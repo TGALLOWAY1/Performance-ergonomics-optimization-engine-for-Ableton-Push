@@ -10,6 +10,8 @@ interface GridAreaProps {
   activeSection: SectionMap | null;
   gridPattern: GridPattern;
   onTogglePad: (step: number, row: number, col: number) => void;
+  showDebugLabels: boolean;
+  viewAllSteps: boolean;
 }
 
 export const GridArea: React.FC<GridAreaProps> = ({
@@ -18,6 +20,8 @@ export const GridArea: React.FC<GridAreaProps> = ({
   activeSection,
   gridPattern,
   onTogglePad,
+  showDebugLabels,
+  viewAllSteps,
 }) => {
   return (
     <div id="grid-area" className="flex-1 bg-slate-950 p-8 flex items-center justify-center border-b border-border relative overflow-hidden">
@@ -27,6 +31,8 @@ export const GridArea: React.FC<GridAreaProps> = ({
         activeSection={activeSection}
         gridPattern={gridPattern}
         onTogglePad={onTogglePad}
+        showDebugLabels={showDebugLabels}
+        viewAllSteps={viewAllSteps}
       />
     </div>
   );
