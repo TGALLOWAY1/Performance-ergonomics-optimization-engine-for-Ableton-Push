@@ -63,3 +63,72 @@ export function parseCellKey(key: string): { row: number; col: number } | null {
   return { row, col };
 }
 
+/**
+ * Represents a template slot in a layout template.
+ * Defines where a standard sound should be placed.
+ */
+export interface TemplateSlot {
+  /** Row position (0-7) */
+  row: number;
+  /** Column position (0-7) */
+  col: number;
+  /** Label to display (e.g., "Kick", "Snare") */
+  label: string;
+  /** Optional MIDI note number suggestion */
+  suggestedNote?: number;
+}
+
+/**
+ * Represents a layout template with predefined slot positions.
+ */
+export interface LayoutTemplate {
+  /** Unique identifier */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Template slots defining where sounds should be placed */
+  slots: TemplateSlot[];
+}
+
+/**
+ * Standard drum kit template.
+ * Based on common Push 3 drum rack layouts with bottomLeftNote = 36 (C1).
+ */
+export const STANDARD_KIT_TEMPLATE: LayoutTemplate = {
+  id: 'standard-kit',
+  name: 'Standard Kit',
+  slots: [
+    // Row 0 (Bottom row) - Core drums
+    { row: 0, col: 0, label: 'Kick', suggestedNote: 36 },
+    { row: 0, col: 1, label: 'Snare', suggestedNote: 38 },
+    { row: 0, col: 2, label: 'Hi-Hat', suggestedNote: 42 },
+    { row: 0, col: 3, label: 'Open Hat', suggestedNote: 46 },
+    { row: 0, col: 4, label: 'Crash', suggestedNote: 49 },
+    { row: 0, col: 5, label: 'Ride', suggestedNote: 51 },
+    { row: 0, col: 6, label: 'Tom 1', suggestedNote: 48 },
+    { row: 0, col: 7, label: 'Tom 2', suggestedNote: 47 },
+    
+    // Row 1 - Additional percussion
+    { row: 1, col: 0, label: 'Clap', suggestedNote: 39 },
+    { row: 1, col: 1, label: 'Rim', suggestedNote: 37 },
+    { row: 1, col: 2, label: 'Shaker', suggestedNote: 70 },
+    { row: 1, col: 3, label: 'Tamb', suggestedNote: 54 },
+    { row: 1, col: 4, label: 'Cowbell', suggestedNote: 56 },
+    { row: 1, col: 5, label: 'Wood', suggestedNote: 76 },
+    { row: 1, col: 6, label: 'Tom 3', suggestedNote: 45 },
+    { row: 1, col: 7, label: 'Tom 4', suggestedNote: 43 },
+  ],
+};
+
+/**
+ * Available layout templates.
+ */
+export const LAYOUT_TEMPLATES: LayoutTemplate[] = [
+  STANDARD_KIT_TEMPLATE,
+];
+
+/**
+ * Template ID type for type safety.
+ */
+export type TemplateId = 'none' | 'standard-kit';
+
