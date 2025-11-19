@@ -65,3 +65,12 @@
   - Generators for Scale Runs, Jumps, and Chords.
 - [ ] **4.2 Architecture Documentation** (`architecture.md`)
   - Summary of data flow and grid logic logic.
+
+## Unprioritized UX Enhancements (To Review/Prioritize)
+
+- [ ] **U1. Step Sequencer Navigation Controls**
+  - Add explicit Next/Prev step controls (buttons and/or keyboard shortcuts) to move the `currentStep` without clicking the timeline directly.
+- [ ] **U2. Play/Pause Transport for Sequencer**
+  - Add a simple transport that auto-advances `currentStep` at the current project tempo, with Play/Pause and (optionally) Loop controls.
+- [ ] **U3. Ergonomic Analysis Visualization in GridEditor**
+  - Overlay engine difficulty data on the grid (e.g., color gradients per pad, hand assignment indicators, or per-step difficulty hints).
