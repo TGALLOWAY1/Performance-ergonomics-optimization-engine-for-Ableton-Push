@@ -5,6 +5,8 @@ import { SectionMap } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
 import { EngineResult } from '../engine/runEngine';
 
+import { GridMapping } from '../types/layout';
+
 interface GridAreaProps {
   activeLayout: LayoutSnapshot | null;
   currentStep: number;
@@ -14,6 +16,9 @@ interface GridAreaProps {
   showDebugLabels: boolean;
   viewAllSteps: boolean;
   engineResult: EngineResult | null;
+  activeMapping?: GridMapping | null;
+  readOnly?: boolean;
+  highlightedCell?: { row: number; col: number } | null;
 }
 
 export const GridArea: React.FC<GridAreaProps> = ({
@@ -24,7 +29,10 @@ export const GridArea: React.FC<GridAreaProps> = ({
   onTogglePad,
   showDebugLabels,
   viewAllSteps,
-  engineResult
+  engineResult,
+  activeMapping,
+  readOnly = false,
+  highlightedCell = null
 }) => {
   return (
     <div id="grid-area" className="w-full h-full flex items-center justify-center relative">
@@ -37,6 +45,9 @@ export const GridArea: React.FC<GridAreaProps> = ({
         showDebugLabels={showDebugLabels}
         viewAllSteps={viewAllSteps}
         engineResult={engineResult}
+        activeMapping={activeMapping}
+        readOnly={readOnly}
+        highlightedCell={highlightedCell}
       />
     </div>
   );

@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { GridArea } from './GridArea';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
+import { LayoutDesigner } from './LayoutDesigner';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { InstrumentConfig } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
@@ -12,12 +13,14 @@ import { parseMidiFile } from '../utils/midiImport';
 import { GridMapService } from '../engine/gridMapService';
 import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
 import { runEngine, EngineResult } from '../engine/runEngine';
+import { GridMapping, SoundAsset } from '../types/layout';
+import { getPositionForMidi } from '../utils/layoutUtils';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
   id: 'inst-1',
   name: 'Standard Drum Kit',
-  bottomLeftNote: 36, // C1
+  bottomLeftNote: 0, // C-2
   layoutMode: 'drum_64',
   rows: 8,
   cols: 8
@@ -52,6 +55,8 @@ const INITIAL_PROJECT_STATE: ProjectState = {
 
 export const Workbench: React.FC = () => {
   const [projectState, setProjectState] = useState<ProjectState>(INITIAL_PROJECT_STATE);
+  const [viewMode, setViewMode] = useState<'analysis' | 'design'>('design');
+  const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
   
   // Local state for the grid pattern (step sequencer)
   // In a real app, this might be part of the layout or derived from performance
@@ -64,6 +69,7 @@ export const Workbench: React.FC = () => {
   const [showDebugLabels, setShowDebugLabels] = useState(false);
   const [viewAllSteps, setViewAllSteps] = useState(false);
   const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
 
   const activeLayout = useMemo(() => 
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -80,17 +86,27 @@ export const Workbench: React.FC = () => {
     [gridPatterns, projectState.activeLayoutId]
   );
 
+  // Get active mapping for LayoutDesigner
+  const activeMapping = useMemo(() => 
+    activeMappingId 
+      ? projectState.mappings.find(m => m.id === activeMappingId) || null
+      : projectState.mappings.length > 0 
+        ? projectState.mappings[0] 
+        : null,
+    [projectState.mappings, activeMappingId]
+  );
+
   // Engine Integration Effect
   useEffect(() => {
-    if (!activeLayout) return;
+    if (!activeLayout || !activeMapping) return;
 
     const timer = setTimeout(() => {
-      const result = runEngine(activeLayout.performance, projectState.sectionMaps);
+      const result = runEngine(activeLayout.performance, activeMapping);
       setEngineResult(result);
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timer);
-  }, [activeLayout, projectState.sectionMaps]);
+  }, [activeLayout, activeMapping]);
 
   const handleCreateLayout = () => {
     const newId = `layout-${Date.now()}`;
@@ -245,7 +261,10 @@ export const Workbench: React.FC = () => {
       performance.events.forEach(event => {
         const stepIndex = Math.round(event.startTime / stepDuration);
         if (stepIndex >= 0 && stepIndex < newPattern.length) {
-          const pos = GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
+          // Use activeMapping if available, otherwise fall back to InstrumentConfig
+          const pos = activeMapping
+            ? getPositionForMidi(event.noteNumber, activeMapping)
+            : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
           if (pos) {
             // We need to use toggleStepPad logic but force it to true
             // Since toggleStepPad toggles, we check if it's false first
@@ -337,7 +356,10 @@ export const Workbench: React.FC = () => {
     performance.events.forEach(event => {
       const stepIndex = Math.round(event.startTime / stepDuration);
       if (stepIndex >= 0 && stepIndex < newPattern.length) {
-        const pos = GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
+        // Use activeMapping if available, otherwise fall back to InstrumentConfig
+        const pos = activeMapping
+          ? getPositionForMidi(event.noteNumber, activeMapping)
+          : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
         if (pos) {
           if (!newPattern.steps[stepIndex][pos.row][pos.col]) {
              newPattern.steps[stepIndex][pos.row][pos.col] = true;
@@ -387,11 +409,250 @@ export const Workbench: React.FC = () => {
     }));
   };
 
+  // LayoutDesigner handlers
+  const handleAssignSound = (cellKey: string, sound: SoundAsset) => {
+    if (!activeMapping) {
+      // Create a new mapping if none exists
+      const newMapping: GridMapping = {
+        id: `mapping-${Date.now()}`,
+        name: 'New Mapping',
+        cells: { [cellKey]: sound },
+        fingerConstraints: {},
+        scoreCache: null,
+        notes: '',
+      };
+      setProjectState(prev => ({
+        ...prev,
+        mappings: [...prev.mappings, newMapping],
+      }));
+      setActiveMappingId(newMapping.id);
+    } else {
+      // Update existing mapping
+      setProjectState(prev => ({
+        ...prev,
+        mappings: prev.mappings.map(m => {
+          if (m.id !== activeMapping.id) return m;
+          return {
+            ...m,
+            cells: {
+              ...m.cells,
+              [cellKey]: sound,
+            },
+          };
+        }),
+      }));
+    }
+  };
+
+  const handleAssignSounds = (assignments: Record<string, SoundAsset>) => {
+    if (!activeMapping) {
+      // Create a new mapping with all assignments
+      const newMapping: GridMapping = {
+        id: `mapping-${Date.now()}`,
+        name: 'New Mapping',
+        cells: assignments,
+        fingerConstraints: {},
+        scoreCache: null,
+        notes: '',
+      };
+      setProjectState(prev => ({
+        ...prev,
+        mappings: [...prev.mappings, newMapping],
+      }));
+      setActiveMappingId(newMapping.id);
+    } else {
+      // Update existing mapping with all assignments
+      setProjectState(prev => ({
+        ...prev,
+        mappings: prev.mappings.map(m => {
+          if (m.id !== activeMapping.id) return m;
+          return {
+            ...m,
+            cells: {
+              ...m.cells,
+              ...assignments,
+            },
+          };
+        }),
+      }));
+    }
+  };
+
+  const handleUpdateMapping = (updates: Partial<GridMapping>) => {
+    if (!activeMapping) return;
+    
+    setProjectState(prev => ({
+      ...prev,
+      mappings: prev.mappings.map(m => {
+        if (m.id !== activeMapping.id) return m;
+        return { ...m, ...updates };
+      }),
+    }));
+  };
+
+  const handleDuplicateMapping = () => {
+    if (!activeMapping) return;
+    
+    const newMapping: GridMapping = {
+      ...activeMapping,
+      id: `mapping-${Date.now()}`,
+      name: `${activeMapping.name} (Copy)`,
+    };
+    
+    setProjectState(prev => ({
+      ...prev,
+      mappings: [...prev.mappings, newMapping],
+    }));
+    setActiveMappingId(newMapping.id);
+  };
+
+  const handleScanMidi = () => {
+    // Stub for now - will be implemented later
+    console.log('Scan MIDI clicked');
+    // For testing, add a dummy sound
+    const dummySound: SoundAsset = {
+      id: `sound-${Date.now()}`,
+      name: `Sound ${projectState.parkedSounds.length + 1}`,
+      sourceType: 'midi_track',
+      sourceFile: '',
+      originalMidiNote: 36 + projectState.parkedSounds.length,
+      color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
+    };
+    setProjectState(prev => ({
+      ...prev,
+      parkedSounds: [...prev.parkedSounds, dummySound],
+    }));
+  };
+
+  const handleAddSound = (sound: SoundAsset) => {
+    setProjectState(prev => ({
+      ...prev,
+      parkedSounds: [...prev.parkedSounds, sound],
+    }));
+  };
+
+  const handleUpdateSound = (soundId: string, updates: Partial<SoundAsset>) => {
+    setProjectState(prev => {
+      // Update in parkedSounds
+      const updatedParkedSounds = prev.parkedSounds.map(s => 
+        s.id === soundId ? { ...s, ...updates } : s
+      );
+
+      // Also update in all mappings if the sound exists there
+      const updatedMappings = prev.mappings.map(m => {
+        const updatedCells: Record<string, SoundAsset> = {};
+        let hasChanges = false;
+
+        Object.entries(m.cells).forEach(([cellKey, sound]) => {
+          if (sound.id === soundId) {
+            updatedCells[cellKey] = { ...sound, ...updates };
+            hasChanges = true;
+          } else {
+            updatedCells[cellKey] = sound;
+          }
+        });
+
+        return hasChanges ? { ...m, cells: updatedCells } : m;
+      });
+
+      return {
+        ...prev,
+        parkedSounds: updatedParkedSounds,
+        mappings: updatedMappings,
+      };
+    });
+  };
+
+  const handleUpdateMappingSound = (cellKey: string, updates: Partial<SoundAsset>) => {
+    if (!activeMapping) return;
+    
+    setProjectState(prev => {
+      let soundIdToUpdate: string | null = null;
+      let updatedCellSound: SoundAsset | null = null;
+
+      // Update in the active mapping
+      const updatedMappings = prev.mappings.map(m => {
+        if (m.id !== activeMapping.id) return m;
+        const cellSound = m.cells[cellKey];
+        if (!cellSound) return m;
+        
+        soundIdToUpdate = cellSound.id;
+        updatedCellSound = { ...cellSound, ...updates };
+        
+        return {
+          ...m,
+          cells: {
+            ...m.cells,
+            [cellKey]: updatedCellSound,
+          },
+        };
+      });
+
+      // Also update in parkedSounds if the sound exists there
+      const updatedParkedSounds = soundIdToUpdate
+        ? prev.parkedSounds.map(s => 
+            s.id === soundIdToUpdate ? { ...s, ...updates } : s
+          )
+        : prev.parkedSounds;
+
+      return {
+        ...prev,
+        parkedSounds: updatedParkedSounds,
+        mappings: updatedMappings,
+      };
+    });
+  };
+
+  const handleRemoveSound = (cellKey: string) => {
+    if (!activeMapping) return;
+    
+    setProjectState(prev => ({
+      ...prev,
+      mappings: prev.mappings.map(m => {
+        if (m.id !== activeMapping.id) return m;
+        const newCells = { ...m.cells };
+        delete newCells[cellKey];
+        return {
+          ...m,
+          cells: newCells,
+        };
+      }),
+    }));
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-gray-900 text-white overflow-hidden">
       {/* Header (Top) */}
       <div className="flex-none h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
-        <div className="flex items-center gap-4">
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-1 bg-slate-800 rounded p-1 border border-slate-700">
+          <button
+            onClick={() => setViewMode('analysis')}
+            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              viewMode === 'analysis'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Analysis
+          </button>
+          <button
+            onClick={() => setViewMode('design')}
+            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              viewMode === 'design'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Designer
+          </button>
+        </div>
+
+        <div className="h-6 w-px bg-slate-800" />
+
+        {viewMode === 'analysis' && (
+          <>
+          <div className="flex items-center gap-4">
           <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
             <input 
               type="checkbox" 
@@ -454,7 +715,7 @@ export const Workbench: React.FC = () => {
           <label className="text-xs text-slate-500">Grid Root Note:</label>
           <input 
             type="number" 
-            value={activeSection?.instrumentConfig.bottomLeftNote || 36}
+            value={activeSection?.instrumentConfig.bottomLeftNote ?? 0}
             onChange={(e) => {
               if (activeSection) {
                 handleUpdateSection(activeSection.id, 'bottomLeftNote', parseInt(e.target.value) || 0);
@@ -463,10 +724,32 @@ export const Workbench: React.FC = () => {
             className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
           />
         </div>
+        </>
+        )}
       </div>
 
       {/* Main Body (Middle) */}
-      <div className="flex-1 flex flex-row overflow-hidden">
+      {viewMode === 'design' ? (
+        <div className="flex-1 overflow-hidden">
+          <LayoutDesigner
+            parkedSounds={projectState.parkedSounds}
+            activeMapping={activeMapping}
+            instrumentConfig={activeSection?.instrumentConfig || null}
+            onAssignSound={handleAssignSound}
+            onAssignSounds={handleAssignSounds}
+            onUpdateMapping={handleUpdateMapping}
+            onDuplicateMapping={handleDuplicateMapping}
+            onAddSound={handleAddSound}
+            onUpdateSound={handleUpdateSound}
+            onUpdateMappingSound={handleUpdateMappingSound}
+            onRemoveSound={handleRemoveSound}
+            projectState={projectState}
+            onUpdateProjectState={setProjectState}
+            onSetActiveMappingId={setActiveMappingId}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-row overflow-hidden">
         {/* Left Panel (Sidebar) */}
         <div className="w-64 flex-none border-r border-gray-700 overflow-y-auto">
           <Sidebar 
@@ -487,7 +770,7 @@ export const Workbench: React.FC = () => {
         <div className="flex-1 flex flex-col min-w-0">
           {/* Grid Area */}
           <div className="flex-1 flex items-center justify-center overflow-auto p-4 bg-slate-950">
-            <GridArea 
+            <GridArea
               activeLayout={activeLayout}
               currentStep={currentStep}
               activeSection={activeSection}
@@ -496,6 +779,9 @@ export const Workbench: React.FC = () => {
               showDebugLabels={showDebugLabels}
               viewAllSteps={viewAllSteps}
               engineResult={engineResult}
+              activeMapping={activeMapping}
+              readOnly={viewMode === 'analysis'}
+              highlightedCell={highlightedCell}
             />
           </div>
           
@@ -512,9 +798,18 @@ export const Workbench: React.FC = () => {
 
         {/* Right Panel (Analysis) */}
         <div className="w-80 flex-none border-l border-gray-700 overflow-y-auto bg-gray-800">
-          <EngineResultsPanel result={engineResult} />
+          <EngineResultsPanel 
+            result={engineResult}
+            activeMapping={activeMapping}
+            onHighlightCell={(row, col) => {
+              setHighlightedCell({ row, col });
+              // Clear highlight after 3 seconds
+              setTimeout(() => setHighlightedCell(null), 3000);
+            }}
+          />
         </div>
       </div>
+      )}
     </div>
   );
 };

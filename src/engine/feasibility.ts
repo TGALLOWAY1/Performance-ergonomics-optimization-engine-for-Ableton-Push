@@ -5,7 +5,7 @@
 
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { FingerID } from '../types/engine';
-import { Hand, MAX_HAND_SPAN } from './ergonomics';
+import { Hand, MAX_HAND_SPAN, MAX_REACH_GRID_UNITS } from './ergonomics';
 
 /**
  * Checks if the distance from wrist to target position is within the maximum hand span.
@@ -106,5 +106,53 @@ export function hasFingerCollision(
   }
   
   return false;
+}
+
+/**
+ * Reachability level for a grid cell from an anchor position.
+ * - 'green': Easy reach (distance <= 3.0 grid units)
+ * - 'yellow': Medium/Hard reach (3.0 < distance <= MAX_REACH_GRID_UNITS)
+ * - 'gray': Unreachable (distance > MAX_REACH_GRID_UNITS)
+ */
+export type ReachabilityLevel = 'green' | 'yellow' | 'gray';
+
+/**
+ * Maps all 64 grid cells to their reachability level from an anchor position.
+ * Used for the "Ghost Hand" visualization to show which cells are reachable
+ * by a specific finger from a given anchor point.
+ * 
+ * @param anchorPos - The anchor position (where the finger is currently placed)
+ * @param anchorFinger - The finger ID at the anchor position (1-5)
+ * @param targetFinger - The finger ID we're checking reachability for (1-5)
+ * @returns A map of cell keys ("row,col") to reachability levels
+ */
+export function getReachabilityMap(
+  anchorPos: GridPosition,
+  _anchorFinger: FingerID,
+  _targetFinger: FingerID
+): Record<string, ReachabilityLevel> {
+  const map: Record<string, ReachabilityLevel> = {};
+  
+  // Generate all 64 cells (8x8 grid)
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const cellKey = `${row},${col}`;
+      const targetPos: GridPosition = { row, col };
+      
+      // Calculate distance from anchor to target
+      const distance = calculateGridDistance(anchorPos, targetPos);
+      
+      // Determine reachability level
+      if (distance <= 3.0) {
+        map[cellKey] = 'green';
+      } else if (distance <= MAX_REACH_GRID_UNITS) {
+        map[cellKey] = 'yellow';
+      } else {
+        map[cellKey] = 'gray';
+      }
+    }
+  }
+  
+  return map;
 }
 

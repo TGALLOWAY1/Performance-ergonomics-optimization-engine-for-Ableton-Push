@@ -1,9 +1,10 @@
-import { Performance, SectionMap, NoteEvent, InstrumentConfig } from '../types/performance';
-import { GridMapService } from './gridMapService';
+import { Performance, NoteEvent } from '../types/performance';
+import { GridMapping } from '../types/layout';
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { defaultCostModel, Hand, MAX_REACH_GRID_UNITS, MAX_SPEED_UNITS_PER_SEC, decayFatigue, accumulateFatigue } from './ergonomics';
 import { FingerID, FingerState } from '../types/engine';
 import { isSpanValid, hasFingerCollision, isFingerOrderingValid } from './feasibility';
+import { getPositionForMidi } from '../utils/layoutUtils';
 
 interface VirtualHand {
   lastEventTime: number;
@@ -41,28 +42,6 @@ export interface EngineResult {
   debugEvents: EngineDebugEvent[];
 }
 
-/**
- * Helper to find the active instrument config for a given time.
- * Assumes 4/4 time signature for measure calculation.
- */
-function getConfigForTime(time: number, sectionMaps: SectionMap[], tempo: number = 120): InstrumentConfig | null {
-  const secondsPerBeat = 60 / tempo;
-  const secondsPerMeasure = secondsPerBeat * 4;
-  // Measures are 1-based in the interface
-  const currentMeasure = (time / secondsPerMeasure) + 1;
-
-  const section = sectionMaps.find(s => 
-    currentMeasure >= s.startMeasure && currentMeasure < s.endMeasure + 1 
-  );
-  
-  // If we find a section by strict measure bounds
-  if (section) return section.instrumentConfig;
-
-  // Fallback: if only one section exists, use it (common case for simple loops)
-  if (sectionMaps.length === 1) return sectionMaps[0].instrumentConfig;
-
-  return null;
-}
 
 /**
  * Helper to get the current active position of a hand.
@@ -112,7 +91,7 @@ function createVirtualHand(name: Hand): VirtualHand {
   };
 }
 
-export function runEngine(performance: Performance, sectionMaps: SectionMap[]): EngineResult {
+export function runEngine(performance: Performance, mapping: GridMapping): EngineResult {
   // Sort all events by startTime
   const sortedEvents = [...performance.events].sort((a, b) => a.startTime - b.startTime);
 
@@ -123,28 +102,13 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
   const debugEvents: EngineDebugEvent[] = [];
   let unplayableCount = 0;
   let hardCount = 0;
-  const tempo = performance.tempo || 120;
 
   for (const note of sortedEvents) {
-    const config = getConfigForTime(note.startTime, sectionMaps, tempo);
-
-    if (!config) {
-      unplayableCount++;
-      debugEvents.push({
-        noteNumber: note.noteNumber,
-        startTime: note.startTime,
-        assignedHand: 'Unplayable',
-        finger: null,
-        cost: 0,
-        difficulty: 'Unplayable'
-      });
-      continue;
-    }
-
-    // Step A: Find position
-    const targetPos = GridMapService.getPositionForNote(note.noteNumber, config);
+    // Step A: Find position using the mapping
+    const targetPos = getPositionForMidi(note.noteNumber, mapping);
 
     if (!targetPos) {
+      // Note is unmapped (not found in the mapping)
       unplayableCount++;
       debugEvents.push({
         noteNumber: note.noteNumber,
@@ -153,6 +117,7 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
         finger: null,
         cost: 0,
         difficulty: 'Unplayable'
+        // No row/col since note is unmapped
       });
       continue;
     }
@@ -274,13 +239,17 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
     if (candidates.length === 0) {
       // No feasible candidates - mark as unplayable
       unplayableCount++;
+      // No valid candidates found (all failed feasibility checks)
+      unplayableCount++;
       debugEvents.push({
         noteNumber: note.noteNumber,
         startTime: note.startTime,
         assignedHand: 'Unplayable',
         finger: null,
         cost: Infinity,
-        difficulty: 'Unplayable'
+        difficulty: 'Unplayable',
+        row: targetPos.row,
+        col: targetPos.col
       });
       continue;
     }
@@ -302,7 +271,9 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
         assignedHand: 'Unplayable',
         finger: null,
         cost: Infinity,
-        difficulty: 'Unplayable'
+        difficulty: 'Unplayable',
+        row: targetPos.row,
+        col: targetPos.col
       });
       continue;
     }
