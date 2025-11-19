@@ -1,14 +1,24 @@
 import { Performance, SectionMap, NoteEvent, InstrumentConfig } from '../types/performance';
 import { GridMapService } from './gridMapService';
 import { GridPosition, calculateGridDistance } from './gridMath';
-import { defaultCostModel, Hand, MAX_REACH_GRID_UNITS, MAX_SPEED_UNITS_PER_SEC } from './ergonomics';
-import { FingerID } from '../types/engine';
+import { defaultCostModel, Hand, MAX_REACH_GRID_UNITS, MAX_SPEED_UNITS_PER_SEC, decayFatigue, accumulateFatigue } from './ergonomics';
+import { FingerID, FingerState } from '../types/engine';
+import { isSpanValid, hasFingerCollision, isFingerOrderingValid } from './feasibility';
 
 interface VirtualHand {
-  currentPosition: GridPosition | null;
   lastEventTime: number;
   name: Hand;
-  currentFinger: FingerID | null;
+  /** Biomechanical model: Each finger (1-5) has position and fatigue state */
+  fingers: Record<FingerID, FingerState>;
+  /** Wrist position - the base position of the hand */
+  wristPosition: GridPosition | null;
+}
+
+interface FingerCandidate {
+  hand: VirtualHand;
+  handName: Hand;
+  finger: FingerID;
+  cost: number;
 }
 
 export type DifficultyLabel = 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
@@ -54,56 +64,61 @@ function getConfigForTime(time: number, sectionMaps: SectionMap[], tempo: number
   return null;
 }
 
-function assignFinger(
-  hand: Hand,
-  currentPos: GridPosition,
-  prevPos: GridPosition | null,
-  isChord: boolean = false
-): FingerID {
-  if (!prevPos) {
-    return 2; // Default strong finger (Index = 2)
+/**
+ * Helper to get the current active position of a hand.
+ * Uses wristPosition if available, otherwise finds the last active finger.
+ */
+function getHandPosition(hand: VirtualHand): GridPosition | null {
+  if (hand.wristPosition !== null) {
+    return hand.wristPosition;
   }
-
-  if (isChord) {
-    // Chord context (simultaneous with previous note)
-    // Relative vertical/horizontal position matters
-    // RH: Bottom/Left -> Thumb (1), Top/Right -> Pinky (5)
-    // LH: Bottom/Right -> Thumb (1), Top/Left -> Pinky (5)
-    
-    const rowDiff = currentPos.row - prevPos.row;
-    const colDiff = currentPos.col - prevPos.col;
-    
-    if (hand === 'RH') {
-        if (rowDiff < 0 || colDiff < 0) return 1; // Lower/Left -> Thumb
-        return 5; // Higher/Right -> Pinky
-    } else {
-        // LH
-        if (rowDiff < 0 || colDiff > 0) return 1; // Lower/Right -> Thumb
-        return 5; // Higher/Left -> Pinky
+  
+  // Find the last active finger (first non-null position from thumb to pinky)
+  const allFingerIds: FingerID[] = [1, 2, 3, 4, 5];
+  for (const fid of allFingerIds) {
+    if (hand.fingers[fid].pos !== null) {
+      return hand.fingers[fid].pos;
     }
   }
+  
+  return null;
+}
 
-  const deltaCol = currentPos.col - prevPos.col;
-
-  if (hand === 'RH') {
-    if (deltaCol < 0) return 2; // Moving Left -> Index (2)
-    if (deltaCol === 0) return 3; // Same col -> Middle (3)
-    return 4; // Moving Right -> Ring (4)
-  } else {
-    // LH
-    if (deltaCol > 0) return 2; // Moving Right -> Index (2)
-    if (deltaCol === 0) return 3; // Same col -> Middle (3)
-    return 4; // Moving Left -> Ring (4)
+/**
+ * Decay fatigue for all fingers in a hand based on time elapsed.
+ */
+function decayHandFatigue(hand: VirtualHand, timeDelta: number): void {
+  const allFingerIds: FingerID[] = [1, 2, 3, 4, 5];
+  for (const fid of allFingerIds) {
+    hand.fingers[fid].fatigue = decayFatigue(hand.fingers[fid].fatigue, timeDelta);
   }
+}
+
+/**
+ * Initialize a VirtualHand with all fingers in null state and zero fatigue.
+ */
+function createVirtualHand(name: Hand): VirtualHand {
+  return {
+    lastEventTime: -1,
+    name,
+    fingers: {
+      1: { pos: null, fatigue: 0 },
+      2: { pos: null, fatigue: 0 },
+      3: { pos: null, fatigue: 0 },
+      4: { pos: null, fatigue: 0 },
+      5: { pos: null, fatigue: 0 },
+    },
+    wristPosition: null,
+  };
 }
 
 export function runEngine(performance: Performance, sectionMaps: SectionMap[]): EngineResult {
   // Sort all events by startTime
   const sortedEvents = [...performance.events].sort((a, b) => a.startTime - b.startTime);
 
-  // Initialize hands
-  const lh: VirtualHand = { currentPosition: null, lastEventTime: -1, name: 'LH', currentFinger: null };
-  const rh: VirtualHand = { currentPosition: null, lastEventTime: -1, name: 'RH', currentFinger: null };
+  // Initialize hands with biomechanical model
+  const lh: VirtualHand = createVirtualHand('LH');
+  const rh: VirtualHand = createVirtualHand('RH');
 
   const debugEvents: EngineDebugEvent[] = [];
   let unplayableCount = 0;
@@ -142,61 +157,171 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
       continue;
     }
 
-    // Step B: Cost Calculation
-    // LH Cost
-    let lhCost = 0;
-    if (lh.currentPosition === null) {
-      lhCost = 0; // Free entry
-    } else {
-      const dist = calculateGridDistance(lh.currentPosition, targetPos);
-      const timeDelta = note.startTime - lh.lastEventTime;
-      
-      // Strict Chord Check for LH
-      if (timeDelta < 0.02 && dist > MAX_REACH_GRID_UNITS) {
-        lhCost = Infinity;
-      } else {
-        lhCost = defaultCostModel.movementCost(dist, timeDelta);
-      }
-    }
-
-    // RH Cost
-    let rhCost = 0;
-    if (rh.currentPosition === null) {
-      rhCost = 0; // Free entry
-    } else {
-      const dist = calculateGridDistance(rh.currentPosition, targetPos);
-      const timeDelta = note.startTime - rh.lastEventTime;
-      
-      // Strict Chord Check for RH
-      if (timeDelta < 0.02 && dist > MAX_REACH_GRID_UNITS) {
-        rhCost = Infinity;
-      } else {
-        rhCost = defaultCostModel.movementCost(dist, timeDelta);
-      }
-    }
-
-    // Step C: Assignment
-    let chosenHand: VirtualHand;
-    let chosenCost: number;
-
-    if (lhCost < rhCost) {
-      chosenHand = lh;
-      chosenCost = lhCost;
-    } else {
-      chosenHand = rh;
-      chosenCost = rhCost;
-    }
-
-    // Calculate Difficulty Label for the chosen hand
-    let difficulty: DifficultyLabel = 'Easy';
+    // Decay fatigue for both hands based on time elapsed
+    const lhTimeDelta = lh.lastEventTime !== -1 ? note.startTime - lh.lastEventTime : 0;
+    const rhTimeDelta = rh.lastEventTime !== -1 ? note.startTime - rh.lastEventTime : 0;
     
-    if (chosenHand.currentPosition === null) {
+    if (lhTimeDelta > 0) {
+      decayHandFatigue(lh, lhTimeDelta);
+    }
+    if (rhTimeDelta > 0) {
+      decayHandFatigue(rh, rhTimeDelta);
+    }
+
+    // Step B: 10-Finger Search Loop
+    // Evaluate all 10 candidates: L1, L2, L3, L4, L5, R1, R2, R3, R4, R5
+    const allFingerIds: FingerID[] = [1, 2, 3, 4, 5];
+    const candidates: FingerCandidate[] = [];
+
+    // Evaluate Left Hand fingers (L1-L5)
+    for (const fid of allFingerIds) {
+      const fingerState = lh.fingers[fid];
+      const timeDelta = lh.lastEventTime !== -1 ? note.startTime - lh.lastEventTime : 0;
+
+      // Hard Veto: Feasibility checks
+      // 1. Check span validity (wrist to target)
+      if (!isSpanValid(lh.wristPosition, targetPos)) {
+        continue; // Skip this candidate
+      }
+
+      // 2. Check collision with other fingers in the same hand
+      if (hasFingerCollision(fid, targetPos, lh.fingers)) {
+        continue; // Skip this candidate
+      }
+
+      // 3. Check finger ordering (if placing thumb or pinky, verify ordering)
+      if (fid === 1 || fid === 5) {
+        const thumbPos = fid === 1 ? targetPos : lh.fingers[1].pos;
+        const pinkyPos = fid === 5 ? targetPos : lh.fingers[5].pos;
+        if (!isFingerOrderingValid('LH', thumbPos, pinkyPos)) {
+          continue; // Skip this candidate
+        }
+      }
+
+      // Calculate biomechanical cost for this feasible candidate
+      const cost = defaultCostModel.calculateBioCost(
+        'LH',
+        fid,
+        fingerState.pos,
+        targetPos,
+        lh.wristPosition,
+        fingerState.fatigue,
+        timeDelta
+      );
+
+      // Only add if cost is finite (feasible)
+      if (isFinite(cost)) {
+        candidates.push({
+          hand: lh,
+          handName: 'LH',
+          finger: fid,
+          cost
+        });
+      }
+    }
+
+    // Evaluate Right Hand fingers (R1-R5)
+    for (const fid of allFingerIds) {
+      const fingerState = rh.fingers[fid];
+      const timeDelta = rh.lastEventTime !== -1 ? note.startTime - rh.lastEventTime : 0;
+
+      // Hard Veto: Feasibility checks
+      // 1. Check span validity (wrist to target)
+      if (!isSpanValid(rh.wristPosition, targetPos)) {
+        continue; // Skip this candidate
+      }
+
+      // 2. Check collision with other fingers in the same hand
+      if (hasFingerCollision(fid, targetPos, rh.fingers)) {
+        continue; // Skip this candidate
+      }
+
+      // 3. Check finger ordering (if placing thumb or pinky, verify ordering)
+      if (fid === 1 || fid === 5) {
+        const thumbPos = fid === 1 ? targetPos : rh.fingers[1].pos;
+        const pinkyPos = fid === 5 ? targetPos : rh.fingers[5].pos;
+        if (!isFingerOrderingValid('RH', thumbPos, pinkyPos)) {
+          continue; // Skip this candidate
+        }
+      }
+
+      // Calculate biomechanical cost for this feasible candidate
+      const cost = defaultCostModel.calculateBioCost(
+        'RH',
+        fid,
+        fingerState.pos,
+        targetPos,
+        rh.wristPosition,
+        fingerState.fatigue,
+        timeDelta
+      );
+
+      // Only add if cost is finite (feasible)
+      if (isFinite(cost)) {
+        candidates.push({
+          hand: rh,
+          handName: 'RH',
+          finger: fid,
+          cost
+        });
+      }
+    }
+
+    // Step C: Choose the best candidate
+    let chosenCandidate: FingerCandidate | null = null;
+    let chosenCost = Infinity;
+
+    if (candidates.length === 0) {
+      // No feasible candidates - mark as unplayable
+      unplayableCount++;
+      debugEvents.push({
+        noteNumber: note.noteNumber,
+        startTime: note.startTime,
+        assignedHand: 'Unplayable',
+        finger: null,
+        cost: Infinity,
+        difficulty: 'Unplayable'
+      });
+      continue;
+    }
+
+    // Find candidate with lowest cost
+    for (const candidate of candidates) {
+      if (candidate.cost < chosenCost) {
+        chosenCost = candidate.cost;
+        chosenCandidate = candidate;
+      }
+    }
+
+    if (!chosenCandidate) {
+      // Fallback (shouldn't happen, but TypeScript safety)
+      unplayableCount++;
+      debugEvents.push({
+        noteNumber: note.noteNumber,
+        startTime: note.startTime,
+        assignedHand: 'Unplayable',
+        finger: null,
+        cost: Infinity,
+        difficulty: 'Unplayable'
+      });
+      continue;
+    }
+
+    const chosenHand = chosenCandidate.hand;
+    const chosenFinger = chosenCandidate.finger;
+    const chosenFingerState = chosenHand.fingers[chosenFinger];
+
+    // Calculate Difficulty Label
+    let difficulty: DifficultyLabel = 'Easy';
+    const chosenFingerPos = chosenFingerState.pos;
+    
+    if (chosenFingerPos === null) {
       difficulty = 'Easy';
     } else {
-      const dist = calculateGridDistance(chosenHand.currentPosition, targetPos);
+      const dist = calculateGridDistance(chosenFingerPos, targetPos);
       const timeDelta = note.startTime - chosenHand.lastEventTime;
       
-      // Unplayable: If distance > MAX_REACH_GRID_UNITS (unless the hand was floating/null)
+      // Unplayable: If distance > MAX_REACH_GRID_UNITS
       if (dist > MAX_REACH_GRID_UNITS) {
         difficulty = 'Unplayable';
         unplayableCount++;
@@ -216,24 +341,21 @@ export function runEngine(performance: Performance, sectionMaps: SectionMap[]): 
       }
     }
 
-    // Determine if it's a chord (simultaneous with last event of THIS hand)
-    // We use a small epsilon for float comparison, or exact equality if quantized.
-    // Assuming exact equality for "same time" as per prompt.
-    const isChord = chosenHand.lastEventTime !== -1 && Math.abs(note.startTime - chosenHand.lastEventTime) < 0.001;
-
-    const finger = assignFinger(chosenHand.name, targetPos, chosenHand.currentPosition, isChord);
-    chosenHand.currentFinger = finger;
-
-    // Update Hand
-    chosenHand.currentPosition = targetPos;
+    // Update the winning finger's state
+    chosenHand.fingers[chosenFinger].pos = targetPos;
+    // Accumulate fatigue for the used finger
+    chosenHand.fingers[chosenFinger].fatigue = accumulateFatigue(chosenHand.fingers[chosenFinger].fatigue);
+    
+    // Update the hand's wristPosition
+    chosenHand.wristPosition = targetPos;
     chosenHand.lastEventTime = note.startTime;
 
-    // Step D: Record
+    // Step D: Record (save the specific finger used)
     debugEvents.push({
       noteNumber: note.noteNumber,
       startTime: note.startTime,
-      assignedHand: difficulty === 'Unplayable' ? 'Unplayable' : chosenHand.name,
-      finger: chosenHand.currentFinger,
+      assignedHand: chosenCandidate.handName,
+      finger: chosenFinger,
       cost: chosenCost,
       difficulty,
       row: targetPos.row,
