@@ -4,6 +4,7 @@ import { SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { GridPattern } from '../types/gridPattern';
 import { EngineResult, EngineDebugEvent, DifficultyLabel } from '../engine/runEngine';
+import { formatFinger, normalizeHand } from '../utils/formatUtils';
 
 interface GridEditorProps {
   activeLayout: LayoutSnapshot | null;
@@ -192,8 +193,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 tooltip += `\nDifficulty: ${debugEvent.difficulty}`;
                 tooltip += `\nCost: ${debugEvent.cost.toFixed(2)}`;
                 tooltip += `\nHand: ${debugEvent.assignedHand}`;
-                if (debugEvent.finger) {
-                  tooltip += `\nFinger: ${debugEvent.finger}`;
+                if (debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
+                  const hand = normalizeHand(debugEvent.assignedHand);
+                  tooltip += `\nFinger: ${formatFinger(hand, debugEvent.finger)}`;
                 }
               }
 
@@ -214,12 +216,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                   </span>
                   
                   {/* Finger Badge */}
-                  {isActive && debugEvent && debugEvent.finger && (
+                  {isActive && debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable' && (
                     <div className={`
-                      absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shadow-sm
+                      absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm
                       ${debugEvent.assignedHand === 'LH' ? 'bg-blue-200 text-blue-900' : 'bg-red-200 text-red-900'}
                     `}>
-                      {debugEvent.finger.charAt(0)}
+                      {formatFinger(normalizeHand(debugEvent.assignedHand), debugEvent.finger)}
                     </div>
                   )}
 

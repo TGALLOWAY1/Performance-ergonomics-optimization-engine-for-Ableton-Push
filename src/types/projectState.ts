@@ -1,4 +1,5 @@
 import { Performance, SectionMap } from './performance';
+import { SoundAsset, GridMapping } from './layout';
 
 export interface LayoutSnapshot {
   id: string;
@@ -12,5 +13,8 @@ export interface ProjectState {
   sectionMaps: SectionMap[];
   activeLayoutId: string | null;
   projectTempo: number;
+  /** Staging area for sound assets before assignment to grid */
+  parkedSounds: SoundAsset[];
+  /** Array of grid mapping configurations */
+  mappings: GridMapping[];
 }
-
