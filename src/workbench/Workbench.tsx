@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { GridArea } from './GridArea';
 import { TimelineArea } from './TimelineArea';
+import { EngineResultsPanel } from './EngineResultsPanel';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { InstrumentConfig } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
@@ -9,7 +10,8 @@ import { createEmptyPattern, toggleStepPad } from '../utils/gridPatternUtils';
 import { gridPatternToPerformance } from '../utils/gridPatternToPerformance';
 import { parseMidiFile } from '../utils/midiImport';
 import { GridMapService } from '../engine/gridMapService';
-import { getSnakePattern, getCornersPattern, getRangeTestPattern } from '../utils/debugPatterns';
+import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
+import { runEngine, EngineResult } from '../engine/runEngine';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -59,6 +61,7 @@ export const Workbench: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [showDebugLabels, setShowDebugLabels] = useState(false);
   const [viewAllSteps, setViewAllSteps] = useState(false);
+  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
 
   const activeLayout = useMemo(() => 
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -74,6 +77,18 @@ export const Workbench: React.FC = () => {
     (projectState.activeLayoutId && gridPatterns[projectState.activeLayoutId]) || createEmptyPattern(64),
     [gridPatterns, projectState.activeLayoutId]
   );
+
+  // Engine Integration Effect
+  useEffect(() => {
+    if (!activeLayout) return;
+
+    const timer = setTimeout(() => {
+      const result = runEngine(activeLayout.performance, projectState.sectionMaps);
+      setEngineResult(result);
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [activeLayout, projectState.sectionMaps]);
 
   const handleCreateLayout = () => {
     const newId = `layout-${Date.now()}`;
@@ -285,7 +300,7 @@ export const Workbench: React.FC = () => {
     }));
   };
 
-  const loadDebugPattern = (patternType: 'snake' | 'corners' | 'range') => {
+  const loadDebugPattern = (patternType: 'snake' | 'corners' | 'range' | 'arp' | 'drum') => {
     if (!projectState.activeLayoutId || !activeSection) return;
 
     let performance;
@@ -298,6 +313,12 @@ export const Workbench: React.FC = () => {
         break;
       case 'range':
         performance = getRangeTestPattern();
+        break;
+      case 'arp':
+        performance = getKillaArp();
+        break;
+      case 'drum':
+        performance = getDrumBeat();
         break;
     }
 
@@ -359,105 +380,132 @@ export const Workbench: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      {/* Left Panel */}
-      <Sidebar 
-        layouts={projectState.layouts}
-        activeLayoutId={projectState.activeLayoutId}
-        sectionMaps={projectState.sectionMaps}
-        onSelectLayout={handleSelectLayout}
-        onCreateLayout={handleCreateLayout}
-        onDeleteLayout={handleDeleteLayout}
-        onUpdateSection={handleUpdateSection}
-        onSaveProject={handleSaveProject}
-        onLoadProject={handleLoadProject}
-        onImportMidi={handleImportMidi}
-      />
-      
-      {/* Main Content Area */}
-      <div className="flex flex-col flex-1 h-full min-w-0">
-        {/* Debug Toolbar */}
-        <div className="h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
-          <div className="flex items-center gap-4">
-            <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={showDebugLabels} 
-                onChange={(e) => setShowDebugLabels(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-800"
-              />
-              Show Debug Labels
-            </label>
-            <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={viewAllSteps} 
-                onChange={(e) => setViewAllSteps(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-800"
-              />
-              View All Steps (Flatten Time)
-            </label>
-          </div>
-          
-          <div className="h-6 w-px bg-slate-800" />
-          
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">Load Pattern:</span>
-            <button 
-              onClick={() => loadDebugPattern('snake')}
-              className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-            >
-              Snake
-            </button>
-            <button 
-              onClick={() => loadDebugPattern('corners')}
-              className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-            >
-              Corners
-            </button>
-            <button 
-              onClick={handleResetPattern}
-              className="px-2 py-1 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
-            >
-              Reset
-            </button>
-          </div>
-
-          <div className="h-6 w-px bg-slate-800" />
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-500">Grid Root Note:</label>
+    <div className="h-screen w-screen flex flex-col bg-gray-900 text-white overflow-hidden">
+      {/* Header (Top) */}
+      <div className="flex-none h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
+        <div className="flex items-center gap-4">
+          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
             <input 
-              type="number" 
-              value={activeSection?.instrumentConfig.bottomLeftNote || 36}
-              onChange={(e) => {
-                if (activeSection) {
-                  handleUpdateSection(activeSection.id, 'bottomLeftNote', parseInt(e.target.value) || 0);
-                }
-              }}
-              className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+              type="checkbox" 
+              checked={showDebugLabels} 
+              onChange={(e) => setShowDebugLabels(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-800"
+            />
+            Show Debug Labels
+          </label>
+          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={viewAllSteps} 
+              onChange={(e) => setViewAllSteps(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-800"
+            />
+            View All Steps (Flatten Time)
+          </label>
+        </div>
+        
+        <div className="h-6 w-px bg-slate-800" />
+        
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Load Pattern:</span>
+          <button 
+            onClick={() => loadDebugPattern('snake')}
+            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          >
+            Snake
+          </button>
+          <button 
+            onClick={() => loadDebugPattern('corners')}
+            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          >
+            Corners
+          </button>
+          <button 
+            onClick={() => loadDebugPattern('arp')}
+            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          >
+            Arp
+          </button>
+          <button 
+            onClick={() => loadDebugPattern('drum')}
+            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          >
+            Drum
+          </button>
+          <button 
+            onClick={handleResetPattern}
+            className="px-2 py-1 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
+          >
+            Reset
+          </button>
+        </div>
+
+        <div className="h-6 w-px bg-slate-800" />
+
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-slate-500">Grid Root Note:</label>
+          <input 
+            type="number" 
+            value={activeSection?.instrumentConfig.bottomLeftNote || 36}
+            onChange={(e) => {
+              if (activeSection) {
+                handleUpdateSection(activeSection.id, 'bottomLeftNote', parseInt(e.target.value) || 0);
+              }
+            }}
+            className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+          />
+        </div>
+      </div>
+
+      {/* Main Body (Middle) */}
+      <div className="flex-1 flex flex-row overflow-hidden">
+        {/* Left Panel (Sidebar) */}
+        <div className="w-64 flex-none border-r border-gray-700 overflow-y-auto">
+          <Sidebar 
+            layouts={projectState.layouts}
+            activeLayoutId={projectState.activeLayoutId}
+            sectionMaps={projectState.sectionMaps}
+            onSelectLayout={handleSelectLayout}
+            onCreateLayout={handleCreateLayout}
+            onDeleteLayout={handleDeleteLayout}
+            onUpdateSection={handleUpdateSection}
+            onSaveProject={handleSaveProject}
+            onLoadProject={handleLoadProject}
+            onImportMidi={handleImportMidi}
+          />
+        </div>
+
+        {/* Center Panel (Stage) */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Grid Area */}
+          <div className="flex-1 flex items-center justify-center overflow-auto p-4 bg-slate-950">
+            <GridArea 
+              activeLayout={activeLayout}
+              currentStep={currentStep}
+              activeSection={activeSection}
+              gridPattern={activeGridPattern}
+              onTogglePad={handleTogglePad}
+              showDebugLabels={showDebugLabels}
+              viewAllSteps={viewAllSteps}
+              engineResult={engineResult}
+            />
+          </div>
+          
+          {/* Timeline Area */}
+          <div className="h-48 flex-none border-t border-gray-700 overflow-x-auto bg-slate-900">
+            <TimelineArea 
+              steps={activeGridPattern.length}
+              currentStep={currentStep}
+              onStepSelect={setCurrentStep}
+              sectionMaps={projectState.sectionMaps}
             />
           </div>
         </div>
 
-        {/* Center Panel */}
-        <GridArea 
-          activeLayout={activeLayout}
-          currentStep={currentStep}
-          activeSection={activeSection}
-          gridPattern={activeGridPattern}
-          onTogglePad={handleTogglePad}
-          showDebugLabels={showDebugLabels}
-          viewAllSteps={viewAllSteps}
-        />
-        
-        {/* Bottom Panel */}
-        <TimelineArea 
-          steps={activeGridPattern.length}
-          currentStep={currentStep}
-          onStepSelect={setCurrentStep}
-          sectionMaps={projectState.sectionMaps}
-        />
+        {/* Right Panel (Analysis) */}
+        <div className="w-80 flex-none border-l border-gray-700 overflow-y-auto bg-gray-800">
+          <EngineResultsPanel result={engineResult} />
+        </div>
       </div>
     </div>
   );

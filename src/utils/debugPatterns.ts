@@ -2,6 +2,7 @@ import { Performance, NoteEvent } from '../types/performance';
 
 const DEFAULT_TEMPO = 120;
 const SIXTEENTH_NOTE_DURATION = (60 / DEFAULT_TEMPO) / 4;
+const QUARTER_NOTE_DURATION = (60 / DEFAULT_TEMPO);
 
 /**
  * Creates a "Snake" pattern: 16 notes from MIDI 36 to 51.
@@ -117,3 +118,85 @@ export const getRangeTestPattern = (): Performance => {
   };
 };
 
+/**
+ * Creates a "Killa Arp" pattern:
+ * - 4-note arpeggio repeating: C1 (36), C2 (48), G2 (55), C3 (60).
+ * - Timing: Quarter notes (1 beat apart).
+ * - Goal: Test simple movement and hand crossing.
+ */
+export const getKillaArp = (): Performance => {
+  const events: NoteEvent[] = [];
+  const notes = [36, 48, 55, 60]; // C1, C2, G2, C3
+  const repetitions = 4; // 4 bars
+
+  for (let i = 0; i < notes.length * repetitions; i++) {
+    const noteIndex = i % notes.length;
+    events.push({
+      noteNumber: notes[noteIndex],
+      startTime: i * QUARTER_NOTE_DURATION,
+      duration: QUARTER_NOTE_DURATION,
+      velocity: 100,
+      channel: 1
+    });
+  }
+
+  return {
+    events,
+    tempo: DEFAULT_TEMPO,
+    name: 'Killa Arp (Wide Intervals)'
+  };
+};
+
+/**
+ * Creates a "Drum Beat" pattern (Boots and Cats):
+ * - Downbeat (Time 0.0, 1.0...): Kick Drum (MIDI 36) + Hi-Hat (MIDI 42) simultaneously.
+ * - Offbeat (Time 0.5, 1.5...): Snare (MIDI 38) + Hi-Hat (MIDI 42) simultaneously.
+ * - Goal: Test Chord splitting.
+ */
+export const getDrumBeat = (): Performance => {
+  const events: NoteEvent[] = [];
+  const beats = 8; // 8 beats (2 bars)
+
+  for (let i = 0; i < beats; i++) {
+    const time = i * QUARTER_NOTE_DURATION;
+    const offbeatTime = time + (QUARTER_NOTE_DURATION / 2); // 8th note offbeat
+
+    // Downbeat: Kick (36) + Hat (42)
+    events.push({
+      noteNumber: 36,
+      startTime: time,
+      duration: SIXTEENTH_NOTE_DURATION,
+      velocity: 100,
+      channel: 1
+    });
+    events.push({
+      noteNumber: 42,
+      startTime: time,
+      duration: SIXTEENTH_NOTE_DURATION,
+      velocity: 90,
+      channel: 1
+    });
+
+    // Offbeat: Snare (38) + Hat (42)
+    events.push({
+      noteNumber: 38,
+      startTime: offbeatTime,
+      duration: SIXTEENTH_NOTE_DURATION,
+      velocity: 100,
+      channel: 1
+    });
+    events.push({
+      noteNumber: 42,
+      startTime: offbeatTime,
+      duration: SIXTEENTH_NOTE_DURATION,
+      velocity: 90,
+      channel: 1
+    });
+  }
+
+  return {
+    events,
+    tempo: DEFAULT_TEMPO,
+    name: 'Drum Beat (Boots & Cats)'
+  };
+};

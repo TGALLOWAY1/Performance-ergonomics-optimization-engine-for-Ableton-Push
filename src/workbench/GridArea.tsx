@@ -3,6 +3,7 @@ import { GridEditor } from './GridEditor';
 import { LayoutSnapshot } from '../types/projectState';
 import { SectionMap } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
+import { EngineResult } from '../engine/runEngine';
 
 interface GridAreaProps {
   activeLayout: LayoutSnapshot | null;
@@ -12,6 +13,7 @@ interface GridAreaProps {
   onTogglePad: (step: number, row: number, col: number) => void;
   showDebugLabels: boolean;
   viewAllSteps: boolean;
+  engineResult: EngineResult | null;
 }
 
 export const GridArea: React.FC<GridAreaProps> = ({
@@ -22,9 +24,10 @@ export const GridArea: React.FC<GridAreaProps> = ({
   onTogglePad,
   showDebugLabels,
   viewAllSteps,
+  engineResult
 }) => {
   return (
-    <div id="grid-area" className="flex-1 bg-slate-950 p-8 flex items-center justify-center border-b border-border relative overflow-hidden">
+    <div id="grid-area" className="w-full h-full flex items-center justify-center relative">
       <GridEditor
         activeLayout={activeLayout}
         currentStep={currentStep}
@@ -33,6 +36,7 @@ export const GridArea: React.FC<GridAreaProps> = ({
         onTogglePad={onTogglePad}
         showDebugLabels={showDebugLabels}
         viewAllSteps={viewAllSteps}
+        engineResult={engineResult}
       />
     </div>
   );
