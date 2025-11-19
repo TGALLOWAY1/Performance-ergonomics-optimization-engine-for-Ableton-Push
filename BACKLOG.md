@@ -3,21 +3,21 @@
 ## Phase 1: Core Data Model & Architecture
 *Goal: Establish strict typing and the mathematical foundation for the 64-pad grid.*
 
-- [ ] **1.1 Define NoteEvent** (`src/types/performance.ts`)
+- [x ] **1.1 Define NoteEvent** (`src/types/performance.ts`)
   - Interface with `noteNumber`, `startTime`, `duration`, `velocity`.
-- [ ] **1.2 Define Performance** (`src/types/performance.ts`)
+- [x ] **1.2 Define Performance** (`src/types/performance.ts`)
   - Interface containing sorted `NoteEvent[]` and metadata.
-- [ ] **1.3 Define InstrumentConfig** (`src/types/performance.ts`)
+- [x ] **1.3 Define InstrumentConfig** (`src/types/performance.ts`)
   - Interface for 64-pad layout (`bottomLeftNote`, 8x8 fixed dimensions).
-- [ ] **1.4 Define SectionMap** (`src/types/performance.ts`)
+- [x ] **1.4 Define SectionMap** (`src/types/performance.ts`)
   - Interface mapping measure ranges to `InstrumentConfig`.
-- [ ] **1.5 Define LayoutSnapshot & ProjectState** (`src/types/projectState.ts`)
+- [x ] **1.5 Define LayoutSnapshot & ProjectState** (`src/types/projectState.ts`)
   - State container for the Workbench.
-- [ ] **1.6 Helper Utilities** (`src/utils/performanceUtils.ts`)
+- [x ] **1.6 Helper Utilities** (`src/utils/performanceUtils.ts`)
   - Sorting and ID generation helpers.
-- [ ] **1.7 GridMapService** (`src/engine/gridMapService.ts`)
+- [x] **1.7 GridMapService** (`src/engine/gridMapService.ts`)
   - **CRITICAL:** Implement strict Push 3 64-Pad Drum Mode logic (Row-Major, Bottom-Left start).
-- [ ] **1.8 Grid Distance Utility** (`src/engine/gridMath.ts`)
+- [x] **1.8 Grid Distance Utility** (`src/engine/gridMath.ts`)
   - Euclidean distance calculation logic.
 
 ## Phase 2: Workbench UI & Test Data
