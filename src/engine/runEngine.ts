@@ -2,14 +2,13 @@ import { Performance, SectionMap, NoteEvent, InstrumentConfig } from '../types/p
 import { GridMapService } from './gridMapService';
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { defaultCostModel, Hand, MAX_REACH_GRID_UNITS, MAX_SPEED_UNITS_PER_SEC } from './ergonomics';
-
-export type Finger = 'Thumb' | 'Index' | 'Middle' | 'Ring' | 'Pinky';
+import { FingerID } from '../types/engine';
 
 interface VirtualHand {
   currentPosition: GridPosition | null;
   lastEventTime: number;
   name: Hand;
-  currentFinger: Finger | null;
+  currentFinger: FingerID | null;
 }
 
 export type DifficultyLabel = 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
@@ -18,7 +17,7 @@ export interface EngineDebugEvent {
   noteNumber: number;
   startTime: number;
   assignedHand: Hand | 'Unplayable';
-  finger: Finger | null;
+  finger: FingerID | null;
   cost: number;
   difficulty: DifficultyLabel;
   row?: number;
@@ -60,41 +59,41 @@ function assignFinger(
   currentPos: GridPosition,
   prevPos: GridPosition | null,
   isChord: boolean = false
-): Finger {
+): FingerID {
   if (!prevPos) {
-    return 'Index'; // Default strong finger
+    return 2; // Default strong finger (Index = 2)
   }
 
   if (isChord) {
     // Chord context (simultaneous with previous note)
     // Relative vertical/horizontal position matters
-    // RH: Bottom/Left -> Thumb, Top/Right -> Pinky
-    // LH: Bottom/Right -> Thumb, Top/Left -> Pinky
+    // RH: Bottom/Left -> Thumb (1), Top/Right -> Pinky (5)
+    // LH: Bottom/Right -> Thumb (1), Top/Left -> Pinky (5)
     
     const rowDiff = currentPos.row - prevPos.row;
     const colDiff = currentPos.col - prevPos.col;
     
     if (hand === 'RH') {
-        if (rowDiff < 0 || colDiff < 0) return 'Thumb'; // Lower/Left
-        return 'Pinky'; // Higher/Right
+        if (rowDiff < 0 || colDiff < 0) return 1; // Lower/Left -> Thumb
+        return 5; // Higher/Right -> Pinky
     } else {
         // LH
-        if (rowDiff < 0 || colDiff > 0) return 'Thumb'; // Lower/Right
-        return 'Pinky'; // Higher/Left
+        if (rowDiff < 0 || colDiff > 0) return 1; // Lower/Right -> Thumb
+        return 5; // Higher/Left -> Pinky
     }
   }
 
   const deltaCol = currentPos.col - prevPos.col;
 
   if (hand === 'RH') {
-    if (deltaCol < 0) return 'Index'; // Moving Left -> Thumb/Index. Prefer Index for agility.
-    if (deltaCol === 0) return 'Middle'; // Same col -> Middle (or Index)
-    return 'Ring'; // Moving Right -> Ring/Pinky
+    if (deltaCol < 0) return 2; // Moving Left -> Index (2)
+    if (deltaCol === 0) return 3; // Same col -> Middle (3)
+    return 4; // Moving Right -> Ring (4)
   } else {
     // LH
-    if (deltaCol > 0) return 'Index'; // Moving Right -> Thumb/Index
-    if (deltaCol === 0) return 'Middle';
-    return 'Ring'; // Moving Left -> Ring/Pinky
+    if (deltaCol > 0) return 2; // Moving Right -> Index (2)
+    if (deltaCol === 0) return 3; // Same col -> Middle (3)
+    return 4; // Moving Left -> Ring (4)
   }
 }
 

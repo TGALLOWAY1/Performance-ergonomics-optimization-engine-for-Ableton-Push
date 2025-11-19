@@ -45,7 +45,9 @@ const INITIAL_PROJECT_STATE: ProjectState = {
     }
   ],
   activeLayoutId: 'layout-1',
-  projectTempo: 120
+  projectTempo: 120,
+  parkedSounds: [],
+  mappings: []
 };
 
 export const Workbench: React.FC = () => {
@@ -191,7 +193,13 @@ export const Workbench: React.FC = () => {
           Array.isArray(parsed.sectionMaps) &&
           typeof parsed.projectTempo === 'number'
         ) {
-           setProjectState(parsed as ProjectState);
+           // Ensure new fields are initialized if missing (for backward compatibility)
+           const loadedState: ProjectState = {
+             ...parsed,
+             parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
+             mappings: Array.isArray(parsed.mappings) ? parsed.mappings : []
+           };
+           setProjectState(loadedState);
            // Reset grid patterns on load (or we'd need to save them too)
            // For now, just re-init empty patterns for loaded layouts
            const newPatterns: Record<string, GridPattern> = {};

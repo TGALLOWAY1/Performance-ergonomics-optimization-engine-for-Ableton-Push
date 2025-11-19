@@ -8,6 +8,18 @@ export const CHORD_PENALTY_THRESHOLD = 3.0; // If a chord spread is wider than t
 
 export type Hand = 'LH' | 'RH';
 
+/**
+ * Finger weights for ergonomic calculations.
+ * Keys are FingerID (1-5): 1=Thumb, 2=Index, 3=Middle, 4=Ring, 5=Pinky
+ */
+export const FINGER_WEIGHTS: Record<number, number> = {
+  1: 1.2, // Thumb - slightly heavier (less agile)
+  2: 1.0, // Index - baseline (most agile)
+  3: 1.0, // Middle - baseline
+  4: 1.1, // Ring - slightly heavier
+  5: 1.3, // Pinky - heaviest (least agile)
+};
+
 export interface CostModel {
   movementCost(distance: number, timeDelta: number): number;
   handSwitchCost(currentHand: Hand): number;
