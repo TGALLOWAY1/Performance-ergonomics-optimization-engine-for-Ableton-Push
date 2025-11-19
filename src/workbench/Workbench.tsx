@@ -1,20 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sidebar } from './Sidebar';
-import { GridArea } from './GridArea';
-import { TimelineArea } from './TimelineArea';
-import { EngineResultsPanel } from './EngineResultsPanel';
 import { LayoutDesigner } from './LayoutDesigner';
-import { ProjectState, LayoutSnapshot } from '../types/projectState';
-import { InstrumentConfig } from '../types/performance';
-import { GridPattern } from '../types/gridPattern';
-import { createEmptyPattern, toggleStepPad } from '../utils/gridPatternUtils';
-import { gridPatternToPerformance } from '../utils/gridPatternToPerformance';
-import { parseMidiFile } from '../utils/midiImport';
-import { GridMapService } from '../engine/gridMapService';
-import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
-import { runEngine, EngineResult } from '../engine/runEngine';
+import { AnalysisView } from './AnalysisView';
+import { ProjectState } from '../types/projectState';
 import { GridMapping, SoundAsset } from '../types/layout';
-import { getPositionForMidi } from '../utils/layoutUtils';
+import { InstrumentConfig } from '../types/performance';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -57,19 +46,6 @@ export const Workbench: React.FC = () => {
   const [projectState, setProjectState] = useState<ProjectState>(INITIAL_PROJECT_STATE);
   const [viewMode, setViewMode] = useState<'analysis' | 'design'>('design');
   const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
-  
-  // Local state for the grid pattern (step sequencer)
-  // In a real app, this might be part of the layout or derived from performance
-  // For now, we keep it simple and tied to the active layout in memory
-  const [gridPatterns, setGridPatterns] = useState<Record<string, GridPattern>>({
-    'layout-1': createEmptyPattern(64) // Increased to 64 steps (4 measures)
-  });
-  
-  const [currentStep, setCurrentStep] = useState(0);
-  const [showDebugLabels, setShowDebugLabels] = useState(false);
-  const [viewAllSteps, setViewAllSteps] = useState(false);
-  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
-  const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
 
   const activeLayout = useMemo(() => 
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -79,11 +55,6 @@ export const Workbench: React.FC = () => {
   const activeSection = useMemo(() => 
     projectState.sectionMaps[0] || null, // Simplified: just take first section for now
     [projectState.sectionMaps]
-  );
-
-  const activeGridPattern = useMemo(() => 
-    (projectState.activeLayoutId && gridPatterns[projectState.activeLayoutId]) || createEmptyPattern(64),
-    [gridPatterns, projectState.activeLayoutId]
   );
 
   // Get active mapping for LayoutDesigner
@@ -96,91 +67,20 @@ export const Workbench: React.FC = () => {
     [projectState.mappings, activeMappingId]
   );
 
-  // Engine Integration Effect
+  // Initialize activeMappingId if mappings exist but activeMappingId is null or invalid
   useEffect(() => {
-    if (!activeLayout || !activeMapping) return;
-
-    const timer = setTimeout(() => {
-      const result = runEngine(activeLayout.performance, activeMapping);
-      setEngineResult(result);
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [activeLayout, activeMapping]);
-
-  const handleCreateLayout = () => {
-    const newId = `layout-${Date.now()}`;
-    const newLayout: LayoutSnapshot = {
-      id: newId,
-      name: `Layout ${projectState.layouts.length + 1}`,
-      createdAt: new Date().toISOString(),
-      performance: {
-        events: [],
-        tempo: projectState.projectTempo,
-        name: 'New Performance'
+    if (projectState.mappings.length > 0) {
+      // If no activeMappingId is set, or if the activeMappingId doesn't exist in mappings, use the first one
+      if (!activeMappingId || !projectState.mappings.find(m => m.id === activeMappingId)) {
+        setActiveMappingId(projectState.mappings[0].id);
       }
-    };
-    
-    setGridPatterns(prev => ({
-      ...prev,
-      [newId]: createEmptyPattern(64)
-    }));
-
-    setProjectState(prev => ({
-      ...prev,
-      layouts: [...prev.layouts, newLayout],
-      activeLayoutId: newId
-    }));
-  };
-
-  const handleDeleteLayout = (id: string) => {
-    setProjectState(prev => {
-      const newLayouts = prev.layouts.filter(l => l.id !== id);
-      let newActiveId = prev.activeLayoutId;
-      if (prev.activeLayoutId === id) {
-        newActiveId = newLayouts.length > 0 ? newLayouts[0].id : null;
+    } else {
+      // If there are no mappings, clear activeMappingId
+      if (activeMappingId) {
+        setActiveMappingId(null);
       }
-      return {
-        ...prev,
-        layouts: newLayouts,
-        activeLayoutId: newActiveId
-      };
-    });
-    
-    setGridPatterns(prev => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
-  const handleSelectLayout = (id: string) => {
-    setProjectState(prev => ({ ...prev, activeLayoutId: id }));
-  };
-
-  const handleUpdateSection = (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => {
-    setProjectState(prev => ({
-      ...prev,
-      sectionMaps: prev.sectionMaps.map(section => {
-        if (section.id !== id) return section;
-        
-        if (field === 'bottomLeftNote') {
-          return {
-            ...section,
-            instrumentConfig: {
-              ...section.instrumentConfig,
-              bottomLeftNote: value
-            }
-          };
-        }
-        
-        return {
-          ...section,
-          [field]: value
-        };
-      })
-    }));
-  };
+    }
+  }, [activeMappingId, projectState.mappings]);
 
   const handleSaveProject = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectState, null, 2));
@@ -216,13 +116,10 @@ export const Workbench: React.FC = () => {
              mappings: Array.isArray(parsed.mappings) ? parsed.mappings : []
            };
            setProjectState(loadedState);
-           // Reset grid patterns on load (or we'd need to save them too)
-           // For now, just re-init empty patterns for loaded layouts
-           const newPatterns: Record<string, GridPattern> = {};
-           parsed.layouts.forEach((l: LayoutSnapshot) => {
-             newPatterns[l.id] = createEmptyPattern(64);
-           });
-           setGridPatterns(newPatterns);
+           // Initialize activeMappingId if mappings exist
+           if (loadedState.mappings.length > 0) {
+             setActiveMappingId(loadedState.mappings[0].id);
+           }
         } else {
            alert("Invalid project file structure");
         }
@@ -234,179 +131,6 @@ export const Workbench: React.FC = () => {
       event.target.value = '';
     };
     reader.readAsText(file);
-  };
-
-  const handleImportMidi = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !activeSection) return;
-
-    try {
-      const performance = await parseMidiFile(file, activeSection.instrumentConfig);
-      
-      // Create a new layout for the imported MIDI
-      const newId = `layout-${Date.now()}`;
-      const newLayout: LayoutSnapshot = {
-        id: newId,
-        name: performance.name || 'Imported MIDI',
-        createdAt: new Date().toISOString(),
-        performance: performance
-      };
-
-      // Convert Performance back to GridPattern for the editor
-      // This is a reverse operation of gridPatternToPerformance
-      // For now, we'll create a basic pattern based on quantized events
-      const newPattern = createEmptyPattern(64); // Default length
-      const stepDuration = (60 / performance.tempo!) / 4; // 16th note duration
-
-      performance.events.forEach(event => {
-        const stepIndex = Math.round(event.startTime / stepDuration);
-        if (stepIndex >= 0 && stepIndex < newPattern.length) {
-          // Use activeMapping if available, otherwise fall back to InstrumentConfig
-          const pos = activeMapping
-            ? getPositionForMidi(event.noteNumber, activeMapping)
-            : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
-          if (pos) {
-            // We need to use toggleStepPad logic but force it to true
-            // Since toggleStepPad toggles, we check if it's false first
-            if (!newPattern.steps[stepIndex][pos.row][pos.col]) {
-               // Manually set it to true to avoid toggle logic complexity here
-               newPattern.steps[stepIndex][pos.row][pos.col] = true;
-            }
-          }
-        }
-      });
-
-      setGridPatterns(prev => ({
-        ...prev,
-        [newId]: newPattern
-      }));
-
-      setProjectState(prev => ({
-        ...prev,
-        layouts: [...prev.layouts, newLayout],
-        activeLayoutId: newId,
-        projectTempo: performance.tempo || prev.projectTempo
-      }));
-
-    } catch (err) {
-      console.error(err);
-      alert("Failed to import MIDI file");
-    }
-    
-    event.target.value = '';
-  };
-
-  const handleTogglePad = (step: number, row: number, col: number) => {
-    if (!projectState.activeLayoutId || !activeSection) return;
-
-    const currentPattern = gridPatterns[projectState.activeLayoutId] || createEmptyPattern(64);
-    const newPattern = toggleStepPad(currentPattern, step, row, col);
-
-    // Update Grid Pattern State
-    setGridPatterns(prev => ({
-      ...prev,
-      [projectState.activeLayoutId!]: newPattern
-    }));
-
-    // Convert to Performance and Update Project State
-    const newPerformance = gridPatternToPerformance(
-      newPattern,
-      activeSection.instrumentConfig,
-      projectState.projectTempo
-    );
-
-    setProjectState(prev => ({
-      ...prev,
-      layouts: prev.layouts.map(l => {
-        if (l.id !== prev.activeLayoutId) return l;
-        return {
-          ...l,
-          performance: newPerformance
-        };
-      })
-    }));
-  };
-
-  const loadDebugPattern = (patternType: 'snake' | 'corners' | 'range' | 'arp' | 'drum') => {
-    if (!projectState.activeLayoutId || !activeSection) return;
-
-    let performance;
-    switch (patternType) {
-      case 'snake':
-        performance = getSnakePattern();
-        break;
-      case 'corners':
-        performance = getCornersPattern();
-        break;
-      case 'range':
-        performance = getRangeTestPattern();
-        break;
-      case 'arp':
-        performance = getKillaArp();
-        break;
-      case 'drum':
-        performance = getDrumBeat();
-        break;
-    }
-
-    // Convert Performance to GridPattern
-    const newPattern = createEmptyPattern(64);
-    const stepDuration = (60 / performance.tempo!) / 4;
-
-    performance.events.forEach(event => {
-      const stepIndex = Math.round(event.startTime / stepDuration);
-      if (stepIndex >= 0 && stepIndex < newPattern.length) {
-        // Use activeMapping if available, otherwise fall back to InstrumentConfig
-        const pos = activeMapping
-          ? getPositionForMidi(event.noteNumber, activeMapping)
-          : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
-        if (pos) {
-          if (!newPattern.steps[stepIndex][pos.row][pos.col]) {
-             newPattern.steps[stepIndex][pos.row][pos.col] = true;
-          }
-        }
-      }
-    });
-
-    setGridPatterns(prev => ({
-      ...prev,
-      [projectState.activeLayoutId!]: newPattern
-    }));
-
-    setProjectState(prev => ({
-      ...prev,
-      layouts: prev.layouts.map(l => {
-        if (l.id !== prev.activeLayoutId) return l;
-        return {
-          ...l,
-          performance: performance
-        };
-      })
-    }));
-  };
-
-  const handleResetPattern = () => {
-    if (!projectState.activeLayoutId) return;
-    
-    setGridPatterns(prev => ({
-      ...prev,
-      [projectState.activeLayoutId!]: createEmptyPattern(64)
-    }));
-
-    setProjectState(prev => ({
-      ...prev,
-      layouts: prev.layouts.map(l => {
-        if (l.id !== prev.activeLayoutId) return l;
-        return {
-          ...l,
-          performance: {
-            events: [],
-            tempo: prev.projectTempo,
-            name: l.performance.name
-          }
-        };
-      })
-    }));
   };
 
   // LayoutDesigner handlers
@@ -425,6 +149,7 @@ export const Workbench: React.FC = () => {
         ...prev,
         mappings: [...prev.mappings, newMapping],
       }));
+      // Set activeMappingId immediately to ensure it's available
       setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping
@@ -459,6 +184,7 @@ export const Workbench: React.FC = () => {
         ...prev,
         mappings: [...prev.mappings, newMapping],
       }));
+      // Set activeMappingId immediately to ensure it's available
       setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping with all assignments
@@ -620,11 +346,18 @@ export const Workbench: React.FC = () => {
     }));
   };
 
+  const loadProjectInputRef = React.useRef<HTMLInputElement>(null);
+
   return (
     <div className="h-screen w-screen flex flex-col bg-gray-900 text-white overflow-hidden">
       {/* Header (Top) */}
-      <div className="flex-none h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 gap-4">
-        {/* View Mode Toggle */}
+      <div className="flex-none h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4">
+        {/* Left: App Title */}
+        <div className="flex items-center">
+          <h1 className="text-lg font-semibold text-slate-200">Push 3 Optimizer</h1>
+        </div>
+
+        {/* Center: View Mode Toggle */}
         <div className="flex items-center gap-1 bg-slate-800 rounded p-1 border border-slate-700">
           <button
             onClick={() => setViewMode('analysis')}
@@ -648,84 +381,28 @@ export const Workbench: React.FC = () => {
           </button>
         </div>
 
-        <div className="h-6 w-px bg-slate-800" />
-
-        {viewMode === 'analysis' && (
-          <>
-          <div className="flex items-center gap-4">
-          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={showDebugLabels} 
-              onChange={(e) => setShowDebugLabels(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800"
-            />
-            Show Debug Labels
-          </label>
-          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={viewAllSteps} 
-              onChange={(e) => setViewAllSteps(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800"
-            />
-            View All Steps (Flatten Time)
-          </label>
-        </div>
-        
-        <div className="h-6 w-px bg-slate-800" />
-        
+        {/* Right: Save/Load Project */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">Load Pattern:</span>
-          <button 
-            onClick={() => loadDebugPattern('snake')}
-            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          <button
+            onClick={handleSaveProject}
+            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
           >
-            Snake
+            Save Project
           </button>
-          <button 
-            onClick={() => loadDebugPattern('corners')}
-            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
+          <button
+            onClick={() => loadProjectInputRef.current?.click()}
+            className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
           >
-            Corners
+            Load Project
           </button>
-          <button 
-            onClick={() => loadDebugPattern('arp')}
-            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-          >
-            Arp
-          </button>
-          <button 
-            onClick={() => loadDebugPattern('drum')}
-            className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-          >
-            Drum
-          </button>
-          <button 
-            onClick={handleResetPattern}
-            className="px-2 py-1 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
-          >
-            Reset
-          </button>
-        </div>
-
-        <div className="h-6 w-px bg-slate-800" />
-
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-slate-500">Grid Root Note:</label>
-          <input 
-            type="number" 
-            value={activeSection?.instrumentConfig.bottomLeftNote ?? 0}
-            onChange={(e) => {
-              if (activeSection) {
-                handleUpdateSection(activeSection.id, 'bottomLeftNote', parseInt(e.target.value) || 0);
-              }
-            }}
-            className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+          <input
+            ref={loadProjectInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleLoadProject}
+            className="hidden"
           />
         </div>
-        </>
-        )}
       </div>
 
       {/* Main Body (Middle) */}
@@ -749,66 +426,16 @@ export const Workbench: React.FC = () => {
           />
         </div>
       ) : (
-        <div className="flex-1 flex flex-row overflow-hidden">
-        {/* Left Panel (Sidebar) */}
-        <div className="w-64 flex-none border-r border-gray-700 overflow-y-auto">
-          <Sidebar 
-            layouts={projectState.layouts}
-            activeLayoutId={projectState.activeLayoutId}
-            sectionMaps={projectState.sectionMaps}
-            onSelectLayout={handleSelectLayout}
-            onCreateLayout={handleCreateLayout}
-            onDeleteLayout={handleDeleteLayout}
-            onUpdateSection={handleUpdateSection}
-            onSaveProject={handleSaveProject}
-            onLoadProject={handleLoadProject}
-            onImportMidi={handleImportMidi}
-          />
-        </div>
-
-        {/* Center Panel (Stage) */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Grid Area */}
-          <div className="flex-1 flex items-center justify-center overflow-auto p-4 bg-slate-950">
-            <GridArea
-              activeLayout={activeLayout}
-              currentStep={currentStep}
-              activeSection={activeSection}
-              gridPattern={activeGridPattern}
-              onTogglePad={handleTogglePad}
-              showDebugLabels={showDebugLabels}
-              viewAllSteps={viewAllSteps}
-              engineResult={engineResult}
-              activeMapping={activeMapping}
-              readOnly={viewMode === 'analysis'}
-              highlightedCell={highlightedCell}
-            />
-          </div>
-          
-          {/* Timeline Area */}
-          <div className="h-48 flex-none border-t border-gray-700 overflow-x-auto bg-slate-900">
-            <TimelineArea 
-              steps={activeGridPattern.length}
-              currentStep={currentStep}
-              onStepSelect={setCurrentStep}
-              sectionMaps={projectState.sectionMaps}
-            />
-          </div>
-        </div>
-
-        {/* Right Panel (Analysis) */}
-        <div className="w-80 flex-none border-l border-gray-700 overflow-y-auto bg-gray-800">
-          <EngineResultsPanel 
-            result={engineResult}
+        <div className="flex-1 overflow-hidden">
+          <AnalysisView
+            projectState={projectState}
+            activeLayout={activeLayout}
             activeMapping={activeMapping}
-            onHighlightCell={(row, col) => {
-              setHighlightedCell({ row, col });
-              // Clear highlight after 3 seconds
-              setTimeout(() => setHighlightedCell(null), 3000);
-            }}
+            onUpdateProjectState={setProjectState}
+            onUpdateMapping={handleUpdateMapping}
+            onSetActiveMappingId={setActiveMappingId}
           />
         </div>
-      </div>
       )}
     </div>
   );

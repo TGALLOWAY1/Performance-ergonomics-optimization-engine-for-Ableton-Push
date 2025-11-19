@@ -8,7 +8,7 @@ import { formatFinger, normalizeHand } from '../utils/formatUtils';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
-import { GridMapping, cellKey } from '../types/layout';
+import { GridMapping } from '../types/layout';
 import { getPositionForMidi } from '../utils/layoutUtils';
 
 interface GridEditorProps {
@@ -31,6 +31,8 @@ interface GridEditorProps {
   readOnly?: boolean;
   /** Highlighted cell coordinates (for external highlighting) */
   highlightedCell?: { row: number; col: number } | null;
+  /** Callback to update finger constraints (for Analysis mode) */
+  onUpdateFingerConstraint?: (cellKey: string, constraint: string | null) => void;
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -68,7 +70,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   onCellClick,
   activeMapping = null,
   readOnly = false,
-  highlightedCell = null
+  highlightedCell = null,
+  onUpdateFingerConstraint
 }) => {
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null);
@@ -159,13 +162,14 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     // Otherwise, use the standard position-to-note conversion
     let noteNumber: number | null = null;
     if (activeMapping) {
-      const key = cellKey(row, col);
+      // Inline cellKey to avoid potential circular dependency issues
+      const key = `${row},${col}`;
       const sound = activeMapping.cells[key];
       if (sound && sound.originalMidiNote !== null) {
         noteNumber = sound.originalMidiNote;
       }
     } else {
-      noteNumber = GridMapService.getNoteForPosition(row, col, activeSection.instrumentConfig);
+      noteNumber = activeSection ? GridMapService.getNoteForPosition(row, col, activeSection.instrumentConfig) : null;
     }
     
     if (noteNumber === null) return null;
@@ -230,13 +234,14 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           <React.Fragment key={`row-${row}`}>
             {cols.map((col) => {
               // Get SoundAsset from activeMapping if available
-              const cellKeyStr = cellKey(row, col);
+              // Inline cellKey to avoid potential circular dependency issues
+              const cellKeyStr = `${row},${col}`;
               const soundAsset = activeMapping?.cells[cellKeyStr] || null;
               
               // Determine note number - use SoundAsset's originalMidiNote if available, otherwise use position
-              const noteNumber = soundAsset?.originalMidiNote !== null
+              const noteNumber = soundAsset && soundAsset.originalMidiNote !== null
                 ? soundAsset.originalMidiNote
-                : GridMapService.getNoteForPosition(row, col, activeSection.instrumentConfig);
+                : GridMapService.getNoteForPosition(row, col, activeSection?.instrumentConfig);
 
               // Base per-step activation
               let isActive = gridPattern?.steps[currentStep]?.[row]?.[col] ?? false;
@@ -251,7 +256,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                   // Use activeMapping if available, otherwise fall back to InstrumentConfig
                   const pos = activeMapping
                     ? getPositionForMidi(event.noteNumber, activeMapping)
-                    : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
+                    : activeSection
+                      ? GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig)
+                      : null;
                   if (pos !== null && pos.row === row && pos.col === col) {
                     padOrderIndex = i;
                     break;
@@ -260,8 +267,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 isActive = padOrderIndex !== null;
               }
 
-              // Display name: use SoundAsset name in readOnly mode, otherwise note name
-              const displayName = readOnly && soundAsset
+              // Display name: use SoundAsset name if available, otherwise note name
+              const displayName = soundAsset
                 ? soundAsset.name
                 : getNoteName(noteNumber);
               const debugEvent = isActive ? getDebugEventForPad(row, col) : null;
@@ -340,6 +347,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               }
 
               // Tooltip content
+              const noteName = getNoteName(noteNumber);
               let tooltip = `Note: ${noteNumber} (${noteName}) | Row: ${row}, Col: ${col}`;
               if (debugEvent && debugEvent.difficulty !== 'Easy') {
                 tooltip += `\nDifficulty: ${debugEvent.difficulty}`;
@@ -362,8 +370,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 }
               };
 
-              // Apply SoundAsset color in readOnly mode
-              const cellColor = readOnly && soundAsset
+              // Apply SoundAsset color if available
+              const cellColor = soundAsset
                 ? soundAsset.color
                 : undefined;
 
@@ -487,6 +495,86 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 >
                   Clear Reachability
                 </button>
+              </>
+            )}
+
+            {/* Finger Constraint Assignment (only if onUpdateFingerConstraint is provided) */}
+            {onUpdateFingerConstraint && activeMapping && (
+              <>
+                <div className="border-t border-slate-700 my-1" />
+                <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
+                  Assign Finger Constraint
+                </div>
+                
+                {/* Left Hand Finger Constraints */}
+                <div className="px-2 py-1">
+                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
+                  {[1, 2, 3, 4, 5].map((finger) => {
+                    const cellKey = `${contextMenu.row},${contextMenu.col}`;
+                    const currentConstraint = activeMapping.fingerConstraints[cellKey];
+                    const constraintValue = `L${finger}`;
+                    const isActive = currentConstraint === constraintValue;
+                    return (
+                      <button
+                        key={`assign-L${finger}`}
+                        onClick={() => {
+                          onUpdateFingerConstraint(cellKey, isActive ? null : constraintValue);
+                          setContextMenu(null);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                        }`}
+                      >
+                        {isActive ? '✓ ' : ''}L{finger} - {finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky'}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right Hand Finger Constraints */}
+                <div className="px-2 py-1">
+                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Right Hand</div>
+                  {[1, 2, 3, 4, 5].map((finger) => {
+                    const cellKey = `${contextMenu.row},${contextMenu.col}`;
+                    const currentConstraint = activeMapping.fingerConstraints[cellKey];
+                    const constraintValue = `R${finger}`;
+                    const isActive = currentConstraint === constraintValue;
+                    return (
+                      <button
+                        key={`assign-R${finger}`}
+                        onClick={() => {
+                          onUpdateFingerConstraint(cellKey, isActive ? null : constraintValue);
+                          setContextMenu(null);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                        }`}
+                      >
+                        {isActive ? '✓ ' : ''}R{finger} - {finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky'}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Clear Finger Constraint */}
+                {activeMapping.fingerConstraints[`${contextMenu.row},${contextMenu.col}`] && (
+                  <>
+                    <div className="border-t border-slate-700 my-1" />
+                    <button
+                      onClick={() => {
+                        onUpdateFingerConstraint(`${contextMenu.row},${contextMenu.col}`, null);
+                        setContextMenu(null);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-slate-700 rounded"
+                    >
+                      Clear Finger Constraint
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>

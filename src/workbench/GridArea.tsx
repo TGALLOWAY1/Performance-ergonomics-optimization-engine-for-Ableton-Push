@@ -19,6 +19,8 @@ interface GridAreaProps {
   activeMapping?: GridMapping | null;
   readOnly?: boolean;
   highlightedCell?: { row: number; col: number } | null;
+  onCellClick?: (row: number, col: number) => void;
+  onUpdateFingerConstraint?: (cellKey: string, constraint: string | null) => void;
 }
 
 export const GridArea: React.FC<GridAreaProps> = ({
@@ -32,7 +34,9 @@ export const GridArea: React.FC<GridAreaProps> = ({
   engineResult,
   activeMapping,
   readOnly = false,
-  highlightedCell = null
+  highlightedCell = null,
+  onCellClick,
+  onUpdateFingerConstraint
 }) => {
   return (
     <div id="grid-area" className="w-full h-full flex items-center justify-center relative">
@@ -48,6 +52,8 @@ export const GridArea: React.FC<GridAreaProps> = ({
         activeMapping={activeMapping}
         readOnly={readOnly}
         highlightedCell={highlightedCell}
+        onCellClick={onCellClick}
+        onUpdateFingerConstraint={onUpdateFingerConstraint}
       />
     </div>
   );

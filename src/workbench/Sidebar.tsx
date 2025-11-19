@@ -15,6 +15,8 @@ interface SidebarProps {
   onSaveProject: () => void;
   onLoadProject: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onImportMidi: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onExportLayout?: () => void;
+  onImportLayout?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -28,9 +30,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSaveProject,
   onLoadProject,
   onImportMidi,
+  onExportLayout,
+  onImportLayout,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const midiInputRef = useRef<HTMLInputElement>(null);
+  const importLayoutInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div id="sidebar" className="w-64 border-r border-border bg-slate-900 p-4 flex flex-col gap-4 overflow-y-auto">
@@ -72,6 +77,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             accept=".mid,.midi"
           />
         </div>
+        {(onExportLayout || onImportLayout) && (
+          <div className="flex gap-2">
+            {onExportLayout && (
+              <button
+                onClick={onExportLayout}
+                className="flex-1 px-2 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-purple-100 rounded border border-purple-600"
+              >
+                Export Layout
+              </button>
+            )}
+            {onImportLayout && (
+              <>
+                <button
+                  onClick={() => importLayoutInputRef.current?.click()}
+                  className="flex-1 px-2 py-1 text-xs bg-purple-700 hover:bg-purple-600 text-purple-100 rounded border border-purple-600"
+                >
+                  Import Layout
+                </button>
+                <input
+                  type="file"
+                  ref={importLayoutInputRef}
+                  onChange={onImportLayout}
+                  className="hidden"
+                  accept=".json"
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
       
       <div className="flex-1 flex flex-col gap-6">
