@@ -23,6 +23,7 @@ import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState } from '../types/projectState';
+import { ImportWizard } from './ImportWizard';
 
 interface LayoutDesignerProps {
   /** Staging area for sound assets before assignment to grid */
@@ -397,6 +398,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
   const [stagingAreaCollapsed, setStagingAreaCollapsed] = useState(false);
   const [placedSoundsCollapsed, setPlacedSoundsCollapsed] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -732,11 +734,22 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     }
   };
 
-  // Handle scan MIDI button click
+  // Handle scan MIDI button click - show ImportWizard
   const handleScanMidiClick = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
+    setShowImportWizard(true);
+  };
+
+  // Handle ImportWizard confirm - add assets to parkedSounds
+  const handleImportConfirm = (assets: SoundAsset[]) => {
+    assets.forEach((asset) => {
+      onAddSound(asset);
+    });
+    setShowImportWizard(false);
+  };
+
+  // Handle ImportWizard cancel
+  const handleImportCancel = () => {
+    setShowImportWizard(false);
   };
 
   // Handle clear grid
@@ -1579,6 +1592,13 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         ) : null}
       </DragOverlay>
       </div>
+      {showImportWizard && (
+        <ImportWizard
+          existingSounds={parkedSounds}
+          onConfirm={handleImportConfirm}
+          onCancel={handleImportCancel}
+        />
+      )}
     </DndContext>
   );
 };
