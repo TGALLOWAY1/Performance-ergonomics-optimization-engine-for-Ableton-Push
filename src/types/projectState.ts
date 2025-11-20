@@ -1,5 +1,6 @@
-import { Performance, SectionMap } from './performance';
+import { Performance } from './performance';
 import { SoundAsset, GridMapping } from './layout';
+import { InstrumentConfig, SectionMap } from '../data/models';
 
 export interface LayoutSnapshot {
   id: string;
@@ -8,8 +9,15 @@ export interface LayoutSnapshot {
   createdAt: string;
 }
 
+/**
+ * A5: Updated ProjectState to include instrumentConfigs and sectionMaps arrays.
+ * Central state container for the entire project.
+ */
 export interface ProjectState {
   layouts: LayoutSnapshot[];
+  /** A5: Array of instrument configurations available in the project */
+  instrumentConfigs: InstrumentConfig[];
+  /** A5: Array of section maps that define time-based grid configurations */
   sectionMaps: SectionMap[];
   activeLayoutId: string | null;
   projectTempo: number;

@@ -1,4 +1,4 @@
-import { InstrumentConfig } from '../types/performance';
+import { InstrumentConfig } from '../data/models';
 
 /**
  * Stateless service for mapping MIDI notes to grid positions and vice versa.
@@ -6,18 +6,14 @@ import { InstrumentConfig } from '../types/performance';
  */
 export class GridMapService {
   /**
-   * Calculates the grid position (row, col) for a given MIDI note number.
+   * A4: Refactored to noteToGrid function.
+   * Calculates the grid position [row, col] for a given MIDI note number.
    * 
    * @param noteNumber - The MIDI note number to map.
    * @param config - The instrument configuration defining the grid layout.
-   * @returns The { row, col } position if the note is within the grid, or null if outside.
+   * @returns The [row, col] position if the note is within the 8x8 window, or null if outside.
    */
-  static getPositionForNote(noteNumber: number, config: InstrumentConfig): { row: number; col: number } | null {
-    if (config.layoutMode !== 'drum_64') {
-      // Currently only 'drum_64' is supported as per requirements
-      return null;
-    }
-
+  static noteToGrid(noteNumber: number, config: InstrumentConfig): [number, number] | null {
     const offset = noteNumber - config.bottomLeftNote;
     
     // Check if note is below the start of the grid
@@ -28,12 +24,22 @@ export class GridMapService {
     const row = Math.floor(offset / config.cols);
     const col = offset % config.cols;
 
-    // Check if note is beyond the grid dimensions
+    // Check if note is beyond the grid dimensions (8x8)
     if (row >= config.rows) {
       return null;
     }
 
-    return { row, col };
+    return [row, col];
+  }
+
+  /**
+   * Legacy method for backward compatibility.
+   * @deprecated Use noteToGrid instead.
+   */
+  static getPositionForNote(noteNumber: number, config: InstrumentConfig): { row: number; col: number } | null {
+    const result = this.noteToGrid(noteNumber, config);
+    if (!result) return null;
+    return { row: result[0], col: result[1] };
   }
 
   /**
