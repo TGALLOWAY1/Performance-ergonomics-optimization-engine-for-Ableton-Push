@@ -1,21 +1,30 @@
 import { Midi } from '@tonejs/midi';
-import { Performance, NoteEvent, InstrumentConfig } from '../types/performance';
+import { Performance, NoteEvent } from '../types/performance';
+import { InstrumentConfig } from '../data/models';
 import { GridMapService } from '../engine/gridMapService';
 import { SoundAsset } from '../types/layout';
 import { generateId } from './performanceUtils';
 
 /**
- * Parses a MIDI file and converts it into a Performance object.
+ * W3: Result type for MIDI import with unmapped note count
+ */
+export interface MidiImportResult {
+  performance: Performance;
+  unmappedNoteCount: number;
+}
+
+/**
+ * W3: Parses a MIDI file and converts it into a Performance object.
  * Also analyzes notes to check if they fall within the 8x8 grid view.
  * 
  * @param file The MIDI file to parse
  * @param config The instrument configuration to check against (for out-of-bounds detection)
- * @returns A Promise resolving to the parsed Performance object
+ * @returns A Promise resolving to the parsed Performance object and unmapped note count
  */
 export const parseMidiFile = async (
   file: File,
   config: InstrumentConfig
-): Promise<Performance> => {
+): Promise<MidiImportResult> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -34,8 +43,8 @@ export const parseMidiFile = async (
           track.notes.forEach((note) => {
             const noteNumber = note.midi;
             
-            // Check if note is within the 8x8 grid
-            const position = GridMapService.getPositionForNote(noteNumber, config);
+            // W3: Check if note is within the 8x8 grid using noteToGrid
+            const position = GridMapService.noteToGrid(noteNumber, config);
             if (!position) {
               outOfBoundsCount++;
               console.warn(`Note ${noteNumber} (${note.name}) is out of bounds for current config.`);
@@ -54,19 +63,19 @@ export const parseMidiFile = async (
         // Sort events by start time
         events.sort((a, b) => a.startTime - b.startTime);
 
-        if (outOfBoundsCount > 0) {
-          console.warn(`Imported MIDI contains ${outOfBoundsCount} notes outside the 8x8 grid view.`);
-        }
-
         // Determine tempo (use the first tempo event or default to 120)
         const tempo = midiData.header.tempos.length > 0 
           ? Math.round(midiData.header.tempos[0].bpm) 
           : 120;
 
+        // W3: Return performance with unmapped note count
         resolve({
-          events,
-          tempo,
-          name: file.name.replace(/\.[^/.]+$/, "") // Remove extension
+          performance: {
+            events,
+            tempo,
+            name: file.name.replace(/\.[^/.]+$/, "") // Remove extension
+          },
+          unmappedNoteCount: outOfBoundsCount
         });
 
       } catch (err) {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { GridEditor } from './GridEditor';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../types/performance';
+import { SectionMap } from '../data/models';
 import { GridPattern } from '../types/gridPattern';
 import { EngineResult } from '../engine/runEngine';
 

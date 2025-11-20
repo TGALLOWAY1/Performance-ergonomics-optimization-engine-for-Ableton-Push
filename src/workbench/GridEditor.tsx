@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../types/performance';
+import { SectionMap } from '../data/models';
 import { GridMapService } from '../engine/gridMapService';
 import { GridPattern } from '../types/gridPattern';
 import { EngineResult, EngineDebugEvent, DifficultyLabel } from '../engine/runEngine';
@@ -92,6 +92,42 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         reachabilityConfig.targetFinger
       )
     : null;
+
+  // W4: Calculate per-pad note count from activeLayout.performance
+  const padNoteCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    
+    if (!activeLayout || !activeLayout.performance || !activeSection) {
+      return counts;
+    }
+
+    activeLayout.performance.events.forEach(event => {
+      // Use activeMapping if available, otherwise use InstrumentConfig
+      let row: number | null = null;
+      let col: number | null = null;
+      
+      if (activeMapping) {
+        const pos = getPositionForMidi(event.noteNumber, activeMapping);
+        if (pos) {
+          row = pos.row;
+          col = pos.col;
+        }
+      } else {
+        const pos = GridMapService.noteToGrid(event.noteNumber, activeSection.instrumentConfig);
+        if (pos) {
+          row = pos[0];
+          col = pos[1];
+        }
+      }
+      
+      if (row !== null && col !== null) {
+        const key = `${row},${col}`;
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    });
+
+    return counts;
+  }, [activeLayout, activeSection, activeMapping]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -397,6 +433,13 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                   <span className={`text-sm font-semibold ${isActive ? 'text-white' : 'text-slate-400'}`}>
                     {displayName}
                   </span>
+                  
+                  {/* W4: Per-Pad Note Count */}
+                  {padNoteCounts[cellKeyStr] !== undefined && padNoteCounts[cellKeyStr] > 0 && (
+                    <div className="absolute bottom-1 left-1 bg-slate-900/80 text-slate-300 text-[10px] font-mono px-1 py-0.5 rounded border border-slate-700">
+                      {padNoteCounts[cellKeyStr]}
+                    </div>
+                  )}
                   
                   {/* Finger Badge - Always show when available, even in readOnly mode */}
                   {isActive && debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable' && (

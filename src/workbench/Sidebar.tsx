@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { LayoutList } from './LayoutList';
 import { SectionMapList } from './SectionMapList';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../types/performance';
+import { SectionMap } from '../data/models';
 
 interface SidebarProps {
   layouts: LayoutSnapshot[];
@@ -11,7 +11,7 @@ interface SidebarProps {
   onSelectLayout: (id: string) => void;
   onCreateLayout: () => void;
   onDeleteLayout: (id: string) => void;
-  onUpdateSection: (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => void;
+  onUpdateSection: (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => void;
   onSaveProject: () => void;
   onLoadProject: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onImportMidi: (e: React.ChangeEvent<HTMLInputElement>) => void;

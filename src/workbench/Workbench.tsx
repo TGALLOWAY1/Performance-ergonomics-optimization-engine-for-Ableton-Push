@@ -2,15 +2,15 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { LayoutDesigner } from './LayoutDesigner';
 import { ProjectState } from '../types/projectState';
 import { GridMapping, SoundAsset } from '../types/layout';
-import { InstrumentConfig, SectionMap } from '../types/performance';
+import { InstrumentConfig, SectionMap } from '../data/models';
 import { useProjectHistory } from '../hooks/useProjectHistory';
+import { generateId } from '../utils/performanceUtils';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
   id: 'inst-1',
   name: 'Standard Drum Kit',
-  bottomLeftNote: 0, // C-2
-  layoutMode: 'drum_64',
+  bottomLeftNote: 36, // C2
   rows: 8,
   cols: 8
 };
@@ -28,11 +28,13 @@ const INITIAL_PROJECT_STATE: ProjectState = {
       }
     }
   ],
+  instrumentConfigs: [INITIAL_INSTRUMENT_CONFIG],
   sectionMaps: [
     {
       id: 'section-1',
+      name: 'Section 1',
       startMeasure: 1,
-      endMeasure: 4,
+      lengthInMeasures: 4,
       instrumentConfig: INITIAL_INSTRUMENT_CONFIG
     }
   ],
@@ -349,25 +351,41 @@ export const Workbench: React.FC = () => {
     });
   };
 
-  const handleUpdateSection = (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => {
+  const handleUpdateSection = (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => {
     setProjectState({
       ...projectState,
       sectionMaps: projectState.sectionMaps.map(section => {
         if (section.id !== id) return section;
         
-        if (field === 'bottomLeftNote') {
+        // Handle legacy format: { field, value }
+        if ('field' in updates && 'value' in updates) {
+          const { field, value } = updates;
+          if (field === 'bottomLeftNote') {
+            return {
+              ...section,
+              instrumentConfig: {
+                ...section.instrumentConfig,
+                bottomLeftNote: value
+              }
+            };
+          }
           return {
             ...section,
-            instrumentConfig: {
-              ...section.instrumentConfig,
-              bottomLeftNote: value
-            }
+            [field]: value
+          };
+        }
+        
+        // Handle new format: Partial<SectionMap>
+        if ('instrumentConfig' in updates) {
+          return {
+            ...section,
+            instrumentConfig: updates.instrumentConfig!
           };
         }
         
         return {
           ...section,
-          [field]: value
+          ...updates
         };
       })
     });
@@ -377,6 +395,66 @@ export const Workbench: React.FC = () => {
     setProjectState({
       ...projectState,
       sectionMaps: projectState.sectionMaps.filter(s => s.id !== id)
+    });
+  };
+
+  // W1: Handler for creating new InstrumentConfig
+  const handleCreateInstrumentConfig = (config: Omit<InstrumentConfig, 'id'>) => {
+    const newConfig: InstrumentConfig = {
+      ...config,
+      id: generateId('inst'),
+    };
+    setProjectState({
+      ...projectState,
+      instrumentConfigs: [...projectState.instrumentConfigs, newConfig],
+    });
+  };
+
+  // W1: Handler for creating new SectionMap
+  const handleCreateSectionMap = (sectionMap: Omit<SectionMap, 'id'>) => {
+    const newSection: SectionMap = {
+      ...sectionMap,
+      id: generateId('section'),
+    };
+    setProjectState({
+      ...projectState,
+      sectionMaps: [...projectState.sectionMaps, newSection],
+    });
+  };
+
+  // W1: Handler for updating InstrumentConfig
+  const handleUpdateInstrumentConfig = (id: string, updates: Partial<InstrumentConfig>) => {
+    setProjectState({
+      ...projectState,
+      instrumentConfigs: projectState.instrumentConfigs.map(config =>
+        config.id === id ? { ...config, ...updates } : config
+      ),
+      // Also update sectionMaps that reference this config
+      sectionMaps: projectState.sectionMaps.map(section =>
+        section.instrumentConfig.id === id
+          ? {
+              ...section,
+              instrumentConfig: { ...section.instrumentConfig, ...updates },
+            }
+          : section
+      ),
+    });
+  };
+
+  // W1: Handler for deleting InstrumentConfig
+  const handleDeleteInstrumentConfig = (id: string) => {
+    // Prevent deletion if any section maps reference it
+    const isReferenced = projectState.sectionMaps.some(
+      section => section.instrumentConfig.id === id
+    );
+    if (isReferenced) {
+      alert('Cannot delete instrument config: it is referenced by one or more section maps.');
+      return;
+    }
+    
+    setProjectState({
+      ...projectState,
+      instrumentConfigs: projectState.instrumentConfigs.filter(c => c.id !== id),
     });
   };
 
@@ -474,6 +552,10 @@ export const Workbench: React.FC = () => {
           activeLayout={activeLayout}
           onUpdateSection={handleUpdateSection}
           onDeleteSection={handleDeleteSection}
+          onCreateInstrumentConfig={handleCreateInstrumentConfig}
+          onCreateSectionMap={handleCreateSectionMap}
+          onUpdateInstrumentConfig={handleUpdateInstrumentConfig}
+          onDeleteInstrumentConfig={handleDeleteInstrumentConfig}
         />
       </div>
     </div>
