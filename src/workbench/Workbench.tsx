@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { LayoutDesigner } from './LayoutDesigner';
-import { AnalysisView } from './AnalysisView';
 import { ProjectState } from '../types/projectState';
 import { GridMapping, SoundAsset } from '../types/layout';
-import { InstrumentConfig } from '../types/performance';
+import { InstrumentConfig, SectionMap } from '../types/performance';
+import { useProjectHistory } from '../hooks/useProjectHistory';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -43,8 +43,15 @@ const INITIAL_PROJECT_STATE: ProjectState = {
 };
 
 export const Workbench: React.FC = () => {
-  const [projectState, setProjectState] = useState<ProjectState>(INITIAL_PROJECT_STATE);
-  const [viewMode, setViewMode] = useState<'analysis' | 'design'>('design');
+  const {
+    projectState,
+    setProjectState,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useProjectHistory(INITIAL_PROJECT_STATE);
+  
   const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
 
   const activeLayout = useMemo(() => 
@@ -115,7 +122,7 @@ export const Workbench: React.FC = () => {
              parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
              mappings: Array.isArray(parsed.mappings) ? parsed.mappings : []
            };
-           setProjectState(loadedState);
+           setProjectState(loadedState, true); // Skip history on load
            // Initialize activeMappingId if mappings exist
            if (loadedState.mappings.length > 0) {
              setActiveMappingId(loadedState.mappings[0].id);
@@ -145,17 +152,17 @@ export const Workbench: React.FC = () => {
         scoreCache: null,
         notes: '',
       };
-      setProjectState(prev => ({
-        ...prev,
-        mappings: [...prev.mappings, newMapping],
-      }));
+      setProjectState({
+        ...projectState,
+        mappings: [...projectState.mappings, newMapping],
+      });
       // Set activeMappingId immediately to ensure it's available
       setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping
-      setProjectState(prev => ({
-        ...prev,
-        mappings: prev.mappings.map(m => {
+      setProjectState({
+        ...projectState,
+        mappings: projectState.mappings.map(m => {
           if (m.id !== activeMapping.id) return m;
           return {
             ...m,
@@ -165,7 +172,7 @@ export const Workbench: React.FC = () => {
             },
           };
         }),
-      }));
+      });
     }
   };
 
@@ -180,17 +187,17 @@ export const Workbench: React.FC = () => {
         scoreCache: null,
         notes: '',
       };
-      setProjectState(prev => ({
-        ...prev,
-        mappings: [...prev.mappings, newMapping],
-      }));
+      setProjectState({
+        ...projectState,
+        mappings: [...projectState.mappings, newMapping],
+      });
       // Set activeMappingId immediately to ensure it's available
       setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping with all assignments
-      setProjectState(prev => ({
-        ...prev,
-        mappings: prev.mappings.map(m => {
+      setProjectState({
+        ...projectState,
+        mappings: projectState.mappings.map(m => {
           if (m.id !== activeMapping.id) return m;
           return {
             ...m,
@@ -200,20 +207,20 @@ export const Workbench: React.FC = () => {
             },
           };
         }),
-      }));
+      });
     }
   };
 
   const handleUpdateMapping = (updates: Partial<GridMapping>) => {
     if (!activeMapping) return;
     
-    setProjectState(prev => ({
-      ...prev,
-      mappings: prev.mappings.map(m => {
+    setProjectState({
+      ...projectState,
+      mappings: projectState.mappings.map(m => {
         if (m.id !== activeMapping.id) return m;
         return { ...m, ...updates };
       }),
-    }));
+    });
   };
 
   const handleDuplicateMapping = () => {
@@ -225,10 +232,10 @@ export const Workbench: React.FC = () => {
       name: `${activeMapping.name} (Copy)`,
     };
     
-    setProjectState(prev => ({
-      ...prev,
-      mappings: [...prev.mappings, newMapping],
-    }));
+    setProjectState({
+      ...projectState,
+      mappings: [...projectState.mappings, newMapping],
+    });
     setActiveMappingId(newMapping.id);
   };
 
@@ -251,90 +258,86 @@ export const Workbench: React.FC = () => {
   };
 
   const handleAddSound = (sound: SoundAsset) => {
-    setProjectState(prev => ({
-      ...prev,
-      parkedSounds: [...prev.parkedSounds, sound],
-    }));
+    setProjectState({
+      ...projectState,
+      parkedSounds: [...projectState.parkedSounds, sound],
+    });
   };
 
   const handleUpdateSound = (soundId: string, updates: Partial<SoundAsset>) => {
-    setProjectState(prev => {
-      // Update in parkedSounds
-      const updatedParkedSounds = prev.parkedSounds.map(s => 
-        s.id === soundId ? { ...s, ...updates } : s
-      );
+    // Update in parkedSounds
+    const updatedParkedSounds = projectState.parkedSounds.map(s => 
+      s.id === soundId ? { ...s, ...updates } : s
+    );
 
-      // Also update in all mappings if the sound exists there
-      const updatedMappings = prev.mappings.map(m => {
-        const updatedCells: Record<string, SoundAsset> = {};
-        let hasChanges = false;
+    // Also update in all mappings if the sound exists there
+    const updatedMappings = projectState.mappings.map(m => {
+      const updatedCells: Record<string, SoundAsset> = {};
+      let hasChanges = false;
 
-        Object.entries(m.cells).forEach(([cellKey, sound]) => {
-          if (sound.id === soundId) {
-            updatedCells[cellKey] = { ...sound, ...updates };
-            hasChanges = true;
-          } else {
-            updatedCells[cellKey] = sound;
-          }
-        });
-
-        return hasChanges ? { ...m, cells: updatedCells } : m;
+      Object.entries(m.cells).forEach(([cellKey, sound]) => {
+        if (sound.id === soundId) {
+          updatedCells[cellKey] = { ...sound, ...updates };
+          hasChanges = true;
+        } else {
+          updatedCells[cellKey] = sound;
+        }
       });
 
-      return {
-        ...prev,
-        parkedSounds: updatedParkedSounds,
-        mappings: updatedMappings,
-      };
+      return hasChanges ? { ...m, cells: updatedCells } : m;
+    });
+
+    setProjectState({
+      ...projectState,
+      parkedSounds: updatedParkedSounds,
+      mappings: updatedMappings,
     });
   };
 
   const handleUpdateMappingSound = (cellKey: string, updates: Partial<SoundAsset>) => {
     if (!activeMapping) return;
     
-    setProjectState(prev => {
-      let soundIdToUpdate: string | null = null;
-      let updatedCellSound: SoundAsset | null = null;
+    let soundIdToUpdate: string | null = null;
+    let updatedCellSound: SoundAsset | null = null;
 
-      // Update in the active mapping
-      const updatedMappings = prev.mappings.map(m => {
-        if (m.id !== activeMapping.id) return m;
-        const cellSound = m.cells[cellKey];
-        if (!cellSound) return m;
-        
-        soundIdToUpdate = cellSound.id;
-        updatedCellSound = { ...cellSound, ...updates };
-        
-        return {
-          ...m,
-          cells: {
-            ...m.cells,
-            [cellKey]: updatedCellSound,
-          },
-        };
-      });
-
-      // Also update in parkedSounds if the sound exists there
-      const updatedParkedSounds = soundIdToUpdate
-        ? prev.parkedSounds.map(s => 
-            s.id === soundIdToUpdate ? { ...s, ...updates } : s
-          )
-        : prev.parkedSounds;
-
+    // Update in the active mapping
+    const updatedMappings = projectState.mappings.map(m => {
+      if (m.id !== activeMapping.id) return m;
+      const cellSound = m.cells[cellKey];
+      if (!cellSound) return m;
+      
+      soundIdToUpdate = cellSound.id;
+      updatedCellSound = { ...cellSound, ...updates };
+      
       return {
-        ...prev,
-        parkedSounds: updatedParkedSounds,
-        mappings: updatedMappings,
+        ...m,
+        cells: {
+          ...m.cells,
+          [cellKey]: updatedCellSound,
+        },
       };
+    });
+
+    // Also update in parkedSounds if the sound exists there
+    const updatedParkedSounds = soundIdToUpdate
+      ? projectState.parkedSounds.map(s => 
+          s.id === soundIdToUpdate ? { ...s, ...updates } : s
+        )
+      : projectState.parkedSounds;
+
+    setProjectState({
+      ...projectState,
+      parkedSounds: updatedParkedSounds,
+      mappings: updatedMappings,
     });
   };
 
   const handleRemoveSound = (cellKey: string) => {
     if (!activeMapping) return;
     
-    setProjectState(prev => ({
-      ...prev,
-      mappings: prev.mappings.map(m => {
+    setProjectState({
+      ...projectState,
+      mappings: projectState.mappings.map(m => {
         if (m.id !== activeMapping.id) return m;
         const newCells = { ...m.cells };
         delete newCells[cellKey];
@@ -343,8 +346,55 @@ export const Workbench: React.FC = () => {
           cells: newCells,
         };
       }),
-    }));
+    });
   };
+
+  const handleUpdateSection = (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => {
+    setProjectState({
+      ...projectState,
+      sectionMaps: projectState.sectionMaps.map(section => {
+        if (section.id !== id) return section;
+        
+        if (field === 'bottomLeftNote') {
+          return {
+            ...section,
+            instrumentConfig: {
+              ...section.instrumentConfig,
+              bottomLeftNote: value
+            }
+          };
+        }
+        
+        return {
+          ...section,
+          [field]: value
+        };
+      })
+    });
+  };
+
+  const handleDeleteSection = (id: string) => {
+    setProjectState({
+      ...projectState,
+      sectionMaps: projectState.sectionMaps.filter(s => s.id !== id)
+    });
+  };
+
+  // Keyboard shortcuts for Undo/Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
 
   const loadProjectInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -357,32 +407,31 @@ export const Workbench: React.FC = () => {
           <h1 className="text-lg font-semibold text-slate-200">Push 3 Optimizer</h1>
         </div>
 
-        {/* Center: View Mode Toggle */}
-        <div className="flex items-center gap-1 bg-slate-800 rounded p-1 border border-slate-700">
-          <button
-            onClick={() => setViewMode('analysis')}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              viewMode === 'analysis'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Analysis
-          </button>
-          <button
-            onClick={() => setViewMode('design')}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              viewMode === 'design'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Designer
-          </button>
-        </div>
-
-        {/* Right: Save/Load Project */}
+        {/* Right: Undo/Redo & Save/Load Project */}
         <div className="flex items-center gap-2">
+          {/* Undo/Redo */}
+          <div className="flex items-center gap-1 border border-slate-700 rounded p-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded transition-colors"
+              title="Undo (Ctrl/Cmd+Z)"
+            >
+              ↶ Undo
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded transition-colors"
+              title="Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)"
+            >
+              ↷ Redo
+            </button>
+          </div>
+          
+          <div className="h-6 w-px bg-slate-800" />
+          
+          {/* Save/Load */}
           <button
             onClick={handleSaveProject}
             className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
@@ -405,38 +454,28 @@ export const Workbench: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Body (Middle) */}
-      {viewMode === 'design' ? (
-        <div className="flex-1 overflow-hidden">
-          <LayoutDesigner
-            parkedSounds={projectState.parkedSounds}
-            activeMapping={activeMapping}
-            instrumentConfig={activeSection?.instrumentConfig || null}
-            onAssignSound={handleAssignSound}
-            onAssignSounds={handleAssignSounds}
-            onUpdateMapping={handleUpdateMapping}
-            onDuplicateMapping={handleDuplicateMapping}
-            onAddSound={handleAddSound}
-            onUpdateSound={handleUpdateSound}
-            onUpdateMappingSound={handleUpdateMappingSound}
-            onRemoveSound={handleRemoveSound}
-            projectState={projectState}
-            onUpdateProjectState={setProjectState}
-            onSetActiveMappingId={setActiveMappingId}
-          />
-        </div>
-      ) : (
-        <div className="flex-1 overflow-hidden">
-          <AnalysisView
-            projectState={projectState}
-            activeLayout={activeLayout}
-            activeMapping={activeMapping}
-            onUpdateProjectState={setProjectState}
-            onUpdateMapping={handleUpdateMapping}
-            onSetActiveMappingId={setActiveMappingId}
-          />
-        </div>
-      )}
+      {/* Main Body (Middle) - Unified Workbench */}
+      <div className="flex-1 overflow-hidden">
+        <LayoutDesigner
+          parkedSounds={projectState.parkedSounds}
+          activeMapping={activeMapping}
+          instrumentConfig={activeSection?.instrumentConfig || null}
+          onAssignSound={handleAssignSound}
+          onAssignSounds={handleAssignSounds}
+          onUpdateMapping={handleUpdateMapping}
+          onDuplicateMapping={handleDuplicateMapping}
+          onAddSound={handleAddSound}
+          onUpdateSound={handleUpdateSound}
+          onUpdateMappingSound={handleUpdateMappingSound}
+          onRemoveSound={handleRemoveSound}
+          projectState={projectState}
+          onUpdateProjectState={setProjectState}
+          onSetActiveMappingId={setActiveMappingId}
+          activeLayout={activeLayout}
+          onUpdateSection={handleUpdateSection}
+          onDeleteSection={handleDeleteSection}
+        />
+      </div>
     </div>
   );
 };

@@ -4,11 +4,13 @@ import { SectionMap } from '../types/performance';
 interface SectionMapListProps {
   sectionMaps: SectionMap[];
   onUpdateSection: (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => void;
+  onDeleteSection?: (id: string) => void;
 }
 
 export const SectionMapList: React.FC<SectionMapListProps> = ({
   sectionMaps,
   onUpdateSection,
+  onDeleteSection,
 }) => {
   return (
     <div className="flex flex-col gap-2 mt-4">
@@ -53,6 +55,19 @@ export const SectionMapList: React.FC<SectionMapListProps> = ({
                 onChange={(e) => onUpdateSection(section.id, 'bottomLeftNote', parseInt(e.target.value) || 0)}
               />
             </div>
+            
+            {onDeleteSection && (
+              <button
+                onClick={() => {
+                  if (window.confirm(`Delete section "${section.instrumentConfig.name}"?`)) {
+                    onDeleteSection(section.id);
+                  }
+                }}
+                className="mt-2 px-2 py-1 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
+              >
+                Delete
+              </button>
+            )}
           </div>
         ))}
         {sectionMaps.length === 0 && (
