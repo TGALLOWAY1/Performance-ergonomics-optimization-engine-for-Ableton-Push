@@ -16,8 +16,7 @@ export const TimelineArea: React.FC<TimelineAreaProps> = ({
   sectionMaps,
 }) => {
   return (
-    <div id="timeline-area" className="h-48 bg-slate-900 p-4 border-t border-border flex flex-col">
-      <h3 className="text-sm font-semibold text-slate-400 mb-2">Timeline</h3>
+    <div id="timeline-area" className="h-full bg-slate-900 p-4 border-t border-border flex flex-col">
       <div className="flex-1 min-h-0">
         <Timeline
           steps={steps}

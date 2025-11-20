@@ -22,8 +22,12 @@ import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
-import { ProjectState } from '../types/projectState';
+import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { ImportWizard } from './ImportWizard';
+import { runEngine, EngineResult } from '../engine/runEngine';
+import { TimelineArea } from './TimelineArea';
+import { EngineResultsPanel } from './EngineResultsPanel';
+import { SectionMapList } from './SectionMapList';
 
 interface LayoutDesignerProps {
   /** Staging area for sound assets before assignment to grid */
@@ -54,6 +58,12 @@ interface LayoutDesignerProps {
   onUpdateProjectState: (state: ProjectState) => void;
   /** Callback to set the active mapping ID */
   onSetActiveMappingId?: (id: string) => void;
+  /** Active layout for performance analysis */
+  activeLayout: LayoutSnapshot | null;
+  /** Callback to update section map */
+  onUpdateSection?: (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => void;
+  /** Callback to delete section map */
+  onDeleteSection?: (id: string) => void;
 }
 
 // Draggable Sound Item Component
@@ -245,8 +255,13 @@ interface DroppableCellProps {
   assignedSound: SoundAsset | null;
   isOver: boolean;
   isSelected: boolean;
+  isHighlighted?: boolean;
   templateSlot: { label: string; suggestedNote?: number } | null;
   reachabilityLevel: ReachabilityLevel | null;
+  heatmapDifficulty?: 'Easy' | 'Medium' | 'Hard' | 'Unplayable' | null;
+  heatmapFinger?: FingerID | null;
+  heatmapHand?: 'LH' | 'RH' | null;
+  fingerConstraint?: string | null;
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -258,8 +273,13 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
   assignedSound, 
   isOver, 
   isSelected,
+  isHighlighted = false,
   templateSlot,
   reachabilityLevel,
+  heatmapDifficulty,
+  heatmapFinger,
+  heatmapHand,
+  fingerConstraint,
   onClick,
   onDoubleClick,
   onContextMenu,
@@ -307,6 +327,7 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
       className={`
         w-16 h-16 flex flex-col items-center justify-center rounded-md
         border transition-all duration-100 relative
+        ${isHighlighted ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-slate-900 z-20' : ''}
         ${assignedSound
           ? isSelected
             ? 'bg-blue-900/50 border-blue-400 border-2 cursor-grab active:cursor-grabbing'
@@ -322,6 +343,24 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
         ...dragStyle,
         borderLeftWidth: assignedSound ? '4px' : undefined,
         borderLeftColor: assignedSound?.color || undefined,
+        // Apply heatmap overlay if enabled (behind the sound chip)
+        ...(heatmapDifficulty && assignedSound ? {
+          backgroundColor: heatmapDifficulty === 'Unplayable'
+            ? 'rgba(239, 68, 68, 0.3)'
+            : heatmapDifficulty === 'Hard'
+            ? 'rgba(249, 115, 22, 0.3)'
+            : heatmapDifficulty === 'Medium'
+            ? 'rgba(234, 179, 8, 0.3)'
+            : 'rgba(59, 130, 246, 0.2)',
+          borderColor: heatmapDifficulty === 'Unplayable'
+            ? 'rgba(239, 68, 68, 0.6)'
+            : heatmapDifficulty === 'Hard'
+            ? 'rgba(249, 115, 22, 0.6)'
+            : heatmapDifficulty === 'Medium'
+            ? 'rgba(234, 179, 8, 0.6)'
+            : 'rgba(59, 130, 246, 0.4)',
+          borderWidth: heatmapDifficulty === 'Unplayable' || heatmapDifficulty === 'Hard' ? '3px' : '2px',
+        } : {}),
         // Apply reachability overlay for empty cells
         ...(reachabilityLevel && !assignedSound ? {
           backgroundColor: reachabilityLevel === 'green' 
@@ -345,6 +384,22 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
           <span className="text-[10px] text-slate-400 mt-0.5">
             [{row},{col}]
           </span>
+          {/* Finger Badge - Always show when available from engine */}
+          {heatmapFinger && heatmapHand && (
+            <div className={`
+              absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm z-10
+              ${heatmapHand === 'LH' ? 'bg-blue-200 text-blue-900' : 'bg-red-200 text-red-900'}
+            `}>
+              {heatmapHand === 'LH' ? 'L' : 'R'}{heatmapFinger}
+            </div>
+          )}
+          {/* Finger Constraint Lock Icon - Show when constraint exists */}
+          {fingerConstraint && (
+            <div className="absolute top-1 left-1 flex items-center gap-1 bg-slate-800/90 border border-slate-600 rounded px-1 py-0.5 z-10">
+              <span className="text-[10px]">🔒</span>
+              <span className="text-[10px] font-semibold text-slate-200">{fingerConstraint}</span>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -385,6 +440,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   projectState,
   onUpdateProjectState,
   onSetActiveMappingId,
+  activeLayout,
+  onUpdateSection,
+  onDeleteSection,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -399,6 +457,19 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const [stagingAreaCollapsed, setStagingAreaCollapsed] = useState(false);
   const [placedSoundsCollapsed, setPlacedSoundsCollapsed] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
+  const [showHeatmapOverlay, setShowHeatmapOverlay] = useState(false);
+  const [showDebugLabels, setShowDebugLabels] = useState(false);
+  const [viewAllSteps, setViewAllSteps] = useState(false);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [timelineForceVisible, setTimelineForceVisible] = useState(false);
+  const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
+  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
+  const [leftPanelTab, setLeftPanelTab] = useState<'library' | 'sections'>('library');
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const [autoLayoutDropdownOpen, setAutoLayoutDropdownOpen] = useState(false);
+  const autoLayoutDropdownRef = useRef<HTMLDivElement>(null);
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -543,23 +614,98 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         }
       }
 
-      // If moving from one cell to another, remove from source first
-      if (sourceCellKey && sourceCellKey !== targetCellKey) {
-        // Update reachability config if the anchor cell is being moved
-        if (reachabilityConfig && reachabilityConfig.anchorCellKey === sourceCellKey) {
-          const newParsed = parseCellKey(targetCellKey);
-          if (newParsed) {
-            setReachabilityConfig({
-              ...reachabilityConfig,
-              anchorCellKey: targetCellKey,
-              anchorPos: { row: newParsed.row, col: newParsed.col },
-            });
-          }
+      // Update reachability config if the anchor cell is being moved
+      if (sourceCellKey && reachabilityConfig && reachabilityConfig.anchorCellKey === sourceCellKey) {
+        const newParsed = parseCellKey(targetCellKey);
+        if (newParsed) {
+          setReachabilityConfig({
+            ...reachabilityConfig,
+            anchorCellKey: targetCellKey,
+            anchorPos: { row: newParsed.row, col: newParsed.col },
+          });
         }
-        onRemoveSound(sourceCellKey);
       }
 
-      onAssignSound(targetCellKey, sound);
+      // Scenario A: Dragging from Library (New Placement)
+      if (!sourceCellKey) {
+        // Just assign the sound to the target cell
+        onAssignSound(targetCellKey, sound);
+      } 
+      // Scenario B: Dragging from Grid (Move)
+      else if (sourceCellKey !== targetCellKey) {
+        // Get current cells state
+        if (!activeMapping) {
+          // Create new mapping if none exists
+          onAssignSound(targetCellKey, sound);
+          return;
+        }
+
+        const currentCells = { ...activeMapping.cells };
+        const targetSound = currentCells[targetCellKey] || null;
+        const sourceSound = currentCells[sourceCellKey] || null;
+
+        if (!sourceSound) {
+          // Source cell doesn't have a sound (shouldn't happen, but handle gracefully)
+          setActiveId(null);
+          setDraggedSound(null);
+          setOverId(null);
+          return;
+        }
+
+        // Create new cells object for atomic update
+        // Start fresh to prevent any duplicates
+        const newCells: Record<string, SoundAsset> = {};
+        
+        // Copy all cells except source and target (we'll handle those separately)
+        Object.entries(currentCells).forEach(([key, value]) => {
+          if (key !== sourceCellKey && key !== targetCellKey) {
+            newCells[key] = value;
+          }
+        });
+
+        // Handle swap if target already has a sound
+        if (targetSound) {
+          // Swap: Move target sound to source position
+          newCells[sourceCellKey] = targetSound;
+        }
+        // If target is empty, sourceCellKey will remain empty (already excluded)
+
+        // Assign dragged sound to target
+        newCells[targetCellKey] = sourceSound;
+
+        // Update finger constraints if they exist
+        const newFingerConstraints = { ...activeMapping.fingerConstraints };
+        
+        // If source had a constraint, move it to target (or clear if swapping)
+        if (newFingerConstraints[sourceCellKey]) {
+          if (targetSound && newFingerConstraints[targetCellKey]) {
+            // Both have constraints - swap them
+            const sourceConstraint = newFingerConstraints[sourceCellKey];
+            const targetConstraint = newFingerConstraints[targetCellKey];
+            newFingerConstraints[targetCellKey] = sourceConstraint;
+            newFingerConstraints[sourceCellKey] = targetConstraint;
+          } else if (targetSound) {
+            // Only source had constraint - move to target, clear source
+            newFingerConstraints[targetCellKey] = newFingerConstraints[sourceCellKey];
+            delete newFingerConstraints[sourceCellKey];
+          } else {
+            // Target is empty - move constraint to target
+            newFingerConstraints[targetCellKey] = newFingerConstraints[sourceCellKey];
+            delete newFingerConstraints[sourceCellKey];
+          }
+        } else if (targetSound && newFingerConstraints[targetCellKey]) {
+          // Only target had constraint - move to source
+          newFingerConstraints[sourceCellKey] = newFingerConstraints[targetCellKey];
+          delete newFingerConstraints[targetCellKey];
+        }
+
+        // Atomic update: Update mapping with new cells and constraints in one operation
+        onUpdateMapping({
+          cells: newCells,
+          fingerConstraints: newFingerConstraints,
+        });
+      }
+      // If sourceCellKey === targetCellKey, do nothing (dropped on same cell)
     }
 
     setActiveId(null);
@@ -752,13 +898,25 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     setShowImportWizard(false);
   };
 
-  // Handle clear grid
+  // Handle clear grid - moves all sounds back to staging
   const handleClearGrid = () => {
     if (!activeMapping) {
       return; // Nothing to clear
     }
 
-    if (window.confirm('Are you sure you want to clear all sounds from the grid? This cannot be undone.')) {
+    if (window.confirm('Are you sure you want to clear all sounds from the grid? All sounds will be moved back to staging.')) {
+      // Collect all sounds from the grid
+      const soundsToMove = Object.values(activeMapping.cells);
+      
+      // Add sounds back to parkedSounds if they're not already there
+      soundsToMove.forEach(sound => {
+        const isInParked = parkedSounds.some(s => s.id === sound.id);
+        if (!isInParked) {
+          onAddSound(sound);
+        }
+      });
+      
+      // Clear the grid
       onUpdateMapping({
         cells: {},
       });
@@ -1012,6 +1170,67 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       )
     : null;
 
+  // Real-time engine execution: Run whenever activeMapping or activeLayout.performance changes
+  useEffect(() => {
+    if (!activeMapping || !activeLayout) {
+      setEngineResult(null);
+      return;
+    }
+
+    // Debounce engine execution for performance
+    const timer = setTimeout(() => {
+      const result = runEngine(activeLayout.performance, activeMapping);
+      setEngineResult(result);
+      
+      // Update scoreCache in the mapping
+      onUpdateMapping({ scoreCache: result.score });
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [activeMapping, activeLayout?.performance, onUpdateMapping]);
+
+  // Responsive timeline hiding: Hide if container height < 200px or window width < 768px
+  useEffect(() => {
+    const checkTimelineVisibility = () => {
+      if (!timelineContainerRef.current) return;
+
+      const container = timelineContainerRef.current;
+      const containerHeight = container.clientHeight;
+      const windowWidth = window.innerWidth;
+      
+      const shouldHide = (containerHeight < 200 || windowWidth < 768) && !timelineForceVisible;
+      setTimelineAutoHidden(shouldHide);
+    };
+
+    checkTimelineVisibility();
+    
+    const resizeObserver = new ResizeObserver(checkTimelineVisibility);
+    if (timelineContainerRef.current) {
+      resizeObserver.observe(timelineContainerRef.current);
+    }
+
+    window.addEventListener('resize', checkTimelineVisibility);
+    
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', checkTimelineVisibility);
+    };
+  }, [timelineForceVisible]);
+
+  // Close auto-layout dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (autoLayoutDropdownRef.current && !autoLayoutDropdownRef.current.contains(event.target as Node)) {
+        setAutoLayoutDropdownOpen(false);
+      }
+    };
+
+    if (autoLayoutDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [autoLayoutDropdownOpen]);
+
   return (
     <DndContext
       sensors={sensors}
@@ -1022,94 +1241,245 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       onDragCancel={handleDragCancel}
     >
       <div className="h-full w-full flex flex-col bg-gray-900 text-white overflow-hidden">
-        {/* Header with File Menu */}
+        {/* Header with View Settings Toolbar */}
         <div className="flex-none border-b border-gray-700 bg-slate-800 px-4 py-2">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold text-slate-200">Layout Designer</h1>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1 border border-slate-700 rounded p-1">
-                <button
-                  onClick={handleSaveProject}
-                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                  title="Save Project (Ctrl/Cmd+S)"
-                >
-                  Save Project
-                </button>
-                <button
-                  onClick={handleLoadProjectClick}
-                  className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
-                  title="Load Project"
-                >
-                  Load Project
-                </button>
-                <input
-                  ref={loadProjectInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleLoadProject}
-                  className="hidden"
-                />
+            <div className="flex items-center gap-4">
+              {/* View Settings */}
+              <div className="flex items-center gap-4 border border-slate-700 rounded px-3 py-1.5">
+                <span className="text-xs text-slate-400 font-semibold">View Settings:</span>
+                
+                {/* Root Note */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-400">Root Note:</label>
+                  <input
+                    type="number"
+                    value={instrumentConfig?.bottomLeftNote ?? 0}
+                    onChange={(e) => {
+                      if (onUpdateSection && projectState.sectionMaps[0]) {
+                        onUpdateSection(projectState.sectionMaps[0].id, 'bottomLeftNote', parseInt(e.target.value) || 0);
+                      }
+                    }}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+                  />
+                </div>
+                
+                <div className="h-4 w-px bg-slate-700" />
+                
+                {/* Debug Toggles */}
+                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={showDebugLabels} 
+                    onChange={(e) => setShowDebugLabels(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-800"
+                  />
+                  Show Note Labels
+                </label>
+                
+                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={viewAllSteps} 
+                    onChange={(e) => setViewAllSteps(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-800"
+                  />
+                  View All Steps
+                </label>
+                
+                <div className="h-4 w-px bg-slate-700" />
+                
+                {/* Heatmap Toggle */}
+                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={showHeatmapOverlay} 
+                    onChange={(e) => setShowHeatmapOverlay(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-800"
+                  />
+                  Show Heatmap
+                </label>
               </div>
-              <div className="flex gap-1 border border-slate-700 rounded p-1">
+              
+              <div className="h-6 w-px bg-slate-700" />
+              
+              {/* Auto-Layout Dropdown */}
+              <div className="relative" ref={autoLayoutDropdownRef}>
                 <button
-                  onClick={handleExportLayout}
-                  disabled={!activeMapping}
-                  className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded transition-colors"
-                  title={!activeMapping ? 'No active layout to export' : 'Export Current Layout'}
+                  onClick={() => setAutoLayoutDropdownOpen(!autoLayoutDropdownOpen)}
+                  className="px-3 py-1.5 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded border border-purple-600 transition-colors"
+                  disabled={!instrumentConfig}
+                  title={!instrumentConfig ? 'No instrument config available' : 'Auto-Layout Options'}
                 >
-                  Export Layout
+                  Auto-Layout ▼
                 </button>
-                <button
-                  onClick={handleImportLayoutClick}
-                  className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
-                  title="Import Layout"
-                >
-                  Import Layout
-                </button>
-                <input
-                  ref={importLayoutInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleImportLayout}
-                  className="hidden"
-                />
+                {autoLayoutDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded-md shadow-xl z-50 min-w-[200px]">
+                    <button
+                      onClick={() => {
+                        handleMapToQuadrants();
+                        setAutoLayoutDropdownOpen(false);
+                      }}
+                      disabled={!instrumentConfig}
+                      className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Organize by 4x4 Banks
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Placeholder for future "Suggest Ergonomic Layout" feature
+                        alert('Ergonomic Layout suggestion coming soon!');
+                        setAutoLayoutDropdownOpen(false);
+                      }}
+                      disabled
+                      className="w-full text-left px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
+                    >
+                      Suggest Ergonomic Layout (Coming Soon)
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              <div className="h-6 w-px bg-slate-700" />
+              
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1 border border-slate-700 rounded p-1">
+                  <button
+                    onClick={handleSaveProject}
+                    className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                    title="Save Project (Ctrl/Cmd+S)"
+                  >
+                    Save Project
+                  </button>
+                  <button
+                    onClick={handleLoadProjectClick}
+                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
+                    title="Load Project"
+                  >
+                    Load Project
+                  </button>
+                  <input
+                    ref={loadProjectInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleLoadProject}
+                    className="hidden"
+                  />
+                </div>
+                <div className="flex gap-1 border border-slate-700 rounded p-1">
+                  <button
+                    onClick={handleExportLayout}
+                    disabled={!activeMapping}
+                    className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded transition-colors"
+                    title={!activeMapping ? 'No active layout to export' : 'Export Current Layout'}
+                  >
+                    Export Layout
+                  </button>
+                  <button
+                    onClick={handleImportLayoutClick}
+                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
+                    title="Import Layout"
+                  >
+                    Import Layout
+                  </button>
+                  <input
+                    ref={importLayoutInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportLayout}
+                    className="hidden"
+                  />
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Main Content Area */}
+        {/* Main Content Area - Strict 3-Column Layout */}
         <div className="flex-1 flex flex-row overflow-hidden">
-          {/* Left Panel - Library */}
-          <div className="w-64 flex-none border-r border-gray-700 bg-slate-900 overflow-y-auto">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-200">Library</h2>
-                <div className="flex gap-2">
+          {/* Left Panel (w-80) - Tabbed: Library & Sections */}
+          <div className="w-80 flex-none border-r border-gray-700 bg-slate-900 flex flex-col overflow-hidden">
+            {/* Layout Actions - Above Tabs */}
+            <div className="flex-none border-b border-slate-700 p-3 bg-slate-800/50">
+              <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Layout Actions</div>
+              <div className="flex flex-col gap-2">
                 <button
-                  onClick={handleNewSound}
-                  className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded border border-green-500 transition-colors"
-                  title="Add New Sound"
+                  onClick={onDuplicateMapping}
+                  disabled={!activeMapping}
+                  className="w-full px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded border border-slate-600 disabled:border-slate-700 transition-colors"
+                  title="Duplicate current layout"
                 >
-                  + New
+                  Duplicate
                 </button>
                 <button
-                  onClick={handleScanMidiClick}
-                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded border border-blue-500 transition-colors"
-                  disabled={!instrumentConfig}
-                  title={!instrumentConfig ? 'No instrument config available' : 'Import MIDI file'}
+                  onClick={handleClearGrid}
+                  disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
+                  className="w-full px-3 py-1.5 text-xs bg-red-900/30 hover:bg-red-900/50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-red-300 disabled:text-slate-500 rounded border border-red-900/50 disabled:border-slate-700 transition-colors"
+                  title={!activeMapping || Object.keys(activeMapping.cells).length === 0 ? 'No cells to clear' : 'Remove all sounds from the grid'}
                 >
-                  Import MIDI
+                  Clear Grid
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".mid,.midi"
-                  onChange={handleMidiFileSelect}
-                  className="hidden"
-                />
               </div>
             </div>
+            
+            {/* Tabs */}
+            <div className="flex-none border-b border-slate-700">
+              <div className="flex">
+                <button
+                  onClick={() => setLeftPanelTab('library')}
+                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+                    leftPanelTab === 'library'
+                      ? 'bg-slate-800 text-slate-200 border-b-2 border-blue-500'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  Library
+                </button>
+                <button
+                  onClick={() => setLeftPanelTab('sections')}
+                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+                    leftPanelTab === 'sections'
+                      ? 'bg-slate-800 text-slate-200 border-b-2 border-blue-500'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  Sections
+                </button>
+              </div>
+            </div>
+            
+            {/* Tab Content */}
+            <div className="flex-1 overflow-y-auto">
+              {leftPanelTab === 'library' ? (
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-slate-200">Library</h2>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleNewSound}
+                        className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded border border-green-500 transition-colors"
+                        title="Add New Sound"
+                      >
+                        + New
+                      </button>
+                      <button
+                        onClick={handleScanMidiClick}
+                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded border border-blue-500 transition-colors"
+                        disabled={!instrumentConfig}
+                        title={!instrumentConfig ? 'No instrument config available' : 'Import MIDI file'}
+                      >
+                        Import MIDI
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".mid,.midi"
+                        onChange={handleMidiFileSelect}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
             
             <div className="space-y-4">
               {/* Staging Area Section */}
@@ -1190,15 +1560,28 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 </div>
               )}
             </div>
+                </div>
+              ) : (
+                <div className="p-4">
+                  <h2 className="text-lg font-semibold text-slate-200 mb-4">Section Maps</h2>
+                  <SectionMapList
+                    sectionMaps={projectState.sectionMaps}
+                    onUpdateSection={onUpdateSection || (() => {})}
+                    onDeleteSection={onDeleteSection}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Center Panel - Grid */}
-        <div className="flex-1 flex items-center justify-center overflow-auto p-8 bg-slate-950">
-          <div
-            className="grid grid-cols-8 gap-2 bg-slate-900 p-4 rounded-xl shadow-2xl border border-slate-800"
-            style={{ width: 'fit-content' }}
-          >
+          {/* Center Panel (flex-1) - GridEditor (top) & Timeline (bottom) */}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            {/* Top: GridEditor (flex-1, centered) */}
+            <div className="flex-1 flex items-center justify-center overflow-auto p-8 bg-slate-950 min-h-0">
+              <div
+                className="grid grid-cols-8 gap-2 bg-slate-900 p-4 rounded-xl shadow-2xl border border-slate-800"
+                style={{ width: 'fit-content' }}
+              >
             {rows.map((row) => (
               <React.Fragment key={`row-${row}`}>
                 {cols.map((col) => {
@@ -1210,6 +1593,39 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   const cellKeyStr = cellKey(row, col);
                   const reachabilityLevel = reachabilityMap?.[cellKeyStr] || null;
 
+                  // Get heatmap data from engineResult if heatmap overlay is enabled
+                  let heatmapDifficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable' | null = null;
+                  let heatmapFinger: FingerID | null = null;
+                  let heatmapHand: 'LH' | 'RH' | null = null;
+                  
+                  if (showHeatmapOverlay && engineResult && activeLayout && activeLayout.performance.events.length > 0 && assignedSound) {
+                    // Find the debug event for this cell's note
+                    const noteNumber = assignedSound.originalMidiNote;
+                    if (noteNumber !== null) {
+                      // Find the worst-case event for this note
+                      const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
+                      if (noteEvents.length > 0) {
+                        const worstEvent = noteEvents.reduce((worst, current) => {
+                          const worstRank = worst.difficulty === 'Unplayable' ? 3 : 
+                                           worst.difficulty === 'Hard' ? 2 :
+                                           worst.difficulty === 'Medium' ? 1 : 0;
+                          const currentRank = current.difficulty === 'Unplayable' ? 3 :
+                                             current.difficulty === 'Hard' ? 2 :
+                                             current.difficulty === 'Medium' ? 1 : 0;
+                          return currentRank > worstRank ? current : worst;
+                        }, noteEvents[0]);
+                        heatmapDifficulty = worstEvent.difficulty;
+                        heatmapFinger = worstEvent.finger;
+                        heatmapHand = worstEvent.assignedHand === 'Unplayable' ? null : worstEvent.assignedHand as 'LH' | 'RH';
+                      }
+                    }
+                  }
+
+                  const isHighlighted = highlightedCell?.row === row && highlightedCell?.col === col;
+                  
+                  // Get finger constraint for this cell
+                  const fingerConstraint = activeMapping?.fingerConstraints[cellKeyStr] || null;
+
                   return (
                     <DroppableCell
                       key={key}
@@ -1218,8 +1634,13 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                       assignedSound={assignedSound}
                       isOver={isOver}
                       isSelected={selectedCellKey === key}
+                      isHighlighted={isHighlighted}
                       templateSlot={templateSlot}
                       reachabilityLevel={reachabilityLevel}
+                      heatmapDifficulty={heatmapDifficulty}
+                      heatmapFinger={heatmapFinger}
+                      heatmapHand={heatmapHand}
+                      fingerConstraint={fingerConstraint}
                       onClick={() => handleCellClick(row, col)}
                       onDoubleClick={() => handleCellDoubleClick(row, col)}
                       onContextMenu={(e) => handleCellContextMenu(e, row, col)}
@@ -1228,15 +1649,71 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 })}
               </React.Fragment>
             ))}
+              </div>
+            </div>
+            
+            {/* Bottom: Performance Timeline (h-64, fixed height, collapsible) */}
+            <div 
+              ref={timelineContainerRef}
+              className={`flex-none border-t border-gray-700 bg-slate-900 transition-all duration-200 ${
+                timelineCollapsed || (timelineAutoHidden && !timelineForceVisible) ? 'h-12' : 'h-64'
+              }`}
+            >
+              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
+                <h3 className="text-sm font-semibold text-slate-300">Performance Timeline</h3>
+                <div className="flex items-center gap-2">
+                  {timelineAutoHidden && (
+                    <button
+                      onClick={() => setTimelineForceVisible(!timelineForceVisible)}
+                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded bg-blue-900/20 hover:bg-blue-900/30"
+                      title={timelineForceVisible ? 'Auto-hide Timeline' : 'Show Timeline'}
+                    >
+                      {timelineForceVisible ? 'Auto-hide' : 'Show Timeline'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setTimelineCollapsed(!timelineCollapsed)}
+                    className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  >
+                    {timelineCollapsed ? '▼ Expand' : '▲ Collapse'}
+                  </button>
+                </div>
+              </div>
+              {!timelineCollapsed && (!timelineAutoHidden || timelineForceVisible) && activeLayout && (
+                <div className="h-[calc(100%-3rem)]">
+                  <TimelineArea
+                    steps={(() => {
+                      // Calculate steps from performance: find the latest event time and convert to 16th notes
+                      // Default to 64 steps (4 bars) if empty or short
+                      if (activeLayout.performance.events.length === 0) {
+                        return 64; // Default to 4 measures
+                      }
+                      const tempo = activeLayout.performance.tempo || 120;
+                      const stepDuration = (60 / tempo) / 4; // 16th note duration in seconds
+                      const latestEvent = activeLayout.performance.events.reduce((latest, event) => 
+                        event.startTime > latest.startTime ? event : latest
+                      );
+                      const eventEndTime = latestEvent.startTime + (latestEvent.duration || stepDuration);
+                      const maxStep = Math.ceil(eventEndTime / stepDuration);
+                      return Math.max(64, Math.ceil(maxStep / 16) * 16); // Round up to nearest measure (16 steps), minimum 64
+                    })()}
+                    currentStep={currentStep}
+                    onStepSelect={setCurrentStep}
+                    sectionMaps={projectState.sectionMaps}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Right Panel - Metadata */}
-        <div className="w-80 flex-none border-l border-gray-700 bg-slate-900 overflow-y-auto">
-          <div className="p-4">
-            <h2 className="text-lg font-semibold text-slate-200 mb-4">
-              Layout Metadata
-            </h2>
+          {/* Right Panel (w-80) - Split: Metadata (Top 50%) and Ergonomic Score (Bottom 50%) */}
+          <div className="w-80 flex-none border-l border-gray-700 bg-slate-900 flex flex-col overflow-hidden">
+            {/* Top Half (50%) - Layout Metadata */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <div className="p-4">
+              <h2 className="text-lg font-semibold text-slate-200 mb-4">
+                Layout Metadata
+              </h2>
 
             <div className="space-y-4">
               {/* Template Dropdown */}
@@ -1383,47 +1860,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 </div>
               )}
 
-              {/* Auto-Layout Section */}
-              <div className="mt-4 pt-4 border-t border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-3">
-                  Auto-Layout
-                </h3>
-                <button
-                  onClick={handleMapToQuadrants}
-                  disabled={!instrumentConfig}
-                  className="w-full px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded border border-purple-600 disabled:border-slate-600 transition-colors font-medium"
-                  title={!instrumentConfig ? 'No instrument config available' : 'Rearrange sounds into 4x4 quadrants based on MIDI note banks'}
-                >
-                  Auto-Layout: 4x4 Quadrants
-                </button>
-                <p className="mt-2 text-xs text-slate-400">
-                  Groups sounds into banks of 16 and maps each bank to a 4x4 quadrant. This will change grid positions and exported MIDI notes.
-                </p>
-              </div>
-
-              {/* Actions Section */}
-              <div className="mt-4 pt-4 border-t border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-3">
-                  Actions
-                </h3>
-                <div className="space-y-2">
-                  <button
-                    onClick={onDuplicateMapping}
-                    className="w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded border border-slate-600 transition-colors font-medium"
-                  >
-                    Duplicate
-                  </button>
-                  <button
-                    onClick={handleClearGrid}
-                    disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
-                    className="w-full px-4 py-2 bg-red-900/30 hover:bg-red-900/50 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-red-300 disabled:text-slate-500 rounded border border-red-900/50 disabled:border-slate-600 transition-colors font-medium"
-                    title={!activeMapping || Object.keys(activeMapping.cells).length === 0 ? 'No cells to clear' : 'Remove all sounds from the grid'}
-                  >
-                    Clear Grid
-                  </button>
-                </div>
-              </div>
-
               {/* Reachability Info Badge */}
               {reachabilityConfig && (
                 <div className="mt-4 pt-4 border-t border-slate-700">
@@ -1474,6 +1910,20 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </div>
                 </div>
               )}
+              </div>
+            </div>
+
+            {/* Bottom Half (50%) - Ergonomic Score */}
+            <div className="flex-1 border-t border-slate-700 overflow-y-auto min-h-0">
+              <EngineResultsPanel
+                result={engineResult}
+                activeMapping={activeMapping}
+                onHighlightCell={(row, col) => {
+                  setHighlightedCell({ row, col });
+                  // Clear highlight after 3 seconds
+                  setTimeout(() => setHighlightedCell(null), 3000);
+                }}
+              />
             </div>
           </div>
         </div>
@@ -1538,6 +1988,106 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               </button>
             </div>
 
+            {/* Finger Assignment Section */}
+            {activeMapping && (
+              <>
+                <div className="border-t border-slate-700 my-1" />
+                <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
+                  Assign Finger Lock
+                </div>
+                
+                {/* Left Hand Fingers */}
+                <div className="px-2 py-1">
+                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
+                  {[1, 2, 3, 4, 5].map((finger) => {
+                    const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
+                    const constraintValue = `L${finger}`;
+                    const isActive = currentConstraint === constraintValue;
+                    const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
+                    return (
+                      <button
+                        key={`finger-L${finger}`}
+                        onClick={() => {
+                          if (activeMapping) {
+                            const newConstraints = { ...activeMapping.fingerConstraints };
+                            if (isActive) {
+                              delete newConstraints[contextMenu.targetCell];
+                            } else {
+                              newConstraints[contextMenu.targetCell] = constraintValue;
+                            }
+                            onUpdateMapping({ fingerConstraints: newConstraints });
+                          }
+                          setContextMenu(null);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                        }`}
+                      >
+                        {isActive ? '✓ ' : ''}L{finger} ({fingerName})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right Hand Fingers */}
+                <div className="px-2 py-1">
+                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Right Hand</div>
+                  {[1, 2, 3, 4, 5].map((finger) => {
+                    const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
+                    const constraintValue = `R${finger}`;
+                    const isActive = currentConstraint === constraintValue;
+                    const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
+                    return (
+                      <button
+                        key={`finger-R${finger}`}
+                        onClick={() => {
+                          if (activeMapping) {
+                            const newConstraints = { ...activeMapping.fingerConstraints };
+                            if (isActive) {
+                              delete newConstraints[contextMenu.targetCell];
+                            } else {
+                              newConstraints[contextMenu.targetCell] = constraintValue;
+                            }
+                            onUpdateMapping({ fingerConstraints: newConstraints });
+                          }
+                          setContextMenu(null);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                        }`}
+                      >
+                        {isActive ? '✓ ' : ''}R{finger} ({fingerName})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Clear Finger Lock */}
+                {activeMapping.fingerConstraints[contextMenu.targetCell] && (
+                  <>
+                    <div className="border-t border-slate-700 my-1" />
+                    <button
+                      onClick={() => {
+                        if (activeMapping) {
+                          const newConstraints = { ...activeMapping.fingerConstraints };
+                          delete newConstraints[contextMenu.targetCell];
+                          onUpdateMapping({ fingerConstraints: newConstraints });
+                        }
+                        setContextMenu(null);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-slate-700 rounded"
+                    >
+                      Clear Finger Lock
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+
             {activeMapping?.cells[contextMenu.targetCell] && (
               <>
                 <div className="border-t border-slate-700 my-1" />
@@ -1553,21 +2103,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 </button>
               </>
             )}
-
-            <div className="border-t border-slate-700 my-1" />
-            <button
-              onClick={() => {
-                if (activeMapping) {
-                  const newConstraints = { ...activeMapping.fingerConstraints };
-                  delete newConstraints[contextMenu.targetCell];
-                  onUpdateMapping({ fingerConstraints: newConstraints });
-                }
-                setContextMenu(null);
-              }}
-              className="w-full text-left px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-700 rounded"
-            >
-              Clear Constraints
-            </button>
           </div>
         </div>
       )}
