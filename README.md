@@ -1,7 +1,7 @@
 # Performance-ergonomics-optimization-engine-for-Ableton-Push
 Analyzes MIDI, evaluates playability, and generates musician-adaptive pad layouts with a visual remapping workbench
 
-<img width="1507" height="820" alt="image" src="https://github.com/user-attachments/assets/b32a8524-92a0-419a-badb-3f4293613305" />
+<img width="2057" height="1293" alt="image" src="https://github.com/user-attachments/assets/a55ebecc-ed02-40dd-8dc9-65f856371c6e" />
 
 The Performability Engine is an ergonomics-driven optimization system for performing electronic music on the Ableton Push.
 
