@@ -18,7 +18,7 @@ import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
 import { parseMidiFile } from '../utils/midiImport';
-import { InstrumentConfig } from '../types/performance';
+import { InstrumentConfig, SectionMap } from '../data/models';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
@@ -61,9 +61,17 @@ interface LayoutDesignerProps {
   /** Active layout for performance analysis */
   activeLayout: LayoutSnapshot | null;
   /** Callback to update section map */
-  onUpdateSection?: (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => void;
+  onUpdateSection?: (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => void;
   /** Callback to delete section map */
   onDeleteSection?: (id: string) => void;
+  /** W1: Callback to create new instrument config */
+  onCreateInstrumentConfig?: (config: Omit<InstrumentConfig, 'id'>) => void;
+  /** W1: Callback to create new section map */
+  onCreateSectionMap?: (sectionMap: Omit<SectionMap, 'id'>) => void;
+  /** W1: Callback to update instrument config */
+  onUpdateInstrumentConfig?: (id: string, updates: Partial<InstrumentConfig>) => void;
+  /** W1: Callback to delete instrument config */
+  onDeleteInstrumentConfig?: (id: string) => void;
 }
 
 // Draggable Sound Item Component
@@ -443,6 +451,10 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   activeLayout,
   onUpdateSection,
   onDeleteSection,
+  onCreateInstrumentConfig,
+  onCreateSectionMap,
+  onUpdateInstrumentConfig,
+  onDeleteInstrumentConfig,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -761,7 +773,14 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     }
 
     try {
-      const performance = await parseMidiFile(file, instrumentConfig);
+      // W3: Get import result with unmapped note count
+      const importResult = await parseMidiFile(file, instrumentConfig);
+      const performance = importResult.performance;
+      
+      // W3: Show warning if there are unmapped notes
+      if (importResult.unmappedNoteCount > 0) {
+        alert(`Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the current 8x8 grid window (bottomLeftNote: ${instrumentConfig.bottomLeftNote}). These notes will not be mapped to the grid.`);
+      }
       
       // Extract unique note numbers from the performance
       const uniqueNotes = new Set<number>();
@@ -1258,7 +1277,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                     value={instrumentConfig?.bottomLeftNote ?? 0}
                     onChange={(e) => {
                       if (onUpdateSection && projectState.sectionMaps[0]) {
-                        onUpdateSection(projectState.sectionMaps[0].id, 'bottomLeftNote', parseInt(e.target.value) || 0);
+                        onUpdateSection(projectState.sectionMaps[0].id, { field: 'bottomLeftNote', value: parseInt(e.target.value) || 0 });
                       }
                     }}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
@@ -1566,8 +1585,13 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   <h2 className="text-lg font-semibold text-slate-200 mb-4">Section Maps</h2>
                   <SectionMapList
                     sectionMaps={projectState.sectionMaps}
+                    instrumentConfigs={projectState.instrumentConfigs}
                     onUpdateSection={onUpdateSection || (() => {})}
                     onDeleteSection={onDeleteSection}
+                    onCreateInstrumentConfig={onCreateInstrumentConfig}
+                    onCreateSectionMap={onCreateSectionMap}
+                    onUpdateInstrumentConfig={onUpdateInstrumentConfig}
+                    onDeleteInstrumentConfig={onDeleteInstrumentConfig}
                   />
                 </div>
               )}
@@ -1700,6 +1724,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                     currentStep={currentStep}
                     onStepSelect={setCurrentStep}
                     sectionMaps={projectState.sectionMaps}
+                    onUpdateSectionMeasure={(id, field, value) => {
+                      if (onUpdateSection) {
+                        onUpdateSection(id, { field, value });
+                      }
+                    }}
                   />
                 </div>
               )}

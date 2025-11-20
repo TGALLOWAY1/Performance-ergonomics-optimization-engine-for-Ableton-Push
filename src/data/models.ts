@@ -40,8 +40,8 @@ export interface SectionMap {
   name: string;
   /** Start measure (1-based index) */
   startMeasure: number;
-  /** End measure (1-based index) */
-  endMeasure: number;
+  /** Length of the section in measures. End measure is calculated as: startMeasure + lengthInMeasures - 1 */
+  lengthInMeasures: number;
   /** The instrument configuration active during this section */
   instrumentConfig: InstrumentConfig;
 }

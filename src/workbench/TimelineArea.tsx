@@ -1,12 +1,14 @@
 import React from 'react';
 import { Timeline } from './Timeline';
-import { SectionMap } from '../types/performance';
+import { SectionMap } from '../data/models';
 
 interface TimelineAreaProps {
   steps: number;
   currentStep: number;
   onStepSelect: (step: number) => void;
   sectionMaps: SectionMap[];
+  /** W2: Callback to update section map boundaries */
+  onUpdateSectionMeasure?: (id: string, field: 'startMeasure' | 'lengthInMeasures', value: number) => void;
 }
 
 export const TimelineArea: React.FC<TimelineAreaProps> = ({
@@ -14,6 +16,7 @@ export const TimelineArea: React.FC<TimelineAreaProps> = ({
   currentStep,
   onStepSelect,
   sectionMaps,
+  onUpdateSectionMeasure,
 }) => {
   return (
     <div id="timeline-area" className="h-full bg-slate-900 p-4 border-t border-border flex flex-col">
@@ -23,6 +26,7 @@ export const TimelineArea: React.FC<TimelineAreaProps> = ({
           currentStep={currentStep}
           onStepSelect={onStepSelect}
           sectionMaps={sectionMaps}
+          onUpdateSectionMeasure={onUpdateSectionMeasure}
         />
       </div>
     </div>

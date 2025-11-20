@@ -4,10 +4,10 @@ import { GridArea } from './GridArea';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
-import { InstrumentConfig } from '../types/performance';
+import { InstrumentConfig } from '../data/models';
 import { GridPattern } from '../types/gridPattern';
 import { createEmptyPattern, toggleStepPad } from '../utils/gridPatternUtils';
-import { gridPatternToPerformance } from '../utils/gridPatternToPerformance';
+import { gridPatternToPerformance, performanceToGridPattern } from '../utils/gridPatternToPerformance';
 import { parseMidiFile } from '../utils/midiImport';
 import { GridMapService } from '../engine/gridMapService';
 import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
@@ -71,6 +71,33 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     [gridPatterns, projectState.activeLayoutId]
   );
 
+  // W5: Bidirectional Sync - Performance → GridPattern
+  // When Performance changes, update GridPattern using the active InstrumentConfig
+  useEffect(() => {
+    if (!activeLayout || !activeSection || !projectState.activeLayoutId) return;
+    
+    // Convert Performance to GridPattern using the active InstrumentConfig
+    const syncedPattern = performanceToGridPattern(
+      activeLayout.performance,
+      activeSection.instrumentConfig,
+      activeLayout.performance.tempo || projectState.projectTempo,
+      64
+    );
+    
+    // Update GridPattern state (this will trigger re-render but won't cause loop since we're not reading gridPatterns in deps)
+    setGridPatterns(prev => {
+      const currentPattern = prev[projectState.activeLayoutId!];
+      // Only update if pattern actually changed (avoid unnecessary updates)
+      if (currentPattern && JSON.stringify(currentPattern.steps) === JSON.stringify(syncedPattern.steps)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [projectState.activeLayoutId!]: syncedPattern
+      };
+    });
+  }, [activeLayout?.performance.events, activeLayout?.performance.tempo, activeSection?.instrumentConfig, projectState.activeLayoutId, projectState.projectTempo]);
+
   // Engine Integration Effect
   useEffect(() => {
     if (!activeLayout || !activeMapping) return;
@@ -132,25 +159,41 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     onUpdateProjectState({ ...projectState, activeLayoutId: id });
   };
 
-  const handleUpdateSection = (id: string, field: 'startMeasure' | 'endMeasure' | 'bottomLeftNote', value: number) => {
+  const handleUpdateSection = (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => {
     onUpdateProjectState({
       ...projectState,
       sectionMaps: projectState.sectionMaps.map(section => {
         if (section.id !== id) return section;
         
-        if (field === 'bottomLeftNote') {
+        // Handle legacy format: { field, value }
+        if ('field' in updates && 'value' in updates) {
+          const { field, value } = updates;
+          if (field === 'bottomLeftNote') {
+            return {
+              ...section,
+              instrumentConfig: {
+                ...section.instrumentConfig,
+                bottomLeftNote: value
+              }
+            };
+          }
           return {
             ...section,
-            instrumentConfig: {
-              ...section.instrumentConfig,
-              bottomLeftNote: value
-            }
+            [field]: value
+          };
+        }
+        
+        // Handle new format: Partial<SectionMap>
+        if ('instrumentConfig' in updates) {
+          return {
+            ...section,
+            instrumentConfig: updates.instrumentConfig!
           };
         }
         
         return {
           ...section,
-          [field]: value
+          ...updates
         };
       })
     });
@@ -215,7 +258,14 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     if (!file || !activeSection) return;
 
     try {
-      const performance = await parseMidiFile(file, activeSection.instrumentConfig);
+      // W3: Get import result with unmapped note count
+      const importResult = await parseMidiFile(file, activeSection.instrumentConfig);
+      const performance = importResult.performance;
+      
+      // W3: Show warning if there are unmapped notes
+      if (importResult.unmappedNoteCount > 0) {
+        alert(`Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the current 8x8 grid window (bottomLeftNote: ${activeSection.instrumentConfig.bottomLeftNote}). These notes will not be mapped to the grid.`);
+      }
       
       // Create a new layout for the imported MIDI
       const newId = `layout-${Date.now()}`;
@@ -226,24 +276,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         performance: performance
       };
 
-      // Convert Performance back to GridPattern for the editor
-      const newPattern = createEmptyPattern(64); // Default length
-      const stepDuration = (60 / performance.tempo!) / 4; // 16th note duration
-
-      performance.events.forEach(event => {
-        const stepIndex = Math.round(event.startTime / stepDuration);
-        if (stepIndex >= 0 && stepIndex < newPattern.length) {
-          // Use activeMapping if available, otherwise fall back to InstrumentConfig
-          const pos = activeMapping
-            ? getPositionForMidi(event.noteNumber, activeMapping)
-            : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
-          if (pos) {
-            if (!newPattern.steps[stepIndex][pos.row][pos.col]) {
-               newPattern.steps[stepIndex][pos.row][pos.col] = true;
-            }
-          }
-        }
-      });
+      // W5: Convert Performance to GridPattern using the active InstrumentConfig
+      const newPattern = performanceToGridPattern(
+        performance,
+        activeSection.instrumentConfig,
+        performance.tempo || projectState.projectTempo,
+        64
+      );
 
       setGridPatterns(prev => ({
         ...prev,
@@ -277,7 +316,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       [projectState.activeLayoutId!]: newPattern
     }));
 
-    // Convert to Performance and Update Project State
+    // W5: Convert GridPattern to Performance using the active InstrumentConfig
     const newPerformance = gridPatternToPerformance(
       newPattern,
       activeSection.instrumentConfig,
