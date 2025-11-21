@@ -9,6 +9,8 @@ import { DEFAULT_TEST_MIDI_URL } from '../data/testData';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
 import { SectionAwareSolver, EngineResult } from '../engine/core';
 import { getActivePerformance } from '../utils/performanceSelectors';
+import { EngineResultsPanel } from './EngineResultsPanel';
+import { TimelineArea } from './TimelineArea';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -108,6 +110,42 @@ export const Workbench: React.FC = () => {
 
   // Engine state
   const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  
+  // Timeline state
+  const [currentStep, setCurrentStep] = useState(0);
+  
+  // Calculate steps from filtered performance for Timeline
+  const filteredPerformance = useMemo(() => {
+    const result = getActivePerformance(projectState);
+    // DEBUG: Log filtered performance
+    if (result) {
+      console.log('[Workbench] Filtered performance computed:', {
+        activeLayoutId: projectState.activeLayoutId,
+        eventsCount: result.events.length,
+        performanceName: result.name,
+      });
+    } else {
+      console.warn('[Workbench] Filtered performance is null:', {
+        activeLayoutId: projectState.activeLayoutId,
+        layoutsCount: projectState.layouts.length,
+        availableLayoutIds: projectState.layouts.map(l => l.id),
+      });
+    }
+    return result;
+  }, [projectState]);
+  const timelineSteps = useMemo(() => {
+    if (!filteredPerformance || filteredPerformance.events.length === 0) {
+      return 64; // Default to 4 bars
+    }
+    
+    const tempo = filteredPerformance.tempo || 120;
+    const stepDuration = (60 / tempo) / 4; // 16th note duration in seconds
+    const latestEvent = filteredPerformance.events.reduce((latest, event) => 
+      event.startTime > latest.startTime ? event : latest
+    );
+    const totalSteps = Math.ceil(latestEvent.startTime / stepDuration) + 1;
+    return Math.max(totalSteps, 64); // Minimum 4 bars
+  }, [filteredPerformance]);
 
   /**
    * Unified project load handler that processes MIDI files and updates project state atomically.
@@ -120,105 +158,107 @@ export const Workbench: React.FC = () => {
     source: File | string,
     existingConfig?: InstrumentConfig
   ): Promise<void> => {
+    console.log('[Workbench] handleProjectLoad - CALLED', {
+      sourceType: typeof source,
+      sourceName: typeof source === 'string' ? source : source.name,
+      hasExistingConfig: !!existingConfig,
+    });
+    
     try {
       // Use the unified import function
+      console.log('[Workbench] handleProjectLoad - Starting MIDI parsing...');
       const projectData = typeof source === 'string'
         ? await fetchMidiProject(source, existingConfig)
         : await parseMidiFileToProject(source, existingConfig);
+      
+      console.log('[Workbench] handleProjectLoad - MIDI parsing complete:', {
+        voicesCount: projectData.voices.length,
+        performanceEvents: projectData.performance.events.length,
+        gridMappingCells: Object.keys(projectData.gridMapping.cells).length,
+      });
 
       // Atomic state update - no setTimeout, no side effects
       setProjectState(prevState => {
-        const layoutId = prevState.activeLayoutId || prevState.layouts[0]?.id || generateId('layout');
+        // HARD RESET: Always create a new layout for the imported MIDI
+        const layoutId = generateId('layout');
         
-        // Update or create layout
-        const updatedLayouts = prevState.layouts.map(layout => 
-          layout.id === layoutId 
-            ? { ...layout, performance: projectData.performance }
-            : layout
-        );
-
-        if (!updatedLayouts.find(l => l.id === layoutId)) {
-          updatedLayouts.push({
-            id: layoutId,
-            name: projectData.performance.name || 'Imported Layout',
-            createdAt: new Date().toISOString(),
-            performance: projectData.performance,
-          });
-        }
-
-        // Update or create instrument config
-        const updatedInstrumentConfigs = prevState.instrumentConfigs.map(config =>
-          config.id === projectData.instrumentConfig.id
-            ? projectData.instrumentConfig
-            : config
-        );
-
-        if (!updatedInstrumentConfigs.find(c => c.id === projectData.instrumentConfig.id)) {
-          updatedInstrumentConfigs.push(projectData.instrumentConfig);
-        }
-
-        // Update or create section map
-        const updatedSectionMaps = prevState.sectionMaps.map(section =>
-          section.id === projectData.sectionMap.id
-            ? projectData.sectionMap
-            : section
-        );
-
-        if (!updatedSectionMaps.find(s => s.id === projectData.sectionMap.id)) {
-          updatedSectionMaps.push(projectData.sectionMap);
-        }
-
-        // Update or create grid mapping
-        const updatedMappings = prevState.mappings.map(mapping =>
-          mapping.id === projectData.gridMapping.id
-            ? projectData.gridMapping
-            : mapping
-        );
-
-        if (!updatedMappings.find(m => m.id === projectData.gridMapping.id)) {
-          updatedMappings.push(projectData.gridMapping);
-        }
-
-        // Merge voices (avoid duplicates by originalMidiNote)
-        const existingVoices = new Map<number, Voice>();
-        prevState.parkedSounds.forEach(voice => {
-          if (voice.originalMidiNote !== null) {
-            existingVoices.set(voice.originalMidiNote, voice);
-          }
+        // DEBUG: Log layout creation
+        console.log('[Workbench] handleProjectLoad - Creating new layout:', {
+          layoutId,
+          performanceEvents: projectData.performance.events.length,
+          performanceName: projectData.performance.name,
+          prevActiveLayoutId: prevState.activeLayoutId,
+          prevLayoutsCount: prevState.layouts.length,
+        });
+        
+        // Create new layout (don't merge with existing)
+        const updatedLayouts = [{
+          id: layoutId,
+          name: projectData.performance.name || 'Imported Layout',
+          createdAt: new Date().toISOString(),
+          performance: projectData.performance,
+        }];
+        
+        // DEBUG: Verify performance has events
+        console.log('[Workbench] handleProjectLoad - New layout performance:', {
+          layoutId,
+          performanceEventsCount: updatedLayouts[0].performance.events.length,
+          performanceName: updatedLayouts[0].performance.name,
         });
 
-        const mergedVoices = [...prevState.parkedSounds];
-        projectData.voices.forEach(voice => {
-          if (voice.originalMidiNote !== null && !existingVoices.has(voice.originalMidiNote)) {
-            mergedVoices.push(voice);
-          }
-        });
+        // HARD RESET: Replace instrument configs, section maps, and mappings entirely
+        const updatedInstrumentConfigs = [projectData.instrumentConfig];
+        const updatedSectionMaps = [projectData.sectionMap];
+        const updatedMappings = [projectData.gridMapping];
 
-        // Merge ignoredNoteNumbers: Keep only notes that still exist
-        const newNoteNumbers = new Set(projectData.performance.events.map(e => e.noteNumber));
-        const previousIgnored = prevState.ignoredNoteNumbers || [];
-        const mergedIgnored = previousIgnored.filter(noteNum => newNoteNumbers.has(noteNum));
+        // HARD RESET: Replace voices entirely, don't merge
+        // Reset ignoredNoteNumbers to empty (all new voices visible by default)
+        const newActiveMappingId = projectData.gridMapping.id;
 
-        // Determine new active mapping ID
-        const newActiveMappingId = activeMappingId || projectData.gridMapping.id;
-
-        return {
+        // DEBUG: Log voices being set
+        console.log('[Workbench] handleProjectLoad - Setting voices:', projectData.voices.length);
+        projectData.voices.forEach(v => console.log(`  - ${v.name} (MIDI ${v.originalMidiNote})`));
+        
+        // DEBUG: Log state being set
+        const newState = {
           ...prevState,
           layouts: updatedLayouts,
-          activeLayoutId: layoutId,
+          activeLayoutId: layoutId, // Set to new layout
           instrumentConfigs: updatedInstrumentConfigs,
           sectionMaps: updatedSectionMaps,
           mappings: updatedMappings,
-          parkedSounds: mergedVoices,
+          parkedSounds: projectData.voices, // REPLACE, don't merge - ALL voices go here
           projectTempo: projectData.performance.tempo || prevState.projectTempo,
-          ignoredNoteNumbers: mergedIgnored,
+          ignoredNoteNumbers: [], // Reset to empty on new import
         };
+        
+        console.log('[Workbench] handleProjectLoad - Setting state:', {
+          layoutId,
+          newActiveLayoutId: newState.activeLayoutId,
+          layoutsCount: newState.layouts.length,
+          layoutPerformanceEvents: newState.layouts[0]?.performance?.events?.length || 0,
+          parkedSoundsCount: newState.parkedSounds.length,
+          mappingsCount: newState.mappings.length,
+        });
+        
+        // DEBUG: Verify the new layout is in the state
+        const newLayoutInState = newState.layouts.find(l => l.id === layoutId);
+        console.log('[Workbench] handleProjectLoad - Verification:', {
+          newLayoutFound: !!newLayoutInState,
+          newLayoutEvents: newLayoutInState?.performance?.events?.length || 0,
+        });
+
+        return newState;
       });
 
-      // Update active mapping ID if needed
-      if (!activeMappingId) {
-        setActiveMappingId(projectData.gridMapping.id);
-      }
+      // DEBUG: Log after state update (but state might not be updated yet due to async nature)
+      console.log('[Workbench] handleProjectLoad - State update queued, waiting for next render...');
+
+      // Always set active mapping ID to the new mapping (hard reset)
+      setActiveMappingId(projectData.gridMapping.id);
+      
+      // DEBUG: Log mapping ID being set
+      console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
 
       // Verify engine works with the new data
       const solver = new SectionAwareSolver([projectData.sectionMap]);
@@ -246,31 +286,32 @@ export const Workbench: React.FC = () => {
     }
   }, [setProjectState, activeMappingId, setActiveMappingId]);
 
-  // Auto-load default test MIDI file if no performance events exist
-  useEffect(() => {
-    if (!activeLayout || !activeSection) return;
-    if (activeLayout.performance.events.length > 0) {
-      setDefaultMidiLoaded(false);
-      return;
-    }
+  // DISABLED: Auto-load default test MIDI file
+  // User wants to start with blank screen and manually drag/drop files
+  // useEffect(() => {
+  //   if (!activeLayout || !activeSection) return;
+  //   if (activeLayout.performance.events.length > 0) {
+  //     setDefaultMidiLoaded(false);
+  //     return;
+  //   }
 
-    let isMounted = true;
-    handleProjectLoad(DEFAULT_TEST_MIDI_URL, activeSection.instrumentConfig)
-      .then(() => {
-        if (isMounted) {
-          setDefaultMidiLoaded(true);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setDefaultMidiLoaded(false);
-        }
-      });
+  //   let isMounted = true;
+  //   handleProjectLoad(DEFAULT_TEST_MIDI_URL, activeSection.instrumentConfig)
+  //     .then(() => {
+  //       if (isMounted) {
+  //         setDefaultMidiLoaded(true);
+  //       }
+  //     })
+  //     .catch(() => {
+  //       if (isMounted) {
+  //         setDefaultMidiLoaded(false);
+  //       }
+  //     });
 
-    return () => {
-      isMounted = false;
-    };
-  }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id, handleProjectLoad]);
+  //   return () => {
+  //     isMounted = false;
+  //   };
+  // }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id, handleProjectLoad]);
 
   // Reactive Solver Loop: Automatically run engine when layout changes
   // Watches: activeMapping, activeLayout.performance, activeSection.instrumentConfig, ignoredNoteNumbers
@@ -833,6 +874,49 @@ export const Workbench: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Dashboard Section - Engine Results & Timeline */}
+      {filteredPerformance && filteredPerformance.events.length > 0 && (
+        <div className="flex-none border-b border-slate-700 bg-slate-900" style={{ minHeight: '300px', maxHeight: '400px', height: '350px' }}>
+          <div className="h-full flex flex-row">
+            {/* Left: Engine Results Panel */}
+            <div className="w-80 flex-none border-r border-slate-700 overflow-hidden">
+              <EngineResultsPanel
+                result={engineResult}
+                activeMapping={activeMapping}
+                onHighlightCell={(row, col) => {
+                  // Highlight cell in grid (could be passed to LayoutDesigner if needed)
+                  console.log(`[Dashboard] Highlight cell: [${row}, ${col}]`);
+                }}
+              />
+            </div>
+            
+            {/* Right: Timeline */}
+            <div className="flex-1 overflow-hidden" style={{ minHeight: '300px', height: '100%' }}>
+              <TimelineArea
+                steps={timelineSteps}
+                currentStep={currentStep}
+                onStepSelect={setCurrentStep}
+                sectionMaps={projectState.sectionMaps}
+                viewAllSteps={viewAllSteps}
+                onUpdateSectionMeasure={(id, field, value) => {
+                  // Update section map measure
+                  if (field === 'startMeasure' || field === 'lengthInMeasures') {
+                    setProjectState(prevState => ({
+                      ...prevState,
+                      sectionMaps: prevState.sectionMaps.map(section =>
+                        section.id === id
+                          ? { ...section, [field]: value }
+                          : section
+                      ),
+                    }));
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Body (Middle) - Unified Workbench */}
       <div className="flex-1 overflow-hidden">

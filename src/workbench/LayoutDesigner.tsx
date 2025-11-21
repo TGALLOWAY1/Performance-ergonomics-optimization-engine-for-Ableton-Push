@@ -890,23 +890,52 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const handleMidiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
-      event.target.value = '';
+      console.warn('[LayoutDesigner] handleMidiFileSelect - No file selected');
+      if (event.target) {
+        event.target.value = '';
+      }
       return;
     }
 
+    console.log('[LayoutDesigner] handleMidiFileSelect - File selected:', {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      hasOnImport: !!onImport,
+    });
+
     if (onImport) {
-      onImport(file);
+      console.log('[LayoutDesigner] handleMidiFileSelect - Calling onImport callback');
+      try {
+        onImport(file);
+      } catch (error) {
+        console.error('[LayoutDesigner] handleMidiFileSelect - Error calling onImport:', error);
+      }
     } else {
-      console.warn('onImport callback not provided - cannot import MIDI file');
+      console.error('[LayoutDesigner] handleMidiFileSelect - onImport callback not provided - cannot import MIDI file');
     }
 
     // Reset input value so same file can be loaded again if needed
-    event.target.value = '';
+    if (event.target) {
+      event.target.value = '';
+    }
   };
 
   // Handle scan MIDI button click - show ImportWizard
   const handleScanMidiClick = () => {
-    setShowImportWizard(true);
+    console.log('[LayoutDesigner] handleScanMidiClick - Button clicked', {
+      fileInputRefExists: !!fileInputRef.current,
+      fileInputRefValue: fileInputRef.current?.value,
+    });
+    
+    if (fileInputRef.current) {
+      console.log('[LayoutDesigner] handleScanMidiClick - Triggering file input click');
+      fileInputRef.current.click();
+    } else {
+      console.error('[LayoutDesigner] handleScanMidiClick - fileInputRef.current is null!');
+      // Fallback: show ImportWizard if file input ref is not available
+      setShowImportWizard(true);
+    }
   };
 
   // Handle ImportWizard confirm - add assets to parkedSounds
@@ -1599,6 +1628,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                         accept=".mid,.midi"
                         onChange={handleMidiFileSelect}
                         className="hidden"
+                        id="midi-file-input"
+                        name="midi-file-input"
                       />
                     </div>
                   </div>
@@ -1921,95 +1952,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               </div>
             </div>
             
-            {/* Bottom: Performance Timeline (h-64, fixed height, collapsible) */}
-            <div 
-              ref={timelineContainerRef}
-              className={`flex-none border-t border-gray-700 bg-slate-900 transition-all duration-200 ${
-                timelineCollapsed || (timelineAutoHidden && !timelineForceVisible) ? 'h-12' : 'h-64'
-              }`}
-            >
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
-                <h3 className="text-sm font-semibold text-slate-300">Performance Timeline</h3>
-                <div className="flex items-center gap-2">
-                  {timelineAutoHidden && (
-                    <button
-                      onClick={() => setTimelineForceVisible(!timelineForceVisible)}
-                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded bg-blue-900/20 hover:bg-blue-900/30"
-                      title={timelineForceVisible ? 'Auto-hide Timeline' : 'Show Timeline'}
-                    >
-                      {timelineForceVisible ? 'Auto-hide' : 'Show Timeline'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setTimelineCollapsed(!timelineCollapsed)}
-                    className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
-                  >
-                    {timelineCollapsed ? '▼ Expand' : '▲ Collapse'}
-                  </button>
-                </div>
-              </div>
-              {!timelineCollapsed && (!timelineAutoHidden || timelineForceVisible) && filteredPerformance && (
-                <div className="h-[calc(100%-3rem)]">
-                  <TimelineArea
-                    steps={(() => {
-                      // CRITICAL: Use filtered performance (computed via getActivePerformance selector)
-                      // Do NOT use raw activeLayout.performance - it includes ignored notes
-                      
-                      if (!filteredPerformance) {
-                        console.log('[LayoutDesigner] Timeline - No filtered performance available, using default 64 steps');
-                        return 64;
-                      }
-                      
-                      const filteredEvents = filteredPerformance.events;
-                      
-                      // Log both raw and filtered for debugging
-                      const rawEventsCount = rawPerformance ? rawPerformance.events.length : 0;
-                      console.log('[LayoutDesigner] Timeline Steps Calculation - Raw Events:', rawEventsCount);
-                      console.log('[LayoutDesigner] Timeline Steps Calculation - Ignored Notes:', projectState.ignoredNoteNumbers || []);
-                      console.log('[LayoutDesigner] Timeline Steps Calculation - Filtered Events:', filteredEvents.length);
-                      
-                      // Calculate steps from filtered performance: find the latest event time and convert to 16th notes
-                      // Default to 64 steps (4 bars) if empty or short
-                      if (filteredEvents.length === 0) {
-                        console.log('[LayoutDesigner] Timeline Steps Calculation - Filtered Events: 0 (no visible events, using default 64 steps)');
-                        return 64; // Default to 4 measures
-                      }
-                      
-                      const tempo = filteredPerformance.tempo || 120;
-                      const stepDuration = (60 / tempo) / 4; // 16th note duration in seconds
-                      const latestEvent = filteredEvents.reduce((latest, event) => 
-                        event.startTime > latest.startTime ? event : latest
-                      );
-                      const eventEndTime = latestEvent.startTime + (latestEvent.duration || stepDuration);
-                      const maxStep = Math.ceil(eventEndTime / stepDuration);
-                      const calculatedSteps = Math.max(64, Math.ceil(maxStep / 16) * 16); // Round up to nearest measure (16 steps), minimum 64
-                      
-                      // DEBUG: Log calculated steps
-                      console.log('[LayoutDesigner] Timeline Steps Calculation - Calculated Steps:', calculatedSteps);
-                      console.log('[LayoutDesigner] Timeline Steps Calculation - Latest Event:', {
-                        noteNumber: latestEvent.noteNumber,
-                        startTime: latestEvent.startTime,
-                        duration: latestEvent.duration,
-                        eventEndTime,
-                        maxStep,
-                        tempo
-                      });
-                      
-                      return calculatedSteps;
-                    })()}
-                    currentStep={currentStep}
-                    onStepSelect={setCurrentStep}
-                    sectionMaps={projectState.sectionMaps}
-                    viewAllSteps={viewAllSteps}
-                    onUpdateSectionMeasure={(id, field, value) => {
-                      if (onUpdateSection) {
-                        onUpdateSection(id, { field, value });
-                      }
-                    }}
-                  />
-                </div>
-              )}
-            </div>
+            {/* Bottom: Performance Timeline - REMOVED: Now rendered in Workbench Dashboard section */}
+            {/* Timeline is now displayed in the Dashboard section at the top of Workbench to avoid duplication */}
           </div>
 
           {/* Right Panel (w-80) - Split: Metadata (Top 50%) and Ergonomic Score (Bottom 50%) */}
@@ -2219,17 +2163,13 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               </div>
             </div>
 
-            {/* Bottom Half (50%) - Ergonomic Score */}
-            <div className="flex-1 border-t border-slate-700 overflow-y-auto min-h-0">
-              <EngineResultsPanel
-                result={engineResult}
-                activeMapping={activeMapping}
-                onHighlightCell={(row, col) => {
-                  setHighlightedCell({ row, col });
-                  // Clear highlight after 3 seconds
-                  setTimeout(() => setHighlightedCell(null), 3000);
-                }}
-              />
+            {/* Bottom Half (50%) - Ergonomic Score - REMOVED: Now rendered in Workbench Dashboard section */}
+            {/* EngineResultsPanel is now displayed in the Dashboard section at the top of Workbench to avoid duplication */}
+            <div className="flex-1 border-t border-slate-700 overflow-y-auto min-h-0 flex items-center justify-center">
+              <div className="text-center text-slate-500 text-sm">
+                <p>Ergonomic Analysis</p>
+                <p className="text-xs mt-1">View results in the Dashboard above</p>
+              </div>
             </div>
           </div>
         </div>

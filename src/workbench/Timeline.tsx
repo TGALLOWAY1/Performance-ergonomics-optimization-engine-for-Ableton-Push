@@ -44,6 +44,13 @@ export const Timeline: React.FC<TimelineProps> = ({
   viewAllSteps = false,
   onUpdateSectionMeasure,
 }) => {
+  // DEBUG: Log props on every render to verify data flow
+  console.log('[Timeline] Rendering Timeline with events:', {
+    steps: inputSteps,
+    currentStep,
+    sectionMapsCount: sectionMaps.length,
+    viewAllSteps,
+  });
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stepsContainerRef = useRef<HTMLDivElement>(null);
   const overviewStripRef = useRef<HTMLDivElement>(null);
