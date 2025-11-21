@@ -2,7 +2,7 @@
  * Auto-layout utilities for organizing sounds on the grid.
  */
 
-import { SoundAsset } from '../types/layout';
+import { Voice } from '../types/layout';
 import { cellKey } from '../types/layout';
 
 /**
@@ -20,15 +20,15 @@ import { cellKey } from '../types/layout';
  * - Note 36 (C1) -> [4,0] (Bank 2, Top-Left)
  * - Note 51 (Eb1) -> [7,3] (Bank 3, Top-Left)
  * 
- * @param sounds - Array of SoundAssets with originalMidiNote set
+ * @param sounds - Array of Voices with originalMidiNote set
  * @param _bottomLeftNote - Unused parameter (kept for API compatibility)
- * @returns A mapping of cell keys ("row,col") to SoundAsset objects
+ * @returns A mapping of cell keys ("row,col") to Voice objects
  */
 export function mapToQuadrants(
-  sounds: SoundAsset[],
+  sounds: Voice[],
   _bottomLeftNote: number
-): Record<string, SoundAsset> {
-  const assignments: Record<string, SoundAsset> = {};
+): Record<string, Voice> {
+  const assignments: Record<string, Voice> = {};
   
   // Quadrant offsets (row, col) for each quadrant index
   const quadrantOffsets: Array<[number, number]> = [

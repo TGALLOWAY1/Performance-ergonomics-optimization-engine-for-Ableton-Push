@@ -1,26 +1,47 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { SectionMap } from '../data/models';
+import { SectionMap } from '../types/performance';
 
 interface TimelineProps {
   steps: number;
   currentStep: number;
   onStepSelect: (step: number) => void;
   sectionMaps: SectionMap[];
+  /** View Settings: View all steps (flatten time) */
+  viewAllSteps?: boolean;
   /** W2: Callback to update section map boundaries */
   onUpdateSectionMeasure?: (id: string, field: 'startMeasure' | 'lengthInMeasures', value: number) => void;
 }
 
 const STEPS_PER_MEASURE = 16; // Assuming 4/4 time signature and 16th notes
 const MIN_STEP_WIDTH = 12; // Minimum width per step in pixels
+const MIN_NOTE_BLOCK_WIDTH = 2; // CSS Safety: Minimum width for note blocks (prevents invisible notes)
+const DEFAULT_NOTE_COLOR = '#FFFFFF'; // CSS Safety: High-contrast fallback color for notes
 const DEFAULT_STEPS = 64; // Default to 4 bars (64 steps at 16th note resolution)
 const OVERVIEW_PROJECT_LENGTH = 32; // Always show 32 bars in overview (512 steps)
 const VIEWPORT_SIZE_MEASURES = 4; // Default viewport size: 4 bars (can be changed to 4 or 8)
+const TIMELINE_MIN_HEIGHT = 150; // CSS Safety: Minimum height for timeline container (px)
+
+/**
+ * CSS Safety Utility: Ensures note block has minimum width and color fallback
+ * Use this when rendering note events as blocks on the timeline
+ */
+const getSafeNoteBlockStyle = (
+  width: number,
+  color?: string
+): React.CSSProperties => {
+  return {
+    width: `${Math.max(width, MIN_NOTE_BLOCK_WIDTH)}px`,
+    backgroundColor: color || DEFAULT_NOTE_COLOR,
+    minHeight: '4px', // Ensure note blocks have visible height
+  };
+};
 
 export const Timeline: React.FC<TimelineProps> = ({
   steps: inputSteps,
   currentStep,
   onStepSelect,
   sectionMaps,
+  viewAllSteps = false,
   onUpdateSectionMeasure,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -213,7 +234,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                   className="absolute top-0 bottom-0 bg-blue-900/40 border-l border-r border-blue-700/50"
                   style={{
                     left: `${sectionLeft}%`,
-                    width: `${sectionWidth}%`,
+                    width: `${Math.max(sectionWidth, 0.5)}%`, // CSS Safety: Minimum width (0.5% prevents invisible sections)
+                    minHeight: '100%' // Ensure section has full height
                   }}
                   title={section.name || section.instrumentConfig.name}
                 />
@@ -237,7 +259,9 @@ export const Timeline: React.FC<TimelineProps> = ({
               className="absolute top-0 bottom-0 bg-yellow-500/30 border-2 border-yellow-400 pointer-events-none z-10"
               style={{
                 left: `${overviewViewportLeft}%`,
-                width: `${overviewViewportWidth}%`,
+                width: `${Math.max(overviewViewportWidth, 0.5)}%`, // CSS Safety: Minimum width for viewport indicator
+                minHeight: '100%', // Ensure viewport indicator has full height
+                backgroundColor: overviewViewportWidth > 0 ? undefined : 'rgba(234, 179, 8, 0.3)' // CSS Safety: Color fallback
               }}
             >
               <div className="absolute top-0 left-0 right-0 h-3 bg-yellow-400/50 flex items-center justify-center">
@@ -253,6 +277,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                 className="absolute top-0 bottom-0 w-0.5 bg-blue-400 pointer-events-none z-20"
                 style={{
                   left: `${(currentStep / projectLengthSteps) * 100}%`,
+                  width: '2px', // CSS Safety: Explicit width (0.5px might be too thin on some displays)
+                  minHeight: '100%', // Ensure indicator has full height
+                  backgroundColor: '#60a5fa' // CSS Safety: Color fallback (blue-400)
                 }}
               />
             )}
@@ -347,7 +374,11 @@ export const Timeline: React.FC<TimelineProps> = ({
       {/* Timeline Content - Viewport (shows only viewportSizeMeasures bars) */}
       <div 
         ref={scrollContainerRef}
-        className="flex-1 overflow-hidden relative bg-slate-950 border border-slate-800 rounded"
+        className={`flex-1 relative bg-slate-950 border border-slate-800 rounded ${viewAllSteps ? 'overflow-x-auto' : 'overflow-hidden'}`}
+        style={{ 
+          minHeight: `${TIMELINE_MIN_HEIGHT}px`,
+          height: '100%' // Ensure height is defined, not collapsing to 0
+        }}
       >
         <div 
           ref={stepsContainerRef}
@@ -381,7 +412,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                 className="absolute top-0 bottom-0 bg-blue-900/20 border-l border-r border-blue-900/30 z-0"
                 style={{ 
                   left: `${left}px`, 
-                  width: `${width}px`,
+                  width: `${Math.max(width, MIN_NOTE_BLOCK_WIDTH)}px`, // CSS Safety: Minimum width for section blocks
+                  minHeight: '100%' // Ensure section block has full height
                 }}
               >
                 <div className="absolute top-1 left-2 text-xs text-blue-400/50 font-mono truncate pointer-events-none">
@@ -435,7 +467,13 @@ export const Timeline: React.FC<TimelineProps> = ({
           })}
 
           {/* Steps - Only show steps in viewport */}
-          <div className="absolute bottom-0 left-0 h-12 flex items-end w-full" style={{ width: '100%' }}>
+          <div 
+            className="absolute bottom-0 left-0 h-12 flex items-end w-full" 
+            style={{ 
+              width: '100%',
+              minHeight: '48px' // CSS Safety: Ensure step container has minimum height
+            }}
+          >
             {Array.from({ length: viewportSizeSteps }).map((_, i) => {
               const absoluteStep = viewportStartStep + i;
               // Check if step is within project bounds
@@ -455,7 +493,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                   `}
                   style={{ 
                     width: `${stepWidth}px`,
-                    minWidth: `${MIN_STEP_WIDTH}px`
+                    minWidth: `${MIN_STEP_WIDTH}px`,
+                    // CSS Safety: Ensure step never collapses to 0 width
+                    minHeight: '32px' // Ensure step has minimum height
                   }}
                   onClick={() => {
                     if (isWithinProject) {

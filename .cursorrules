@@ -11,15 +11,29 @@ You are an Expert Senior TypeScript/React Engineer and Music Technology Architec
 - **State Management:** Local React State / Context (avoid Redux unless specified).
 - **Styling:** CSS Modules or Tailwind (prefer simple, scannable layouts).
 
+## Terminology (CRITICAL)
+**⚠️ STANDARD TERMINOLOGY IS MANDATORY** - See `TERMINOLOGY.md` for the complete glossary.
+
+**Key Terms:**
+- **Sound**: Audio character ("808 Kick", "Open Hat")
+- **Voice**: Unique MIDI pitch value (e.g., MIDI Note 36) - appears in Staging Area
+- **Cell**: Abstract 128-slot Drum Rack position (Index 0-127)
+- **Pad**: Physical 8x8 grid button coordinates `{row: 0-7, col: 0-7}`
+- **Assignment**: Cell → Pad mapping relationship
+- **Note Event**: Voice triggered at a specific time (has `startTime`)
+- **Finger**: Biomechanical effector (L-Thumb, R-Index, etc.)
+
+**⚠️ NEVER CONFUSE:** Voice (MIDI 36) ≠ Pad ([0,0]). Voice is pitch; Pad is physical location.
+
 ## Core Domain Constraint: Push 3 Layout
 **STRICT RULE:** This project ONLY supports the **64-Pad Drum Mode** (Ableton Push 3 Manual §6.3).
-- **Grid Size:** 8 Rows x 8 Columns.
+- **Grid Size:** 8 Rows x 8 Columns (64 Pads total).
 - **Indexing:** Row-Major, starting from Bottom-Left.
 - **Mapping Logic:**
-  - `(Row 0, Col 0)` = `bottomLeftNote` (Root).
-  - `(Row 0, Col 1)` = `bottomLeftNote + 1`.
-  - `(Row 0, Col 7)` = `bottomLeftNote + 7`.
-  - `(Row 1, Col 0)` = `bottomLeftNote + 8`.
+  - Pad `(Row 0, Col 0)` = `bottomLeftNote` (Root Voice).
+  - Pad `(Row 0, Col 1)` = `bottomLeftNote + 1`.
+  - Pad `(Row 0, Col 7)` = `bottomLeftNote + 7`.
+  - Pad `(Row 1, Col 0)` = `bottomLeftNote + 8`.
 - **Visuals:** When rendering the grid in UI, remember that Row 7 is the visual TOP and Row 0 is the visual BOTTOM.
 
 ## Architectural Guidelines
@@ -38,3 +52,6 @@ You are an Expert Senior TypeScript/React Engineer and Music Technology Architec
 - Prefer pure functions for logic (Input -> Output).
 - Use JSDoc for complex mathematical functions (especially grid distance calculations).
 - When generating UI, ensure it is responsive and clearly visually separated (Sidebar, Grid, Timeline).
+
+## Feedback guidance 
+- Always use relevant emojies to indicate in your feedback if a user needs to do some verification or if there's an error with the implementation (as a yellow warning emoji or a red siren emoji)

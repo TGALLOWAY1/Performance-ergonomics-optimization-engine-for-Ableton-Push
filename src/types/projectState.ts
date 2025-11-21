@@ -1,6 +1,6 @@
 import { Performance } from './performance';
-import { SoundAsset, GridMapping } from './layout';
-import { InstrumentConfig, SectionMap } from '../data/models';
+import { Voice, GridMapping } from './layout';
+import { InstrumentConfig, SectionMap } from '../types/performance';
 
 export interface LayoutSnapshot {
   id: string;
@@ -22,7 +22,9 @@ export interface ProjectState {
   activeLayoutId: string | null;
   projectTempo: number;
   /** Staging area for sound assets before assignment to grid */
-  parkedSounds: SoundAsset[];
+  parkedSounds: Voice[];
   /** Array of grid mapping configurations */
   mappings: GridMapping[];
+  /** Voice Manager: Array of note numbers (Cells) that should be ignored/hidden in analysis and grid view. Defaults to empty array. */
+  ignoredNoteNumbers?: number[];
 }

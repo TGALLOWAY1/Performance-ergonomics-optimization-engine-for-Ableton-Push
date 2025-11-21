@@ -3,7 +3,7 @@
  */
 
 import { ProjectState } from '../types/projectState';
-import { GridMapping, SoundAsset } from '../types/layout';
+import { GridMapping, Voice } from '../types/layout';
 
 /**
  * Saves the full project state to a JSON file.
@@ -47,21 +47,21 @@ export async function loadProject(file: File): Promise<ProjectState> {
 }
 
 /**
- * Exports a single layout mapping with all referenced SoundAssets.
+ * Exports a single layout mapping with all referenced Voices.
  * This ensures the layout can be imported independently without broken references.
  * 
  * @param mapping - The GridMapping to export
- * @param allParkedSounds - All available SoundAssets (to find referenced ones)
+ * @param allParkedSounds - All available Voices (to find referenced ones)
  */
-export function exportLayout(mapping: GridMapping, allParkedSounds: SoundAsset[]): void {
-  // Collect all unique SoundAssets referenced by this mapping
+export function exportLayout(mapping: GridMapping, allParkedSounds: Voice[]): void {
+  // Collect all unique Voices referenced by this mapping
   const referencedAssetIds = new Set<string>();
   Object.values(mapping.cells).forEach(sound => {
     referencedAssetIds.add(sound.id);
   });
   
   // Find all referenced assets from parkedSounds
-  const referencedAssets: SoundAsset[] = [];
+  const referencedAssets: Voice[] = [];
   referencedAssetIds.forEach(id => {
     const asset = allParkedSounds.find(s => s.id === id);
     if (asset) {
@@ -117,7 +117,7 @@ export async function importLayout(
   }
   
   const importedMapping: GridMapping = parsed.mapping;
-  const importedAssets: SoundAsset[] = Array.isArray(parsed.referencedAssets) 
+  const importedAssets: Voice[] = Array.isArray(parsed.referencedAssets) 
     ? parsed.referencedAssets 
     : [];
   

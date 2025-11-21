@@ -1,6 +1,6 @@
 import { GridPattern } from '../types/gridPattern';
 import { Performance, NoteEvent } from '../types/performance';
-import { InstrumentConfig } from '../data/models';
+import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 
 /**

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -13,45 +13,57 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { SoundAsset, GridMapping, cellKey, parseCellKey, TemplateId, LAYOUT_TEMPLATES, LayoutTemplate } from '../types/layout';
+import { Voice, GridMapping, cellKey, parseCellKey, TemplateId, LAYOUT_TEMPLATES, LayoutTemplate } from '../types/layout';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
-import { parseMidiFile } from '../utils/midiImport';
-import { InstrumentConfig, SectionMap } from '../data/models';
+// MIDI import logic removed - handled by parent Workbench component
+import { InstrumentConfig, SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { ImportWizard } from './ImportWizard';
-import { runEngine, EngineResult } from '../engine/runEngine';
+import { EngineResult } from '../engine/core';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { SectionMapList } from './SectionMapList';
+import { getActivePerformance, getRawActivePerformance } from '../utils/performanceSelectors';
 
+/**
+ * LayoutDesigner Component
+ * 
+ * TERMINOLOGY (see TERMINOLOGY.md):
+ * - Voice: A unique MIDI pitch (e.g., MIDI Note 36)
+ * - Cell: A slot in the 128 Drum Rack (Index 0-127)
+ * - Pad: A specific x/y coordinate on the 8x8 grid
+ * - Assignment: The mapping of a Voice/Cell to a Pad
+ */
 interface LayoutDesignerProps {
-  /** Staging area for sound assets before assignment to grid */
-  parkedSounds: SoundAsset[];
-  /** Currently active mapping being edited */
+  /** Staging area for Voices before Assignment to Pads (legacy name: parkedSounds) */
+  parkedSounds: Voice[];
+  /** Currently active mapping being edited (defines Pad-to-Voice Assignments) */
   activeMapping: GridMapping | null;
-  /** Instrument configuration for MIDI import */
+  /** Instrument configuration for MIDI import (defines Voice-to-Pad Assignment mapping) */
   instrumentConfig: InstrumentConfig | null;
-  /** Callback when a sound is dropped on a grid cell */
-  onAssignSound: (cellKey: string, sound: SoundAsset) => void;
-  /** Callback to assign multiple sounds at once (for batch operations) */
-  onAssignSounds: (assignments: Record<string, SoundAsset>) => void;
+  /** Callback when a Voice is assigned to a Pad (Assignment relationship) */
+  onAssignSound: (cellKey: string, sound: Voice) => void;
+  /** Callback to assign multiple Voices to Pads at once (batch Assignment operations) */
+  onAssignSounds: (assignments: Record<string, Voice>) => void;
   /** Callback when mapping metadata is updated */
   onUpdateMapping: (updates: Partial<GridMapping>) => void;
   /** Callback to duplicate the current mapping */
   onDuplicateMapping: () => void;
-  /** Callback to add a new sound to parkedSounds */
-  onAddSound: (sound: SoundAsset) => void;
-  /** Callback to update a sound in parkedSounds */
-  onUpdateSound: (soundId: string, updates: Partial<SoundAsset>) => void;
-  /** Callback to update a sound in the active mapping */
-  onUpdateMappingSound: (cellKey: string, updates: Partial<SoundAsset>) => void;
-  /** Callback to remove a sound from a cell */
+  /** Callback to add a new Voice to parkedSounds (staging area) */
+  onAddSound: (sound: Voice) => void;
+  /** Callback to update a Voice in parkedSounds (staging area) */
+  onUpdateSound: (soundId: string, updates: Partial<Voice>) => void;
+  /** Callback to update a Voice in the active mapping (Pad Assignment) */
+  onUpdateMappingSound: (cellKey: string, updates: Partial<Voice>) => void;
+  /** Callback to remove a Voice Assignment from a Pad */
   onRemoveSound: (cellKey: string) => void;
+  /** Callback to delete a Voice from parkedSounds (staging area) */
+  onDeleteSound?: (soundId: string) => void;
   /** Current project state (for save/load operations) */
   projectState: ProjectState;
   /** Callback to update the entire project state */
@@ -72,17 +84,45 @@ interface LayoutDesignerProps {
   onUpdateInstrumentConfig?: (id: string, updates: Partial<InstrumentConfig>) => void;
   /** W1: Callback to delete instrument config */
   onDeleteInstrumentConfig?: (id: string) => void;
+  /** View Settings: Show Cell labels (Voice MIDI note numbers) on Pads */
+  showNoteLabels?: boolean;
+  /** View Settings: View all steps (flatten time) */
+  viewAllSteps?: boolean;
+  /** View Settings: Show heatmap overlay */
+  showHeatmap?: boolean;
+  /** Callback when user wants to import a MIDI file */
+  onImport?: (file: File) => void;
+  /** Engine result from Workbench (reactive solver loop) */
+  engineResult?: EngineResult | null;
 }
 
-// Draggable Sound Item Component
+/**
+ * Draggable Voice Item Component
+ * 
+ * A Voice can be dragged and assigned to a Pad.
+ * This creates an Assignment relationship: Voice → Pad.
+ */
 interface DraggableSoundProps {
-  sound: SoundAsset;
+  sound: Voice;
   isSelected: boolean;
   onSelect: () => void;
-  onEdit: (updates: Partial<SoundAsset>) => void;
+  onEdit: (updates: Partial<Voice>) => void;
+  onDelete: () => void;
+  /** Whether this Voice is visible (not ignored) */
+  isVisible?: boolean;
+  /** Callback to toggle Voice visibility (by Cell/MIDI note number) */
+  onToggleVisibility?: (noteNumber: number) => void;
 }
 
-const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSelect, onEdit }) => {
+const DraggableSound: React.FC<DraggableSoundProps> = ({ 
+  sound, 
+  isSelected, 
+  onSelect, 
+  onEdit, 
+  onDelete,
+  isVisible = true,
+  onToggleVisibility,
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(sound.name);
   const [editColor, setEditColor] = useState(sound.color || '#6366f1');
@@ -166,12 +206,61 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSe
         </div>
       ) : (
         <>
-          <div className="font-medium text-slate-200 text-sm">
-            {sound.name}
-          </div>
-          <div className="text-xs text-slate-400 mt-1">
-            {sound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
-            {sound.originalMidiNote !== null && ` • Note ${sound.originalMidiNote}`}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-slate-200 text-sm">
+                {sound.name}
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                {sound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
+                {sound.originalMidiNote !== null && ` • Note ${sound.originalMidiNote}`}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {/* Visibility toggle button */}
+              {onToggleVisibility && sound.originalMidiNote !== null && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleVisibility(sound.originalMidiNote!);
+                  }}
+                  className={`flex-shrink-0 p-1.5 rounded transition-colors ${
+                    isVisible 
+                      ? 'text-green-400 hover:bg-green-900/20' 
+                      : 'text-slate-500 hover:bg-slate-700'
+                  }`}
+                  title={isVisible ? 'Hide Voice' : 'Show Voice'}
+                >
+                  {isVisible ? '👁️' : '🚫'}
+                </button>
+              )}
+              {/* Delete button - always visible */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`Delete "${sound.name}" from library?`)) {
+                    onDelete();
+                  }
+                }}
+                className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                title="Delete voice"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
           {isSelected && (
             <button
@@ -190,10 +279,10 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSe
   );
 };
 
-// Placed Sound Item Component (for Library "Placed on Grid" section)
+// Placed Voice Item Component (for Library "Placed on Grid" section - shows Pad assignments)
 interface PlacedSoundItemProps {
-  sound: SoundAsset;
-  cellKey: string;
+  sound: Voice;
+  cellKey: string; // Pad key "row,col"
   isSelected: boolean;
   onSelect: () => void;
 }
@@ -256,11 +345,11 @@ const DroppableStagingArea: React.FC<DroppableStagingAreaProps> = ({ children })
   );
 };
 
-// Droppable Grid Cell Component
+// Droppable Pad Component (represents a Pad on the 8x8 grid)
 interface DroppableCellProps {
   row: number;
   col: number;
-  assignedSound: SoundAsset | null;
+  assignedSound: Voice | null;
   isOver: boolean;
   isSelected: boolean;
   isHighlighted?: boolean;
@@ -270,6 +359,8 @@ interface DroppableCellProps {
   heatmapFinger?: FingerID | null;
   heatmapHand?: 'LH' | 'RH' | null;
   fingerConstraint?: string | null;
+  showNoteLabels?: boolean;
+  instrumentConfig?: InstrumentConfig | null;
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -288,10 +379,25 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
   heatmapFinger,
   heatmapHand,
   fingerConstraint,
+  showNoteLabels = false,
+  instrumentConfig = null,
   onClick,
   onDoubleClick,
   onContextMenu,
 }) => {
+  // Get Cell (MIDI note number) for label display on this Pad
+  const noteNumber = assignedSound && assignedSound.originalMidiNote !== null
+    ? assignedSound.originalMidiNote
+    : instrumentConfig
+      ? GridMapService.getNoteForPosition(row, col, instrumentConfig)
+      : null;
+  
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const getNoteName = (midiNote: number): string => {
+    const note = NOTE_NAMES[midiNote % 12];
+    const octave = Math.floor(midiNote / 12) - 2;
+    return `${note}${octave}`;
+  };
   const key = cellKey(row, col);
   const { setNodeRef, isOver: isDroppableOver } = useDroppable({
     id: key,
@@ -392,6 +498,13 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
           <span className="text-[10px] text-slate-400 mt-0.5">
             [{row},{col}]
           </span>
+          {/* Note Label - Show MIDI pitch when showNoteLabels is enabled */}
+          {showNoteLabels && noteNumber !== null && (
+            <div className="absolute bottom-1 left-0 right-0 flex flex-col items-center text-[9px] opacity-60 leading-tight pointer-events-none font-mono">
+              <span>{noteNumber}</span>
+              <span>{getNoteName(noteNumber)}</span>
+            </div>
+          )}
           {/* Finger Badge - Always show when available from engine */}
           {heatmapFinger && heatmapHand && (
             <div className={`
@@ -445,6 +558,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onUpdateSound,
   onUpdateMappingSound,
   onRemoveSound,
+  onDeleteSound,
   projectState,
   onUpdateProjectState,
   onSetActiveMappingId,
@@ -455,27 +569,34 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onCreateSectionMap,
   onUpdateInstrumentConfig,
   onDeleteInstrumentConfig,
+  showNoteLabels = false,
+  viewAllSteps = false,
+  showHeatmap = false,
+  onImport,
+  engineResult: engineResultProp = null,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const loadProjectInputRef = useRef<HTMLInputElement>(null);
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [draggedSound, setDraggedSound] = useState<SoundAsset | null>(null);
+  const [draggedSound, setDraggedSound] = useState<Voice | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>('none');
   const [selectedSoundId, setSelectedSoundId] = useState<string | null>(null);
   const [selectedCellKey, setSelectedCellKey] = useState<string | null>(null);
   const [stagingAreaCollapsed, setStagingAreaCollapsed] = useState(false);
-  const [placedSoundsCollapsed, setPlacedSoundsCollapsed] = useState(false);
+  const [placedSoundsCollapsed, setPlacedSoundsCollapsed] = useState(true); // Default to collapsed
+  const [stagingAreaSectionCollapsed, setStagingAreaSectionCollapsed] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
-  const [showHeatmapOverlay, setShowHeatmapOverlay] = useState(false);
-  const [showDebugLabels, setShowDebugLabels] = useState(false);
-  const [viewAllSteps, setViewAllSteps] = useState(false);
+  // View Settings are now passed as props from Workbench
+  // Keep local state for backward compatibility if needed, but use props
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [timelineForceVisible, setTimelineForceVisible] = useState(false);
   const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
-  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  // Engine result is now passed from Workbench (reactive solver loop)
+  // Use prop if provided, otherwise fall back to null
+  const engineResult = engineResultProp;
   const [currentStep, setCurrentStep] = useState(0);
   const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
   const [leftPanelTab, setLeftPanelTab] = useState<'library' | 'sections'>('library');
@@ -559,7 +680,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     // Check if dragging from a cell (format: "cell-row,col")
     const activeIdStr = active.id as string;
-    let sound: SoundAsset | null = null;
+    let sound: Voice | null = null;
     let sourceCellKey: string | null = null;
 
     if (activeIdStr.startsWith('cell-')) {
@@ -666,7 +787,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
         // Create new cells object for atomic update
         // Start fresh to prevent any duplicates
-        const newCells: Record<string, SoundAsset> = {};
+        const newCells: Record<string, Voice> = {};
         
         // Copy all cells except source and target (we'll handle those separately)
         Object.entries(currentCells).forEach(([key, value]) => {
@@ -732,7 +853,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Get the sound assigned to a cell
-  const getCellSound = (row: number, col: number): SoundAsset | null => {
+  const getCellSound = (row: number, col: number): Voice | null => {
     if (!activeMapping) return null;
     const key = cellKey(row, col);
     return activeMapping.cells[key] || null;
@@ -752,7 +873,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   // Handle creating new sound
   const handleNewSound = () => {
-    const newSound: SoundAsset = {
+    const newSound: Voice = {
       id: `sound-${Date.now()}`,
       name: 'New Sound',
       sourceType: 'midi_track',
@@ -764,139 +885,23 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     setSelectedSoundId(newSound.id);
   };
 
-  // Handle MIDI file import
-  const handleMidiFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle MIDI file import - delegate to parent component (Workbench)
+  // All MIDI parsing and state updates are handled by Workbench.handleProjectLoad
+  const handleMidiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !instrumentConfig) {
+    if (!file) {
       event.target.value = '';
       return;
     }
 
-    try {
-      // W3: Get import result with unmapped note count
-      const importResult = await parseMidiFile(file, instrumentConfig);
-      const performance = importResult.performance;
-      
-      // W3: Show warning if there are unmapped notes
-      if (importResult.unmappedNoteCount > 0) {
-        alert(`Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the current 8x8 grid window (bottomLeftNote: ${instrumentConfig.bottomLeftNote}). These notes will not be mapped to the grid.`);
-      }
-      
-      // Extract unique note numbers from the performance
-      const uniqueNotes = new Set<number>();
-      performance.events.forEach(event => {
-        uniqueNotes.add(event.noteNumber);
-      });
-
-      // Create SoundAssets for each unique note
-      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-      const getNoteName = (midiNote: number): string => {
-        const note = noteNames[midiNote % 12];
-        // MIDI note 0 = C-2, so octave = floor(0/12) - 2 = -2
-        const octave = Math.floor(midiNote / 12) - 2;
-        return `${note}${octave}`;
-      };
-
-      // Generate colors for each note (distinct colors)
-      const colors = [
-        '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
-        '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
-        '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
-      ];
-
-      // Check for existing sounds to avoid duplicates
-      const existingNoteMap = new Map<number, SoundAsset>();
-      parkedSounds.forEach(sound => {
-        if (sound.originalMidiNote !== null) {
-          existingNoteMap.set(sound.originalMidiNote, sound);
-        }
-      });
-
-      const newSounds: SoundAsset[] = [];
-      Array.from(uniqueNotes).forEach((noteNumber, index) => {
-        // Check if a sound for this note already exists
-        const existing = existingNoteMap.get(noteNumber);
-        if (existing) {
-          // Use existing sound instead of creating a duplicate
-          newSounds.push(existing);
-        } else {
-          // Create new sound
-          const noteName = getNoteName(noteNumber);
-          const newSound: SoundAsset = {
-            id: `sound-${file.name}-${noteNumber}-${Date.now()}-${index}`,
-            name: `${noteName} (${noteNumber})`,
-            sourceType: 'midi_track' as const,
-            sourceFile: file.name,
-            originalMidiNote: noteNumber,
-            color: colors[index % colors.length],
-          };
-          newSounds.push(newSound);
-          // Add to library only if it's new
-          onAddSound(newSound);
-        }
-      });
-
-      // Automatically populate the grid based on MIDI note numbers
-      if (instrumentConfig) {
-        // Map each sound to its grid position based on MIDI note number
-        const assignments: Array<{ cellKey: string; sound: SoundAsset }> = [];
-        
-        newSounds.forEach(sound => {
-          if (sound.originalMidiNote !== null) {
-            const position = GridMapService.getPositionForNote(sound.originalMidiNote, instrumentConfig);
-            if (position) {
-              const cellKeyStr = cellKey(position.row, position.col);
-              assignments.push({ cellKey: cellKeyStr, sound });
-              console.log(`Mapping note ${sound.originalMidiNote} (${sound.name}) to grid [${position.row},${position.col}]`);
-            } else {
-              console.warn(`Note ${sound.originalMidiNote} (${sound.name}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
-            }
-          }
-        });
-
-        // Batch all assignments together to avoid state update conflicts
-        if (assignments.length > 0) {
-          const cellsToAssign: Record<string, SoundAsset> = {};
-          assignments.forEach(({ cellKey, sound }) => {
-            cellsToAssign[cellKey] = sound;
-          });
-
-          // Use batch assignment if available, otherwise fall back to individual calls
-          if (onAssignSounds) {
-            onAssignSounds(cellsToAssign);
-          } else {
-            // Fallback: assign individually (may have race conditions)
-            assignments.forEach(({ cellKey, sound }) => {
-              onAssignSound(cellKey, sound);
-            });
-          }
-
-          // Update mapping metadata
-          if (!activeMapping) {
-            // Wait for mapping to be created, then update metadata
-            setTimeout(() => {
-              onUpdateMapping({
-                name: `${performance.name || file.name} Layout`,
-                notes: `Auto-generated from ${file.name}`,
-              });
-            }, 50);
-          } else {
-            onUpdateMapping({
-              notes: activeMapping.notes 
-                ? `${activeMapping.notes}\n\nAuto-populated from ${file.name}`
-                : `Auto-populated from ${file.name}`,
-            });
-          }
-        }
-      }
-
-      // Reset file input
-      event.target.value = '';
-    } catch (err) {
-      console.error('Failed to import MIDI file:', err);
-      alert(`Failed to import MIDI file: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      event.target.value = '';
+    if (onImport) {
+      onImport(file);
+    } else {
+      console.warn('onImport callback not provided - cannot import MIDI file');
     }
+
+    // Reset input value so same file can be loaded again if needed
+    event.target.value = '';
   };
 
   // Handle scan MIDI button click - show ImportWizard
@@ -905,7 +910,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Handle ImportWizard confirm - add assets to parkedSounds
-  const handleImportConfirm = (assets: SoundAsset[]) => {
+  const handleImportConfirm = (assets: Voice[]) => {
     assets.forEach((asset) => {
       onAddSound(asset);
     });
@@ -915,6 +920,20 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Handle ImportWizard cancel
   const handleImportCancel = () => {
     setShowImportWizard(false);
+  };
+
+  // Handle clear staging area - remove all sounds from staging
+  const handleClearStaging = () => {
+    if (stagingAssets.length === 0) {
+      return; // Nothing to clear
+    }
+    
+    if (window.confirm(`Are you sure you want to remove all ${stagingAssets.length} sound(s) from staging? This will permanently delete them.`)) {
+      // Delete all staging sounds
+      stagingAssets.forEach(sound => {
+        onDeleteSound?.(sound.id);
+      });
+    }
   };
 
   // Handle clear grid - moves all sounds back to staging
@@ -1036,7 +1055,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     // Collect all sounds that have originalMidiNote set
     // Use derived lists to avoid duplicates
-    const soundsWithNotes: SoundAsset[] = [
+    const soundsWithNotes: Voice[] = [
       ...placedAssets.filter(s => s.originalMidiNote !== null),
       ...stagingAssets.filter(s => s.originalMidiNote !== null),
     ];
@@ -1147,6 +1166,118 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const placedAssetIds = new Set(placedAssets.map(s => s.id));
   
   const stagingAssets = parkedSounds.filter(sound => !placedAssetIds.has(sound.id));
+  
+  // Voice Visibility: Filter based on ignoredNoteNumbers
+  const ignoredNoteNumbers = projectState.ignoredNoteNumbers || [];
+  
+  // Handler to toggle voice visibility
+  const handleToggleVoiceVisibility = (noteNumber: number) => {
+    const currentIgnored = projectState.ignoredNoteNumbers || [];
+    const isIgnored = currentIgnored.includes(noteNumber);
+    
+    onUpdateProjectState({
+      ...projectState,
+      ignoredNoteNumbers: isIgnored
+        ? currentIgnored.filter(n => n !== noteNumber) // Remove from ignored (show)
+        : [...currentIgnored, noteNumber], // Add to ignored (hide)
+    });
+  };
+  
+  // Handler for destructive delete: Permanently remove all events for a noteNumber
+  const handleDestructiveDelete = (noteNumber: number) => {
+    if (!activeLayout) {
+      console.warn('No active layout to delete from');
+      return;
+    }
+    
+    // Find the active layout
+    const layoutIndex = projectState.layouts.findIndex(l => l.id === activeLayout.id);
+    if (layoutIndex === -1) {
+      console.warn('Active layout not found in project state');
+      return;
+    }
+    
+    // Filter out all events matching this noteNumber
+    const updatedLayouts = projectState.layouts.map((layout, idx) => {
+      if (idx === layoutIndex) {
+        return {
+          ...layout,
+          performance: {
+            ...layout.performance,
+            events: layout.performance.events.filter(e => e.noteNumber !== noteNumber),
+          },
+        };
+      }
+      return layout;
+    });
+    
+    // Remove from ignoredNoteNumbers (cleanup)
+    const currentIgnored = projectState.ignoredNoteNumbers || [];
+    const updatedIgnored = currentIgnored.filter(n => n !== noteNumber);
+    
+    // Update state
+    onUpdateProjectState({
+      ...projectState,
+      layouts: updatedLayouts,
+      ignoredNoteNumbers: updatedIgnored,
+    });
+  };
+
+  // Handle auto-assign random: Map unassigned Voices to empty Pads
+  const handleAutoAssignRandom = () => {
+    if (!activeMapping || !instrumentConfig) {
+      alert('No active mapping or instrument config available. Please create a mapping first.');
+      return;
+    }
+
+    // Find all unassigned Voices (in staging, not yet assigned to a Pad)
+    const unassignedVoices = stagingAssets;
+
+    if (unassignedVoices.length === 0) {
+      alert('No unassigned Voices found. All Voices are already assigned to Pads.');
+      return;
+    }
+
+    // Find all empty Pads (8x8 grid positions without a Voice assignment)
+    const emptyPads: Array<{ row: number; col: number; key: string }> = [];
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const key = cellKey(row, col);
+        if (!activeMapping.cells[key]) {
+          emptyPads.push({ row, col, key });
+        }
+      }
+    }
+
+    if (emptyPads.length === 0) {
+      alert('No empty Pads available. All 64 Pads are already assigned.');
+      return;
+    }
+
+    // Randomly shuffle both arrays
+    const shuffledVoices = [...unassignedVoices].sort(() => Math.random() - 0.5);
+    const shuffledPads = [...emptyPads].sort(() => Math.random() - 0.5);
+
+    // Map voices to pads (up to the minimum of available voices and empty pads)
+    const assignments: Record<string, Voice> = {};
+    const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
+    
+    for (let i = 0; i < maxAssignments; i++) {
+      assignments[shuffledPads[i].key] = shuffledVoices[i];
+    }
+
+    // Batch assign all at once
+    if (Object.keys(assignments).length > 0) {
+      if (onAssignSounds) {
+        onAssignSounds(assignments);
+      } else {
+        // Fallback: assign individually
+        Object.entries(assignments).forEach(([key, voice]) => {
+          onAssignSound(key, voice);
+        });
+      }
+    }
+  };
 
   // Get selected sound (from library or grid)
   const selectedSound = selectedCellKey && activeMapping
@@ -1189,24 +1320,19 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       )
     : null;
 
-  // Real-time engine execution: Run whenever activeMapping or activeLayout.performance changes
-  useEffect(() => {
-    if (!activeMapping || !activeLayout) {
-      setEngineResult(null);
-      return;
-    }
+  // Get filtered performance using selector (excludes ignored notes)
+  // This is the computed performance that should be used everywhere instead of raw activeLayout.performance
+  const filteredPerformance = useMemo(() => {
+    return getActivePerformance(projectState);
+  }, [projectState]);
+  
+  // Also get raw performance for operations that need all events (like destructive delete)
+  const rawPerformance = useMemo(() => {
+    return getRawActivePerformance(projectState);
+  }, [projectState]);
 
-    // Debounce engine execution for performance
-    const timer = setTimeout(() => {
-      const result = runEngine(activeLayout.performance, activeMapping);
-      setEngineResult(result);
-      
-      // Update scoreCache in the mapping
-      onUpdateMapping({ scoreCache: result.score });
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [activeMapping, activeLayout?.performance, onUpdateMapping]);
+  // Engine execution moved to Workbench.tsx (reactive solver loop)
+  // Engine result is now passed as a prop from Workbench
 
   // Responsive timeline hiding: Hide if container height < 200px or window width < 768px
   useEffect(() => {
@@ -1286,39 +1412,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 
                 <div className="h-4 w-px bg-slate-700" />
                 
-                {/* Debug Toggles */}
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={showDebugLabels} 
-                    onChange={(e) => setShowDebugLabels(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  Show Note Labels
-                </label>
-                
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={viewAllSteps} 
-                    onChange={(e) => setViewAllSteps(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  View All Steps
-                </label>
-                
-                <div className="h-4 w-px bg-slate-700" />
-                
-                {/* Heatmap Toggle */}
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={showHeatmapOverlay} 
-                    onChange={(e) => setShowHeatmapOverlay(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  Show Heatmap
-                </label>
+                {/* View Settings are now controlled from Workbench header */}
+                <span className="text-xs text-slate-500 italic">View Settings controlled from main header</span>
               </div>
               
               <div className="h-6 w-px bg-slate-700" />
@@ -1439,6 +1534,14 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 >
                   Clear Grid
                 </button>
+                <button
+                  onClick={handleClearStaging}
+                  disabled={stagingAssets.length === 0}
+                  className="w-full px-3 py-1.5 text-xs bg-orange-900/30 hover:bg-orange-900/50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-orange-300 disabled:text-slate-500 rounded border border-orange-900/50 disabled:border-slate-700 transition-colors"
+                  title={stagingAssets.length === 0 ? 'No sounds in staging' : `Remove all ${stagingAssets.length} sound(s) from staging`}
+                >
+                  Clear Staging
+                </button>
               </div>
             </div>
             
@@ -1501,44 +1604,178 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </div>
             
             <div className="space-y-4">
-              {/* Staging Area Section */}
+              {/* Detected Voices Section - Derived from active Performance (for visibility/delete management) */}
               <div>
                 <button
                   onClick={() => setStagingAreaCollapsed(!stagingAreaCollapsed)}
                   className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
                 >
-                  <span>Staging Area</span>
+                  <span>Detected Voices</span>
                   <span className="text-xs text-slate-500">
-                    {stagingAssets.length} {stagingAssets.length === 1 ? 'sound' : 'sounds'}
+                    {(() => {
+                      const rawPerformance = getRawActivePerformance(projectState);
+                      if (!rawPerformance) return '0 voices';
+                      const uniqueNotes = new Set(rawPerformance.events.map(e => e.noteNumber));
+                      return `${uniqueNotes.size} ${uniqueNotes.size === 1 ? 'voice' : 'voices'}`;
+                    })()}
                   </span>
                   <span className="text-slate-500">
                     {stagingAreaCollapsed ? '▼' : '▲'}
                   </span>
                 </button>
                 {!stagingAreaCollapsed && (
+                  <div className="mt-2">
+                    {(() => {
+                      const rawPerformance = getRawActivePerformance(projectState);
+                      if (!rawPerformance || rawPerformance.events.length === 0) {
+                        return (
+                          <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
+                            No Voices detected
+                            <br />
+                            <span className="text-xs">Import a MIDI file to detect voices</span>
+                          </div>
+                        );
+                      }
+                      
+                      // Extract unique noteNumbers from the raw Performance
+                      const uniqueNotes = Array.from(new Set(rawPerformance.events.map(e => e.noteNumber))).sort((a, b) => a - b);
+                      
+                      return (
+                        <div className="space-y-2">
+                          {uniqueNotes.map((noteNumber) => {
+                            const isVisible = !ignoredNoteNumbers.includes(noteNumber);
+                            const eventCount = rawPerformance.events.filter(e => e.noteNumber === noteNumber).length;
+                            
+                            return (
+                              <div
+                                key={noteNumber}
+                                className="p-3 rounded-md border bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 transition-colors flex items-center justify-between gap-2"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-slate-200 text-sm">
+                                    Note {noteNumber}
+                                  </div>
+                                  <div className="text-xs text-slate-400 mt-1">
+                                    {eventCount} {eventCount === 1 ? 'event' : 'events'}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {/* Visibility Toggle */}
+                                  <button
+                                    onClick={() => handleToggleVoiceVisibility(noteNumber)}
+                                    className={`flex-shrink-0 p-1.5 rounded transition-colors ${
+                                      isVisible 
+                                        ? 'text-green-400 hover:bg-green-900/20' 
+                                        : 'text-slate-500 hover:bg-slate-700'
+                                    }`}
+                                    title={isVisible ? 'Hide Voice' : 'Show Voice'}
+                                  >
+                                    {isVisible ? '👁️' : '🚫'}
+                                  </button>
+                                  {/* Destructive Delete */}
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm(`Permanently delete all events for Note ${noteNumber}? This action cannot be undone.`)) {
+                                        handleDestructiveDelete(noteNumber);
+                                      }
+                                    }}
+                                    className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                                    title="Permanently delete all events for this note"
+                                  >
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="h-4 w-4"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Staging Area Section - Draggable Voices */}
+              <div>
+                <button
+                  onClick={() => setStagingAreaSectionCollapsed(!stagingAreaSectionCollapsed)}
+                  className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
+                >
+                  <span>Staging Area</span>
+                  <span className="text-xs text-slate-500">
+                    {stagingAssets.length} {stagingAssets.length === 1 ? 'voice' : 'voices'}
+                  </span>
+                  <span className="text-slate-500">
+                    {stagingAreaSectionCollapsed ? '▼' : '▲'}
+                  </span>
+                </button>
+                {!stagingAreaSectionCollapsed && (
                   <DroppableStagingArea>
+                    {/* Assign Actions Toolbar */}
+                    {stagingAssets.length > 0 && (
+                      <div className="mb-3 p-2 bg-slate-800/50 rounded border border-slate-700">
+                        <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Assign Actions</div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleAutoAssignRandom}
+                            disabled={!activeMapping || !instrumentConfig || stagingAssets.length === 0}
+                            className="flex-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded border border-blue-500 disabled:border-slate-600 transition-colors"
+                            title={!activeMapping || !instrumentConfig ? 'No active mapping or instrument config' : 'Randomly assign unassigned Voices to empty Pads'}
+                          >
+                            Auto-Assign (Random)
+                          </button>
+                          <button
+                            disabled
+                            className="flex-1 px-3 py-1.5 text-xs bg-slate-700 text-slate-500 cursor-not-allowed rounded border border-slate-600 flex items-center justify-center gap-1"
+                            title="AI Optimization coming in v2"
+                          >
+                            Auto-Assign (Optimize) 🧠
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2 mt-2">
                       {stagingAssets.length === 0 ? (
                         <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
-                          No sounds in staging
+                          No Voices in staging
                           <br />
-                          <span className="text-xs">Click "+ New" or "Import MIDI" to add sounds</span>
-                          <br />
-                          <span className="text-xs">Or drag sounds from grid here to unassign</span>
+                          <span className="text-xs">Drag Voices from grid here to unassign</span>
                         </div>
                       ) : (
-                        stagingAssets.map((sound) => (
-                          <DraggableSound
-                            key={sound.id}
-                            sound={sound}
-                            isSelected={selectedSoundId === sound.id && !selectedCellKey}
-                            onSelect={() => {
-                              setSelectedSoundId(sound.id);
-                              setSelectedCellKey(null);
-                            }}
-                            onEdit={(updates) => onUpdateSound(sound.id, updates)}
-                          />
-                        ))
+                        stagingAssets.map((sound) => {
+                          const isVisible = sound.originalMidiNote === null 
+                            ? true 
+                            : !ignoredNoteNumbers.includes(sound.originalMidiNote);
+                          
+                          return (
+                            <DraggableSound
+                              key={sound.id}
+                              sound={sound}
+                              isSelected={selectedSoundId === sound.id && !selectedCellKey}
+                              onSelect={() => {
+                                setSelectedSoundId(sound.id);
+                                setSelectedCellKey(null);
+                              }}
+                              onEdit={(updates) => onUpdateSound(sound.id, updates)}
+                              onDelete={() => onDeleteSound?.(sound.id)}
+                              isVisible={isVisible}
+                              onToggleVisibility={handleToggleVoiceVisibility}
+                            />
+                          );
+                        })
                       )}
                     </div>
                   </DroppableStagingArea>
@@ -1549,7 +1786,10 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               {activeMapping && Object.keys(activeMapping.cells).length > 0 && (
                 <div>
                   <button
-                    onClick={() => setPlacedSoundsCollapsed(!placedSoundsCollapsed)}
+                    onClick={() => {
+                      const newState = !placedSoundsCollapsed;
+                      setPlacedSoundsCollapsed(newState);
+                    }}
                     className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
                   >
                     <span>Placed on Grid</span>
@@ -1622,9 +1862,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   let heatmapFinger: FingerID | null = null;
                   let heatmapHand: 'LH' | 'RH' | null = null;
                   
-                  if (showHeatmapOverlay && engineResult && activeLayout && activeLayout.performance.events.length > 0 && assignedSound) {
+                  if (showHeatmap && engineResult && filteredPerformance && filteredPerformance.events.length > 0 && assignedSound) {
                     // Find the debug event for this cell's note
-                    const noteNumber = assignedSound.originalMidiNote;
+                    const noteNumber = assignedSound?.originalMidiNote ?? null;
                     if (noteNumber !== null) {
                       // Find the worst-case event for this note
                       const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
@@ -1639,8 +1879,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                           return currentRank > worstRank ? current : worst;
                         }, noteEvents[0]);
                         heatmapDifficulty = worstEvent.difficulty;
-                        heatmapFinger = worstEvent.finger;
-                        heatmapHand = worstEvent.assignedHand === 'Unplayable' ? null : worstEvent.assignedHand as 'LH' | 'RH';
+                        // Type assertion: runtime data from runEngine uses FingerID (1-5), not FingerType
+                        heatmapFinger = worstEvent.finger as FingerID | null;
+                        // Type assertion: runtime data from runEngine uses 'LH'/'RH', but type says 'left'/'right'
+                        const hand = worstEvent.assignedHand as 'left' | 'right' | 'Unplayable' | 'LH' | 'RH';
+                        heatmapHand = hand === 'Unplayable' ? null : (hand === 'left' || hand === 'LH' ? 'LH' : 'RH');
                       }
                     }
                   }
@@ -1665,6 +1908,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                       heatmapFinger={heatmapFinger}
                       heatmapHand={heatmapHand}
                       fingerConstraint={fingerConstraint}
+                      showNoteLabels={showNoteLabels}
+                      instrumentConfig={instrumentConfig}
                       onClick={() => handleCellClick(row, col)}
                       onDoubleClick={() => handleCellDoubleClick(row, col)}
                       onContextMenu={(e) => handleCellContextMenu(e, row, col)}
@@ -1703,27 +1948,59 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </button>
                 </div>
               </div>
-              {!timelineCollapsed && (!timelineAutoHidden || timelineForceVisible) && activeLayout && (
+              {!timelineCollapsed && (!timelineAutoHidden || timelineForceVisible) && filteredPerformance && (
                 <div className="h-[calc(100%-3rem)]">
                   <TimelineArea
                     steps={(() => {
-                      // Calculate steps from performance: find the latest event time and convert to 16th notes
+                      // CRITICAL: Use filtered performance (computed via getActivePerformance selector)
+                      // Do NOT use raw activeLayout.performance - it includes ignored notes
+                      
+                      if (!filteredPerformance) {
+                        console.log('[LayoutDesigner] Timeline - No filtered performance available, using default 64 steps');
+                        return 64;
+                      }
+                      
+                      const filteredEvents = filteredPerformance.events;
+                      
+                      // Log both raw and filtered for debugging
+                      const rawEventsCount = rawPerformance ? rawPerformance.events.length : 0;
+                      console.log('[LayoutDesigner] Timeline Steps Calculation - Raw Events:', rawEventsCount);
+                      console.log('[LayoutDesigner] Timeline Steps Calculation - Ignored Notes:', projectState.ignoredNoteNumbers || []);
+                      console.log('[LayoutDesigner] Timeline Steps Calculation - Filtered Events:', filteredEvents.length);
+                      
+                      // Calculate steps from filtered performance: find the latest event time and convert to 16th notes
                       // Default to 64 steps (4 bars) if empty or short
-                      if (activeLayout.performance.events.length === 0) {
+                      if (filteredEvents.length === 0) {
+                        console.log('[LayoutDesigner] Timeline Steps Calculation - Filtered Events: 0 (no visible events, using default 64 steps)');
                         return 64; // Default to 4 measures
                       }
-                      const tempo = activeLayout.performance.tempo || 120;
+                      
+                      const tempo = filteredPerformance.tempo || 120;
                       const stepDuration = (60 / tempo) / 4; // 16th note duration in seconds
-                      const latestEvent = activeLayout.performance.events.reduce((latest, event) => 
+                      const latestEvent = filteredEvents.reduce((latest, event) => 
                         event.startTime > latest.startTime ? event : latest
                       );
                       const eventEndTime = latestEvent.startTime + (latestEvent.duration || stepDuration);
                       const maxStep = Math.ceil(eventEndTime / stepDuration);
-                      return Math.max(64, Math.ceil(maxStep / 16) * 16); // Round up to nearest measure (16 steps), minimum 64
+                      const calculatedSteps = Math.max(64, Math.ceil(maxStep / 16) * 16); // Round up to nearest measure (16 steps), minimum 64
+                      
+                      // DEBUG: Log calculated steps
+                      console.log('[LayoutDesigner] Timeline Steps Calculation - Calculated Steps:', calculatedSteps);
+                      console.log('[LayoutDesigner] Timeline Steps Calculation - Latest Event:', {
+                        noteNumber: latestEvent.noteNumber,
+                        startTime: latestEvent.startTime,
+                        duration: latestEvent.duration,
+                        eventEndTime,
+                        maxStep,
+                        tempo
+                      });
+                      
+                      return calculatedSteps;
                     })()}
                     currentStep={currentStep}
                     onStepSelect={setCurrentStep}
                     sectionMaps={projectState.sectionMaps}
+                    viewAllSteps={viewAllSteps}
                     onUpdateSectionMeasure={(id, field, value) => {
                       if (onUpdateSection) {
                         onUpdateSection(id, { field, value });

@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { LayoutList } from './LayoutList';
 import { SectionMapList } from './SectionMapList';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../data/models';
+import { SectionMap } from '../types/performance';
 
 interface SidebarProps {
   layouts: LayoutSnapshot[];
