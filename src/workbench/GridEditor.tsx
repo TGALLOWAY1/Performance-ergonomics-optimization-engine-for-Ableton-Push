@@ -1,3 +1,17 @@
+/**
+ * GridEditor Component
+ * 
+ * Renders the 8x8 Pad grid (64 Pads) for the Ableton Push 3.
+ * 
+ * TERMINOLOGY (see TERMINOLOGY.md):
+ * - Pad: Physical button on 8x8 grid (coordinates: {row: 0-7, col: 0-7})
+ * - Voice: MIDI pitch value (e.g., MIDI Note 36)
+ * - Assignment: Maps a Voice (via Cell) to a Pad
+ * - Note Event: Voice triggered at a specific time
+ * - Finger: Biomechanical effector (L-Thumb, R-Index, etc.)
+ * 
+ * ⚠️ CRITICAL: Never confuse Voice (MIDI 36) with Pad ([0,0]). Voice is pitch; Pad is physical location.
+ */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LayoutSnapshot } from '../types/projectState';
 import { SectionMap } from '../data/models';
@@ -194,6 +208,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     setContextMenu(null);
   };
 
+  // Safety Check: Get ignoredNoteNumbers from props or default to empty array
+  // Note: GridEditor doesn't have direct access to ProjectState, so we'll filter in LayoutDesigner
+  // For now, use all events (filtering will happen at the LayoutDesigner level)
   const performanceEvents = activeLayout?.performance?.events ?? [];
   const totalEvents = performanceEvents.length;
 

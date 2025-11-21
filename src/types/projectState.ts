@@ -25,4 +25,6 @@ export interface ProjectState {
   parkedSounds: SoundAsset[];
   /** Array of grid mapping configurations */
   mappings: GridMapping[];
+  /** Voice Manager: Array of note numbers (Cells) that should be ignored/hidden in analysis and grid view. Defaults to empty array. */
+  ignoredNoteNumbers?: number[];
 }

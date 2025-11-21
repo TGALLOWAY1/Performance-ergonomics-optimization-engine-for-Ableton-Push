@@ -57,6 +57,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [currentStep, setCurrentStep] = useState(0);
   const [showDebugLabels, setShowDebugLabels] = useState(false);
   const [viewAllSteps, setViewAllSteps] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false); // ADD THIS LINE
+  const [showNoteLabels, setShowNoteLabels] = useState(false); // ADD THIS LINE (if separate from debug labels)
   const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
   const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
   const importLayoutInputRef = React.useRef<HTMLInputElement>(null);
@@ -262,9 +264,47 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       const importResult = await parseMidiFile(file, activeSection.instrumentConfig);
       const performance = importResult.performance;
       
-      // W3: Show warning if there are unmapped notes
+      // Intelligent Root Note Logic: Auto-set bottomLeftNote to minimum note
+      let updatedProjectState = { ...projectState };
+      if (importResult.minNoteNumber !== null) {
+        // Update the active section's instrument config
+        const updatedSectionMaps = projectState.sectionMaps.map(section => {
+          if (section.id === activeSection.id) {
+            return {
+              ...section,
+              instrumentConfig: {
+                ...section.instrumentConfig,
+                bottomLeftNote: importResult.minNoteNumber!
+              }
+            };
+          }
+          return section;
+        });
+
+        // Also update the instrument config in the instrumentConfigs array
+        const updatedInstrumentConfigs = projectState.instrumentConfigs.map(config => {
+          if (config.id === activeSection.instrumentConfig.id) {
+            return {
+              ...config,
+              bottomLeftNote: importResult.minNoteNumber!
+            };
+          }
+          return config;
+        });
+
+        updatedProjectState = {
+          ...projectState,
+          sectionMaps: updatedSectionMaps,
+          instrumentConfigs: updatedInstrumentConfigs
+        };
+      }
+      
+      // W3: Show warning if there are unmapped notes (should be 0 after auto-adjustment)
       if (importResult.unmappedNoteCount > 0) {
-        alert(`Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the current 8x8 grid window (bottomLeftNote: ${activeSection.instrumentConfig.bottomLeftNote}). These notes will not be mapped to the grid.`);
+        console.warn(
+          `Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the 8x8 grid window. ` +
+          `Root note auto-adjusted to ${importResult.minNoteNumber !== null ? importResult.minNoteNumber : activeSection.instrumentConfig.bottomLeftNote} to fit all notes.`
+        );
       }
       
       // Create a new layout for the imported MIDI
@@ -276,11 +316,12 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         performance: performance
       };
 
-      // W5: Convert Performance to GridPattern using the active InstrumentConfig
+      // W5: Convert Performance to GridPattern using the updated InstrumentConfig
+      const updatedConfig = updatedProjectState.sectionMaps.find(s => s.id === activeSection.id)?.instrumentConfig || activeSection.instrumentConfig;
       const newPattern = performanceToGridPattern(
         performance,
-        activeSection.instrumentConfig,
-        performance.tempo || projectState.projectTempo,
+        updatedConfig,
+        performance.tempo || updatedProjectState.projectTempo,
         64
       );
 
@@ -290,10 +331,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       }));
 
       onUpdateProjectState({
-        ...projectState,
-        layouts: [...projectState.layouts, newLayout],
+        ...updatedProjectState,
+        layouts: [...updatedProjectState.layouts, newLayout],
         activeLayoutId: newId,
-        projectTempo: performance.tempo || projectState.projectTempo
+        projectTempo: performance.tempo || updatedProjectState.projectTempo
       });
 
     } catch (err) {
@@ -503,11 +544,20 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
               <input 
                 type="checkbox" 
-                checked={showDebugLabels} 
-                onChange={(e) => setShowDebugLabels(e.target.checked)}
+                checked={showHeatmap} 
+                onChange={(e) => setShowHeatmap(e.target.checked)}
                 className="rounded border-slate-700 bg-slate-800"
               />
-              Show Debug Labels
+              Show Heatmap
+            </label>
+            <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={showNoteLabels} 
+                onChange={(e) => setShowNoteLabels(e.target.checked)}
+                className="rounded border-slate-700 bg-slate-800"
+              />
+              Show Note Labels
             </label>
             <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
               <input 
@@ -516,7 +566,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 onChange={(e) => setViewAllSteps(e.target.checked)}
                 className="rounded border-slate-700 bg-slate-800"
               />
-              View All Steps (Flatten Time)
+              View All Steps
             </label>
           </div>
           

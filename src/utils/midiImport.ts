@@ -6,22 +6,28 @@ import { SoundAsset } from '../types/layout';
 import { generateId } from './performanceUtils';
 
 /**
- * W3: Result type for MIDI import with unmapped Cell count
+ * Result type for MIDI import with unmapped Voice count.
+ * 
+ * TERMINOLOGY (see TERMINOLOGY.md):
+ * - Voice: A unique MIDI pitch (e.g., MIDI Note 36)
+ * - Cell: A slot in the 128 Drum Rack (Index 0-127)
+ * - Pad: A specific x/y coordinate on the 8x8 grid
  */
 export interface MidiImportResult {
   performance: Performance;
   unmappedNoteCount: number;
-  /** Minimum Cell (MIDI note number) found in the MIDI file (for intelligent root note logic) */
+  /** Minimum Voice (Cell/MIDI note number) found in the MIDI file (for intelligent root note logic) */
   minNoteNumber: number | null;
 }
 
 /**
- * W3: Parses a MIDI file and converts it into a Performance object.
- * Also analyzes Cells (MIDI notes) to check if they fall within the 8x8 grid view (can be mapped to Pads).
+ * Parses a MIDI file and converts it into a Performance object.
+ * 
+ * Also analyzes Voices (MIDI pitches) to check if they can be mapped to Pads via the Voice-to-Pad Assignment.
  * 
  * @param file The MIDI file to parse
- * @param config The instrument configuration to check against (for Cell-to-Pad mapping and out-of-bounds detection)
- * @returns A Promise resolving to the parsed Performance object and unmapped Cell count
+ * @param config The instrument configuration defining the Voice-to-Pad Assignment mapping
+ * @returns A Promise resolving to the parsed Performance object and unmapped Voice count
  */
 export const parseMidiFile = async (
   file: File,
@@ -45,7 +51,7 @@ export const parseMidiFile = async (
           track.notes.forEach((note) => {
             const noteNumber = note.midi;
             
-        // W3: Check if Cell (MIDI note) can be mapped to a Pad using noteToGrid
+        // Check if Voice (Cell/MIDI note) can be mapped to a Pad via Voice-to-Pad Assignment
         const position = GridMapService.noteToGrid(noteNumber, config);
         if (!position) {
           outOfBoundsCount++;
@@ -96,11 +102,16 @@ export const parseMidiFile = async (
 };
 
 /**
- * Processes multiple MIDI files and extracts unique sounds (one per unique pitch class).
- * Applies smart naming heuristics based on the number of unique pitches found.
+ * Processes multiple MIDI files and extracts unique Voices (one per unique MIDI pitch).
+ * 
+ * Applies smart naming heuristics based on the number of unique Voices found.
+ * Each Voice is stored as a SoundAsset (deprecated alias for Voice).
+ * 
+ * TERMINOLOGY (see TERMINOLOGY.md):
+ * - Voice: A unique MIDI pitch (e.g., MIDI Note 36) - stored as SoundAsset
  * 
  * @param files Array of MIDI files to process
- * @returns Promise resolving to a flat array of SoundAsset objects
+ * @returns Promise resolving to a flat array of Voice objects (as SoundAsset)
  */
 export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => {
   const allAssets: SoundAsset[] = [];
@@ -126,7 +137,7 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
         reader.readAsArrayBuffer(file);
       });
 
-      // Extract all unique pitch classes (MIDI note numbers) from all tracks
+      // Extract all unique Voices (MIDI pitch values) from all tracks
       const uniquePitches = new Set<number>();
       midiData.tracks.forEach((track) => {
         track.notes.forEach((note) => {
@@ -139,7 +150,7 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
 
       // Apply naming heuristic
       if (uniquePitchesArray.length === 1) {
-        // Single pitch: use filename
+        // Single Voice: use filename
         const asset: SoundAsset = {
           id: generateId('sound'),
           name: fileName,
@@ -150,7 +161,7 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
         };
         allAssets.push(asset);
       } else if (uniquePitchesArray.length > 1) {
-        // Multiple pitches: use filename with index
+        // Multiple Voices: use filename with index
         uniquePitchesArray.forEach((pitch, index) => {
           const asset: SoundAsset = {
             id: generateId('sound'),
@@ -176,11 +187,12 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
 
 /**
  * Fetches a MIDI file from a URL and parses it into a Performance object.
+ * 
  * Used for automatically loading test MIDI files during development.
  * 
  * @param url The URL or path to the MIDI file
- * @param config The instrument configuration to check against
- * @returns A Promise resolving to the parsed Performance object and unmapped note count
+ * @param config The instrument configuration defining the Voice-to-Pad Assignment mapping
+ * @returns A Promise resolving to the parsed Performance object and unmapped Voice count
  */
 export const fetchAndParseMidiFile = async (
   url: string,

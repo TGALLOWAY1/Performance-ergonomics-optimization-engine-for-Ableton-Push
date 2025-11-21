@@ -6,6 +6,7 @@
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { FingerID } from '../types/engine';
 import { Hand, MAX_HAND_SPAN, MAX_REACH_GRID_UNITS } from './ergonomics';
+import { FingerType, HandState, GridPos, DEFAULT_ENGINE_CONSTANTS } from './models';
 
 /**
  * Checks if the distance from wrist to target position is within the maximum hand span.
@@ -154,5 +155,278 @@ export function getReachabilityMap(
   }
   
   return map;
+}
+
+/**
+ * Calculates the Euclidean distance between two grid positions as tuples.
+ * 
+ * @param start - Starting position [row, col]
+ * @param end - Ending position [row, col]
+ * @returns The Euclidean distance between the two points
+ */
+function calculateDistance(start: GridPos, end: GridPos): number {
+  const rowDiff = end[0] - start[0];
+  const colDiff = end[1] - start[1];
+  return Math.sqrt((rowDiff * rowDiff) + (colDiff * colDiff));
+}
+
+/**
+ * Checks if a reach from start to end position is possible for a given finger.
+ * Returns false if the distance exceeds the maximum reach constant.
+ * 
+ * @param start - Starting position [row, col]
+ * @param end - Ending position [row, col]
+ * @param finger - The finger type attempting the reach
+ * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
+ * @returns true if the reach is possible, false if distance exceeds max reach
+ */
+export function isReachPossible(
+  start: GridPos,
+  end: GridPos,
+  finger: FingerType,
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+): boolean {
+  const distance = calculateDistance(start, end);
+  
+  // Use maxReach as the maximum reach distance
+  // All fingers use the same max reach for now, but this could be finger-specific
+  return distance <= constants.maxReach;
+}
+
+/**
+ * Checks if a new finger assignment violates geometric finger ordering constraints.
+ * Returns false if the assignment would cause invalid geometry (e.g., index crossing over pinky,
+ * thumb crossing above middle finger).
+ * 
+ * @param handState - Current state of the hand
+ * @param newAssignment - The new finger assignment {finger: FingerType, pos: GridPos}
+ * @param handSide - Which hand (left or right)
+ * @returns true if the assignment is geometrically valid, false otherwise
+ */
+export function isValidFingerOrder(
+  handState: HandState,
+  newAssignment: { finger: FingerType; pos: GridPos },
+  handSide: 'left' | 'right'
+): boolean {
+  const { finger: newFinger, pos: newPos } = newAssignment;
+  
+  // Create a temporary hand state with the new assignment
+  const tempFingers: Record<FingerType, FingerState> = {
+    ...handState.fingers,
+    [newFinger]: {
+      currentGridPos: newPos,
+      fatigueLevel: handState.fingers[newFinger].fatigueLevel
+    }
+  };
+
+  // Get all finger positions (including the new assignment)
+  const thumbPos = tempFingers.thumb.currentGridPos;
+  const indexPos = tempFingers.index.currentGridPos;
+  const middlePos = tempFingers.middle.currentGridPos;
+  const ringPos = tempFingers.ring.currentGridPos;
+  const pinkyPos = tempFingers.pinky.currentGridPos;
+
+  // Rule 1: Thumb and Pinky ordering
+  // For right hand: thumb should be left (lower col) or bottom (lower row) of pinky
+  // For left hand: thumb should be right (higher col) or bottom (lower row) of pinky
+  if (thumbPos && pinkyPos) {
+    if (handSide === 'right') {
+      if (thumbPos[1] >= pinkyPos[1] && thumbPos[0] >= pinkyPos[0]) {
+        return false; // Thumb is to the right and above pinky (invalid)
+      }
+    } else {
+      // left hand
+      if (thumbPos[1] <= pinkyPos[1] && thumbPos[0] >= pinkyPos[0]) {
+        return false; // Thumb is to the left and above pinky (invalid)
+      }
+    }
+  }
+
+  // Rule 2: Index should not cross over pinky
+  // For right hand: index should be to the right (higher col) of pinky
+  // For left hand: index should be to the left (lower col) of pinky
+  if (indexPos && pinkyPos) {
+    if (handSide === 'right') {
+      if (indexPos[1] < pinkyPos[1]) {
+        return false; // Index is to the left of pinky (crossed over)
+      }
+    } else {
+      // left hand
+      if (indexPos[1] > pinkyPos[1]) {
+        return false; // Index is to the right of pinky (crossed over)
+      }
+    }
+  }
+
+  // Rule 3: Thumb should not cross above middle finger
+  // Thumb should generally be at the same row or below middle finger
+  if (thumbPos && middlePos) {
+    if (thumbPos[0] > middlePos[0]) {
+      return false; // Thumb is above middle finger (invalid)
+    }
+  }
+
+  // Rule 4: Finger sequence ordering (index < middle < ring < pinky in column for right hand)
+  // For right hand: fingers should be in order left to right (index, middle, ring, pinky)
+  // For left hand: fingers should be in order right to left (pinky, ring, middle, index)
+  const fingerSequence: FingerType[] = handSide === 'right' 
+    ? ['index', 'middle', 'ring', 'pinky']
+    : ['pinky', 'ring', 'middle', 'index'];
+
+  for (let i = 0; i < fingerSequence.length - 1; i++) {
+    const finger1 = fingerSequence[i];
+    const finger2 = fingerSequence[i + 1];
+    const pos1 = tempFingers[finger1].currentGridPos;
+    const pos2 = tempFingers[finger2].currentGridPos;
+
+    if (pos1 && pos2) {
+      if (handSide === 'right') {
+        // Right hand: each finger should be to the right (higher col) of the previous
+        if (pos1[1] >= pos2[1]) {
+          return false; // Fingers are out of order
+        }
+      } else {
+        // Left hand: each finger should be to the left (lower col) of the previous
+        if (pos1[1] <= pos2[1]) {
+          return false; // Fingers are out of order
+        }
+      }
+    }
+  }
+
+  return true; // All geometric constraints satisfied
+}
+
+/**
+ * Finger assignment for a chord.
+ */
+export interface ChordFingerAssignment {
+  finger: FingerType;
+  pos: GridPos;
+}
+
+/**
+ * Checks chord feasibility and returns valid finger combinations.
+ * Rejects combinations that require overlapping fingers or impossible spans.
+ * 
+ * @param notes - Array of note positions [row, col] in the chord
+ * @param handSide - Which hand (left or right)
+ * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
+ * @returns Array of valid finger assignment combinations, or empty array if no valid combination exists
+ */
+export function checkChordFeasibility(
+  notes: GridPos[],
+  handSide: 'left' | 'right',
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+): ChordFingerAssignment[][] {
+  if (notes.length === 0) {
+    return [];
+  }
+
+  // If more notes than fingers, chord is impossible
+  if (notes.length > 5) {
+    return [];
+  }
+
+  const allFingers: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  const validCombinations: ChordFingerAssignment[][] = [];
+
+  // Generate all possible finger-to-note assignments
+  // We'll use a recursive approach to generate permutations
+  function generateAssignments(
+    remainingNotes: GridPos[],
+    remainingFingers: FingerType[],
+    currentAssignment: ChordFingerAssignment[]
+  ): void {
+    // Base case: all notes assigned
+    if (remainingNotes.length === 0) {
+      // Check if this assignment is valid
+      if (isChordAssignmentValid(currentAssignment, handSide, constants)) {
+        validCombinations.push([...currentAssignment]);
+      }
+      return;
+    }
+
+    // Try assigning each remaining finger to the first remaining note
+    for (let i = 0; i < remainingFingers.length; i++) {
+      const finger = remainingFingers[i];
+      const note = remainingNotes[0];
+      
+      const newAssignment: ChordFingerAssignment[] = [
+        ...currentAssignment,
+        { finger, pos: note }
+      ];
+
+      // Recursively assign remaining notes to remaining fingers
+      generateAssignments(
+        remainingNotes.slice(1),
+        [...remainingFingers.slice(0, i), ...remainingFingers.slice(i + 1)],
+        newAssignment
+      );
+    }
+  }
+
+  generateAssignments(notes, allFingers, []);
+
+  return validCombinations;
+}
+
+/**
+ * Helper function to check if a chord assignment is valid.
+ * Checks for overlapping fingers and impossible spans.
+ */
+function isChordAssignmentValid(
+  assignment: ChordFingerAssignment[],
+  handSide: 'left' | 'right',
+  constants: typeof DEFAULT_ENGINE_CONSTANTS
+): boolean {
+  // Check 1: No overlapping fingers (same position)
+  const positions = new Set<string>();
+  for (const { pos } of assignment) {
+    const posKey = `${pos[0]},${pos[1]}`;
+    if (positions.has(posKey)) {
+      return false; // Overlapping fingers
+    }
+    positions.add(posKey);
+  }
+
+  // Check 2: Span width is within limits
+  const thumbAssignment = assignment.find(a => a.finger === 'thumb');
+  const pinkyAssignment = assignment.find(a => a.finger === 'pinky');
+
+  if (thumbAssignment && pinkyAssignment) {
+    const spanDistance = calculateDistance(thumbAssignment.pos, pinkyAssignment.pos);
+    if (spanDistance > constants.maxSpan) {
+      return false; // Span too wide
+    }
+  }
+
+  // Check 3: Finger ordering is valid
+  // Create a temporary hand state for validation
+  const tempHandState: HandState = {
+    fingers: {
+      thumb: { currentGridPos: null, fatigueLevel: 0 },
+      index: { currentGridPos: null, fatigueLevel: 0 },
+      middle: { currentGridPos: null, fatigueLevel: 0 },
+      ring: { currentGridPos: null, fatigueLevel: 0 },
+      pinky: { currentGridPos: null, fatigueLevel: 0 },
+    },
+    centerOfGravity: null,
+    spanWidth: 0,
+  };
+
+  // Apply all assignments to temp hand state
+  for (const { finger, pos } of assignment) {
+    tempHandState.fingers[finger].currentGridPos = pos;
+  }
+
+  // Check each assignment for valid finger order
+  for (const { finger, pos } of assignment) {
+    if (!isValidFingerOrder(tempHandState, { finger, pos }, handSide)) {
+      return false; // Invalid finger ordering
+    }
+  }
+
+  return true; // All checks passed
 }
 

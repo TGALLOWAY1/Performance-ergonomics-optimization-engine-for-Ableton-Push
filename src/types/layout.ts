@@ -1,21 +1,29 @@
 /**
  * Layout and mapping types for the Designer interface.
+ * 
+ * TERMINOLOGY (see TERMINOLOGY.md):
+ * - Voice: A unique MIDI pitch (e.g., MIDI Note 36) - formerly 'sound' or 'track'
+ * - Cell: A slot in the 128 Drum Rack (Index 0-127) - formerly 'note' or 'pitch'
+ * - Pad: A specific x/y coordinate on the 8x8 grid
+ * - Assignment: The mapping of a Voice/Cell to a Pad
  */
 
 /**
  * Voice: A unique MIDI pitch that can be assigned to a Pad on the grid.
+ * 
  * Represents a distinct sound source (formerly 'sound' or 'track').
+ * The Voice's Cell (MIDI note number) determines which Drum Rack slot it occupies.
  */
 export interface Voice {
   /** Unique identifier (UUID) */
   id: string;
-  /** Display name for the voice */
+  /** Display name for the Voice */
   name: string;
   /** Source type: MIDI track or audio slice */
   sourceType: 'midi_track' | 'audio_slice';
   /** Path or reference to the source file */
   sourceFile: string;
-  /** Cell: The MIDI note number (0-127) in the 128 Drum Rack slot (formerly 'note' or 'pitch') */
+  /** Cell: The MIDI note number (0-127) representing the Drum Rack slot for this Voice */
   originalMidiNote: number | null;
   /** Color for UI display (hex code or CSS color) */
   color: string;
@@ -27,8 +35,10 @@ export interface Voice {
 export type SoundAsset = Voice;
 
 /**
- * Represents a grid mapping configuration.
+ * GridMapping: Represents a grid mapping configuration.
+ * 
  * Assignment: Maps Pads (x/y coordinates on the 8x8 grid) to Voices and finger constraints.
+ * This defines which Voice (via its Cell) is assigned to which Pad.
  */
 export interface GridMapping {
   /** Unique identifier */
@@ -71,8 +81,9 @@ export function parseCellKey(key: string): { row: number; col: number } | null {
 }
 
 /**
- * Represents a template slot in a layout template.
- * Defines where a Voice should be assigned to a Pad.
+ * TemplateSlot: Represents a template slot in a layout template.
+ * 
+ * Defines where a Voice should be assigned to a Pad (Assignment relationship).
  */
 export interface TemplateSlot {
   /** Pad row position (0-7, 0 is bottom) */
@@ -81,7 +92,7 @@ export interface TemplateSlot {
   col: number;
   /** Label to display (e.g., "Kick", "Snare") */
   label: string;
-  /** Optional Cell (MIDI note number) suggestion for this Pad */
+  /** Optional Cell (MIDI note number) suggestion for this Pad Assignment */
   suggestedNote?: number;
 }
 
@@ -99,8 +110,9 @@ export interface LayoutTemplate {
 
 /**
  * Standard drum kit template.
- * Based on common Push 3 drum rack layouts with bottomLeftCell = 36 (C1).
- * Defines Pad assignments for common drum Voices.
+ * 
+ * Based on common Push 3 drum rack layouts with bottomLeftNote = 36 (C1).
+ * Defines Pad Assignments for common drum Voices.
  */
 export const STANDARD_KIT_TEMPLATE: LayoutTemplate = {
   id: 'standard-kit',
