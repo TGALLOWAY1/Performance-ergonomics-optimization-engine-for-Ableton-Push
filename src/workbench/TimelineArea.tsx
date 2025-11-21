@@ -1,6 +1,6 @@
 import React from 'react';
 import { Timeline } from './Timeline';
-import { SectionMap } from '../data/models';
+import { SectionMap } from '../types/performance';
 
 interface TimelineAreaProps {
   steps: number;

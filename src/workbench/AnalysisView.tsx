@@ -4,14 +4,14 @@ import { GridArea } from './GridArea';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
-import { InstrumentConfig } from '../data/models';
+import { InstrumentConfig } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
 import { createEmptyPattern, toggleStepPad } from '../utils/gridPatternUtils';
 import { gridPatternToPerformance, performanceToGridPattern } from '../utils/gridPatternToPerformance';
 import { parseMidiFile } from '../utils/midiImport';
 import { GridMapService } from '../engine/gridMapService';
 import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
-import { runEngine, EngineResult } from '../engine/runEngine';
+import { SectionAwareSolver, EngineResult } from '../engine/core';
 import { GridMapping } from '../types/layout';
 import { getPositionForMidi } from '../utils/layoutUtils';
 import { exportLayout, importLayout } from '../utils/projectPersistence';
@@ -102,15 +102,16 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   // Engine Integration Effect
   useEffect(() => {
-    if (!activeLayout || !activeMapping) return;
+    if (!activeLayout || !projectState.sectionMaps.length) return;
 
     const timer = setTimeout(() => {
-      const result = runEngine(activeLayout.performance, activeMapping);
+      const solver = new SectionAwareSolver(projectState.sectionMaps);
+      const result = solver.solve(activeLayout.performance);
       setEngineResult(result);
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timer);
-  }, [activeLayout, activeMapping]);
+  }, [activeLayout, projectState.sectionMaps]);
 
   const handleCreateLayout = () => {
     const newId = `layout-${Date.now()}`;

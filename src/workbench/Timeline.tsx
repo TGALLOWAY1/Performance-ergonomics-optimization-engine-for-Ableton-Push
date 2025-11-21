@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { SectionMap } from '../data/models';
+import { SectionMap } from '../types/performance';
 
 interface TimelineProps {
   steps: number;

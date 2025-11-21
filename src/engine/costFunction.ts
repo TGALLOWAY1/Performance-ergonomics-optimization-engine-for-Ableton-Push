@@ -4,19 +4,19 @@
  * candidate finger assignments for notes.
  */
 
-import { FingerType, HandState, GridPos, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
+import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
+import { GridPosition, calculateGridDistance } from './gridMath';
 
 /**
- * Calculates the Euclidean distance between two grid positions as tuples.
+ * Calculates the Euclidean distance between two grid positions.
+ * Uses GridPosition (object-based) for consistency.
  * 
- * @param from - Starting position [row, col]
- * @param to - Ending position [row, col]
+ * @param from - Starting position
+ * @param to - Ending position
  * @returns The Euclidean distance between the two points
  */
-function calculateDistance(from: GridPos, to: GridPos): number {
-  const rowDiff = to[0] - from[0];
-  const colDiff = to[1] - from[1];
-  return Math.sqrt((rowDiff * rowDiff) + (colDiff * colDiff));
+function calculateDistance(from: GridPosition, to: GridPosition): number {
+  return calculateGridDistance(from, to);
 }
 
 /**
@@ -24,15 +24,15 @@ function calculateDistance(from: GridPos, to: GridPos): number {
  * Cost = Euclidean distance * finger strength weight.
  * Pinky moves are expensive (weight = 2.5), index moves are baseline (weight = 1.0).
  * 
- * @param from - Starting position [row, col], or null if finger is not placed
- * @param to - Target position [row, col]
+ * @param from - Starting position (object-based), or null if finger is not placed
+ * @param to - Target position (object-based)
  * @param finger - The finger type making the movement
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
  * @returns The movement cost (distance * finger weight)
  */
 export function calculateMovementCost(
-  from: GridPos | null,
-  to: GridPos,
+  from: GridPosition | null,
+  to: GridPosition,
   finger: FingerType,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): number {
@@ -52,10 +52,10 @@ export function calculateMovementCost(
  * CoG is the average position of all placed fingers.
  * 
  * @param handState - The current hand state
- * @returns The center of gravity [row, col], or null if no fingers are placed
+ * @returns The center of gravity (object-based), or null if no fingers are placed
  */
-function calculateCenterOfGravity(handState: HandState): GridPos | null {
-  const placedFingers: GridPos[] = [];
+function calculateCenterOfGravity(handState: HandState): GridPosition | null {
+  const placedFingers: GridPosition[] = [];
   
   for (const fingerType of ['thumb', 'index', 'middle', 'ring', 'pinky'] as FingerType[]) {
     const pos = handState.fingers[fingerType].currentGridPos;
@@ -69,13 +69,13 @@ function calculateCenterOfGravity(handState: HandState): GridPos | null {
   }
 
   // Calculate average position
-  const sumRow = placedFingers.reduce((sum, pos) => sum + pos[0], 0);
-  const sumCol = placedFingers.reduce((sum, pos) => sum + pos[1], 0);
+  const sumRow = placedFingers.reduce((sum, pos) => sum + pos.row, 0);
+  const sumCol = placedFingers.reduce((sum, pos) => sum + pos.col, 0);
   
-  return [
-    sumRow / placedFingers.length,
-    sumCol / placedFingers.length
-  ];
+  return {
+    row: sumRow / placedFingers.length,
+    col: sumCol / placedFingers.length
+  };
 }
 
 /**
@@ -92,7 +92,7 @@ function calculateSpanWidth(handState: HandState): number {
     return 0;
   }
 
-  return calculateDistance(thumbPos, pinkyPos);
+  return calculateGridDistance(thumbPos, pinkyPos);
 }
 
 /**
@@ -100,14 +100,14 @@ function calculateSpanWidth(handState: HandState): number {
  * Uses a non-linear penalty function that increases exponentially as span exceeds idealReach.
  * 
  * @param handState - Current hand state
- * @param newPos - New position being considered [row, col]
+ * @param newPos - New position being considered (object-based)
  * @param finger - The finger type being assigned to newPos
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
  * @returns The stretch penalty (0 if within comfort zone, non-linear penalty if beyond)
  */
 export function calculateStretchPenalty(
   handState: HandState,
-  newPos: GridPos,
+  newPos: GridPosition,
   finger: FingerType,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): number {
@@ -150,13 +150,13 @@ export function calculateStretchPenalty(
  * from the section's home position (e.g., bottomLeftNote or defined home position).
  * 
  * @param handState - Current hand state
- * @param homePos - Home position [row, col] (e.g., position of bottomLeftNote)
+ * @param homePos - Home position (object-based) (e.g., position of bottomLeftNote)
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
  * @returns The drift penalty (0 if CoG is at home, increasing with distance)
  */
 export function calculateDriftPenalty(
   handState: HandState,
-  homePos: GridPos,
+  homePos: GridPosition,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): number {
   // Calculate current center of gravity

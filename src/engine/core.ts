@@ -4,9 +4,9 @@
  */
 
 import { Performance, NoteEvent } from '../types/performance';
-import { SectionMap, InstrumentConfig } from '../data/models';
+import { SectionMap, InstrumentConfig } from '../types/performance';
 import { GridMapService } from './gridMapService';
-import { FingerType, HandState, GridPos, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
+import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
 import { isReachPossible, isValidFingerOrder, checkChordFeasibility } from './feasibility';
 import {
   calculateMovementCost,
@@ -16,7 +16,7 @@ import {
   recordNoteAssignment,
   clearNoteHistory,
 } from './costFunction';
-import { GridPosition } from './gridMath';
+import { GridPosition, calculateGridDistance } from './gridMath';
 
 /**
  * Engine debug event with assignment details.
@@ -75,38 +75,33 @@ interface FingerCandidate {
 }
 
 /**
- * Calculates the Euclidean distance between two grid positions as tuples.
+ * Helper to convert GridPosition to tuple format for compatibility.
+ * @deprecated Use GridPosition directly instead of tuples
  */
-function calculateDistance(a: GridPos, b: GridPos): number {
-  const rowDiff = b[0] - a[0];
-  const colDiff = b[1] - a[1];
-  return Math.sqrt((rowDiff * rowDiff) + (colDiff * colDiff));
-}
-
-/**
- * Converts GridPosition to GridPos tuple.
- */
-function gridPosToTuple(pos: GridPosition): GridPos {
+function gridPosToTuple(pos: GridPosition): [number, number] {
   return [pos.row, pos.col];
 }
 
 /**
- * Converts GridPos tuple to GridPosition.
+ * Helper to convert tuple to GridPosition.
+ * @deprecated Use GridPosition directly instead of tuples
  */
-function tupleToGridPos(pos: GridPos): GridPosition {
+function tupleToGridPos(pos: [number, number]): GridPosition {
   return { row: pos[0], col: pos[1] };
 }
 
 /**
  * Calculates the center of gravity for a hand state.
+ * Returns GridPosition (object-based) instead of tuple.
  */
-function calculateCenterOfGravity(handState: HandState): GridPos | null {
-  const placedFingers: GridPos[] = [];
+function calculateCenterOfGravity(handState: HandState): GridPosition | null {
+  const placedFingers: GridPosition[] = [];
   
   for (const fingerType of ['thumb', 'index', 'middle', 'ring', 'pinky'] as FingerType[]) {
     const pos = handState.fingers[fingerType].currentGridPos;
     if (pos !== null) {
-      placedFingers.push(pos);
+      // Convert tuple to GridPosition if needed
+      placedFingers.push(Array.isArray(pos) ? tupleToGridPos(pos) : pos);
     }
   }
 
@@ -114,13 +109,13 @@ function calculateCenterOfGravity(handState: HandState): GridPos | null {
     return null;
   }
 
-  const sumRow = placedFingers.reduce((sum, pos) => sum + pos[0], 0);
-  const sumCol = placedFingers.reduce((sum, pos) => sum + pos[1], 0);
+  const sumRow = placedFingers.reduce((sum, pos) => sum + pos.row, 0);
+  const sumCol = placedFingers.reduce((sum, pos) => sum + pos.col, 0);
   
-  return [
-    sumRow / placedFingers.length,
-    sumCol / placedFingers.length
-  ];
+  return {
+    row: sumRow / placedFingers.length,
+    col: sumCol / placedFingers.length
+  };
 }
 
 /**
@@ -134,9 +129,11 @@ function calculateSpanWidth(handState: HandState): number {
     return 0;
   }
 
-  const rowDiff = pinkyPos[0] - thumbPos[0];
-  const colDiff = pinkyPos[1] - thumbPos[1];
-  return Math.sqrt((rowDiff * rowDiff) + (colDiff * colDiff));
+  // Convert tuples to GridPosition if needed
+  const thumb = Array.isArray(thumbPos) ? tupleToGridPos(thumbPos) : thumbPos;
+  const pinky = Array.isArray(pinkyPos) ? tupleToGridPos(pinkyPos) : pinkyPos;
+  
+  return calculateGridDistance(thumb, pinky);
 }
 
 /**
@@ -149,6 +146,8 @@ function updateHandStateMetrics(handState: HandState): void {
 
 /**
  * Creates an initial hand state with all fingers unplaced.
+ * Note: HandState still uses GridPos (tuple) for backward compatibility with models.ts,
+ * but we'll convert internally to GridPosition where needed.
  */
 function createInitialHandState(): HandState {
   return {
@@ -172,9 +171,9 @@ function createInitialHandState(): HandState {
  * 
  * @param sectionMap - The section map defining the instrument config
  * @param hand - Which hand ('left' or 'right')
- * @returns Home position [row, col] for the hand
+ * @returns Home position (object-based) for the hand
  */
-function getHomePosition(sectionMap: SectionMap, hand: 'left' | 'right'): GridPos {
+function getHomePosition(sectionMap: SectionMap, hand: 'left' | 'right'): GridPosition {
   // Base home position: bottom-left corner (row 0, col 0) = bottomLeftNote
   // Left hand: stays near bottom-left (row 0-1, col 0-2)
   // Right hand: offset to the right (row 0-1, col 4-6)
@@ -182,11 +181,11 @@ function getHomePosition(sectionMap: SectionMap, hand: 'left' | 'right'): GridPo
   if (hand === 'left') {
     // Left hand home: bottom-left area (C1/C2 region)
     // Position: row 0 (bottom), col 1 (slightly right of left edge)
-    return [0, 1];
+    return { row: 0, col: 1 };
   } else {
     // Right hand home: right side of bottom row (F2/G2 region)
     // Position: row 0 (bottom), col 5 (right side)
-    return [0, 5];
+    return { row: 0, col: 5 };
   }
 }
 
@@ -240,11 +239,11 @@ export class SectionAwareSolver {
    * Identifies candidate hands using left/right split heuristic.
    * For an 8x8 grid, typically: left half (cols 0-3) = left hand, right half (cols 4-7) = right hand.
    * 
-   * @param targetPos - Target position [row, col]
+   * @param targetPos - Target position (object-based)
    * @returns Array of candidate hands
    */
-  private identifyCandidateHands(targetPos: GridPos): ('left' | 'right')[] {
-    const col = targetPos[1];
+  private identifyCandidateHands(targetPos: GridPosition): ('left' | 'right')[] {
+    const col = targetPos.col;
     
     // Simple split: left half (cols 0-3) = left hand, right half (cols 4-7) = right hand
     // But allow both hands as candidates for flexibility (hands can cross over)
@@ -259,13 +258,13 @@ export class SectionAwareSolver {
    * Generates candidate fingers that can reach the target position.
    * 
    * @param handState - Current hand state
-   * @param targetPos - Target position [row, col]
+   * @param targetPos - Target position (object-based)
    * @param hand - Which hand
    * @returns Array of candidate finger types that can reach
    */
   private generateCandidateFingers(
     handState: HandState,
-    targetPos: GridPos,
+    targetPos: GridPosition,
     hand: 'left' | 'right'
   ): FingerType[] {
     const candidates: FingerType[] = [];
@@ -275,7 +274,7 @@ export class SectionAwareSolver {
       const currentPos = handState.fingers[finger].currentGridPos;
       
       // If finger is not placed, use center of gravity or home position as start
-      const startPos: GridPos = currentPos || handState.centerOfGravity || [0, 0];
+      const startPos: GridPosition = currentPos || handState.centerOfGravity || { row: 0, col: 0 };
       
       // Check if reach is possible
       if (isReachPossible(startPos, targetPos, finger, this.constants)) {
@@ -290,7 +289,7 @@ export class SectionAwareSolver {
    * Calculates total cost for a candidate assignment.
    * 
    * @param candidate - The candidate assignment
-   * @param targetPos - Target position [row, col]
+   * @param targetPos - Target position (object-based)
    * @param sectionMap - Active section map
    * @param currentTime - Current time in seconds
    * @param noteNumber - MIDI note number
@@ -298,7 +297,7 @@ export class SectionAwareSolver {
    */
   private calculateTotalCost(
     candidate: FingerCandidate,
-    targetPos: GridPos,
+    targetPos: GridPosition,
     sectionMap: SectionMap,
     currentTime: number,
     noteNumber: number
@@ -331,7 +330,7 @@ export class SectionAwareSolver {
    * If current choice makes next note impossible/expensive, add penalty.
    * 
    * @param currentCandidate - Current candidate assignment
-   * @param currentTargetPos - Current note's target position [row, col]
+   * @param currentTargetPos - Current note's target position (object-based)
    * @param nextNote - Next note event (if available)
    * @param sectionMap - Active section map for next note
    * @param currentTime - Current time
@@ -339,7 +338,7 @@ export class SectionAwareSolver {
    */
   private calculateFutureCost(
     currentCandidate: FingerCandidate,
-    currentTargetPos: GridPos,
+    currentTargetPos: GridPosition,
     nextNote: NoteEvent | null,
     sectionMap: SectionMap | null,
     currentTime: number
@@ -430,13 +429,13 @@ export class SectionAwareSolver {
    * 
    * @param handState - Hand state to update
    * @param finger - Finger being assigned
-   * @param targetPos - Target position [row, col]
+   * @param targetPos - Target position (object-based)
    * @param timeDelta - Time since last event
    */
   private updateHandState(
     handState: HandState,
     finger: FingerType,
-    targetPos: GridPos,
+    targetPos: GridPosition,
     timeDelta: number
   ): void {
     // Decay fatigue for all fingers
@@ -604,8 +603,8 @@ export class SectionAwareSolver {
           finger: null,
           cost: Infinity,
           difficulty: 'Unplayable',
-          row: targetPos[0],
-          col: targetPos[1],
+          row: targetPos.row,
+          col: targetPos.col,
         });
         continue;
       }
@@ -635,8 +634,8 @@ export class SectionAwareSolver {
         finger: winner.finger,
         cost: winner.cost,
         difficulty,
-        row: targetPos[0],
-        col: targetPos[1],
+        row: targetPos.row,
+        col: targetPos.col,
       });
 
       this.lastEventTime = note.startTime;
@@ -697,9 +696,9 @@ export class SectionAwareSolver {
       // Calculate drift for events in this section
       sectionEvents.forEach(event => {
         if (event.row !== undefined && event.col !== undefined) {
-          const eventPos: GridPos = [event.row, event.col];
+          const eventPos: GridPosition = { row: event.row, col: event.col };
           const homePos = (event.assignedHand === 'left') ? leftHome : rightHome;
-          const drift = calculateDistance(eventPos, homePos);
+          const drift = calculateGridDistance(eventPos, homePos);
           totalDrift += drift;
           driftCount++;
         }

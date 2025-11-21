@@ -14,10 +14,12 @@
  */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../data/models';
+import { SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { GridPattern } from '../types/gridPattern';
-import { EngineResult, EngineDebugEvent, DifficultyLabel } from '../engine/runEngine';
+import { EngineResult, EngineDebugEvent } from '../engine/core';
+
+type DifficultyLabel = 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
 import { formatFinger, normalizeHand } from '../utils/formatUtils';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
@@ -226,7 +228,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const getDebugEventForPad = (row: number, col: number): EngineDebugEvent | null => {
     if (!engineResult || !activeLayout) return null;
 
-    // If we have activeMapping, find the note by looking up the cell's SoundAsset
+    // If we have activeMapping, find the note by looking up the cell's Voice
     // Otherwise, use the standard position-to-note conversion
     let noteNumber: number | null = null;
     if (activeMapping) {
@@ -309,12 +311,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         {rows.map((row) => (
           <React.Fragment key={`row-${row}`}>
             {cols.map((col) => {
-              // Get SoundAsset from activeMapping if available
+              // Get Voice from activeMapping if available
               // Inline cellKey to avoid potential circular dependency issues
               const cellKeyStr = `${row},${col}`;
               const soundAsset = activeMapping?.cells[cellKeyStr] || null;
               
-              // Determine note number - use SoundAsset's originalMidiNote if available, otherwise use position
+              // Determine note number - use Voice's originalMidiNote if available, otherwise use position
               const noteNumber = soundAsset && soundAsset.originalMidiNote !== null
                 ? soundAsset.originalMidiNote
                 : GridMapService.getNoteForPosition(row, col, activeSection?.instrumentConfig);
@@ -343,7 +345,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 isActive = padOrderIndex !== null;
               }
 
-              // Display name: use SoundAsset name if available, otherwise note name
+              // Display name: use Voice name if available, otherwise note name
               const displayName = soundAsset
                 ? soundAsset.name
                 : getNoteName(noteNumber);
@@ -458,7 +460,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 }
               };
 
-              // Apply SoundAsset color if available
+              // Apply Voice color if available
               const cellColor = soundAsset
                 ? soundAsset.color
                 : undefined;

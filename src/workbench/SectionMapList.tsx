@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { InstrumentConfig, SectionMap } from '../data/models';
+import { InstrumentConfig, SectionMap } from '../types/performance';
 
 interface SectionMapItemProps {
   section: SectionMap;
@@ -167,6 +167,7 @@ export const SectionMapList: React.FC<SectionMapListProps> = ({
       rows: 8,
       cols: 8,
       bottomLeftNote: newConfigBottomNote,
+      layoutMode: 'drum_64',
     });
     
     setNewConfigName('');

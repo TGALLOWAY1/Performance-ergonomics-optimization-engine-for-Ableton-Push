@@ -4,6 +4,8 @@
  * of hand and finger states for ergonomic analysis.
  */
 
+import { GridPosition } from './gridMath';
+
 /**
  * Finger type enumeration.
  * Represents the five fingers of a hand.
@@ -17,8 +19,8 @@ export type FingerType = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky';
 export type HandSide = 'left' | 'right';
 
 /**
- * Grid position as a tuple [row, col].
- * Row and column are 0-based indices.
+ * @deprecated Use GridPosition instead. This tuple type is kept for backward compatibility only.
+ * Grid position as a tuple [row, col]. Row and column are 0-based indices.
  */
 export type GridPos = [number, number];
 
@@ -27,8 +29,8 @@ export type GridPos = [number, number];
  * Includes position on the grid and fatigue level.
  */
 export interface FingerState {
-  /** Current grid position [row, col], or null if finger is not placed */
-  currentGridPos: GridPos | null;
+  /** Current grid position (object-based), or null if finger is not placed */
+  currentGridPos: GridPosition | null;
   /** Fatigue level (0.0 = no fatigue, higher = more fatigued) */
   fatigueLevel: number;
 }
@@ -40,8 +42,8 @@ export interface FingerState {
 export interface HandState {
   /** State of each finger, indexed by FingerType */
   fingers: Record<FingerType, FingerState>;
-  /** Center of gravity of the hand [row, col], calculated from finger positions */
-  centerOfGravity: GridPos | null;
+  /** Center of gravity of the hand (object-based), calculated from finger positions */
+  centerOfGravity: GridPosition | null;
   /** Span width in grid cells (distance between thumb and pinky) */
   spanWidth: number;
 }

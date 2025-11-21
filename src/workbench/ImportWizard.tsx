@@ -1,17 +1,17 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { SoundAsset } from '../types/layout';
+import { Voice } from '../types/layout';
 import { processMidiFiles } from '../utils/midiImport';
 
 interface ImportWizardProps {
   /** Existing Voices to check for conflicts */
-  existingSounds: SoundAsset[];
+  existingSounds: Voice[];
   /** Callback when import is confirmed with final Voices */
-  onConfirm: (assets: SoundAsset[]) => void;
+  onConfirm: (assets: Voice[]) => void;
   /** Callback when import is cancelled */
   onCancel: () => void;
 }
 
-interface StagedAsset extends SoundAsset {
+interface StagedAsset extends Voice {
   /** Temporary name that can be edited before import */
   tempName: string;
   /** Whether this Voice has a naming conflict */
@@ -62,7 +62,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
       const fileArray = Array.from(files);
       
       // FIX: Process all files and collect ALL assets into a single array
-      const allAssets: SoundAsset[] = [];
+      const allAssets: Voice[] = [];
       
       for (const file of fileArray) {
         try {
@@ -180,7 +180,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
    * Confirms import with final asset names.
    */
   const handleConfirm = () => {
-    const finalAssets: SoundAsset[] = stagedAssets.map(({ tempName, hasConflict, ...asset }) => ({
+    const finalAssets: Voice[] = stagedAssets.map(({ tempName, hasConflict, ...asset }) => ({
       ...asset,
       name: tempName,
     }));

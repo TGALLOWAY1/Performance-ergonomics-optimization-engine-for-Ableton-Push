@@ -1,14 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { LayoutDesigner } from './LayoutDesigner';
 import { ProjectState } from '../types/projectState';
-import { GridMapping, SoundAsset } from '../types/layout';
-import { InstrumentConfig, SectionMap } from '../data/models';
+import { GridMapping, Voice } from '../types/layout';
+import { InstrumentConfig, SectionMap } from '../types/performance';
 import { useProjectHistory } from '../hooks/useProjectHistory';
 import { generateId } from '../utils/performanceUtils';
 import { DEFAULT_TEST_MIDI_URL } from '../data/testData';
-import { fetchAndParseMidiFile } from '../utils/midiImport';
-import { GridMapService } from '../engine/gridMapService';
-import { cellKey } from '../types/layout';
+import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
+import { SectionAwareSolver, EngineResult } from '../engine/core';
+import { getActivePerformance } from '../utils/performanceSelectors';
 
 // Dummy Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -16,7 +16,8 @@ const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
   name: 'Standard Drum Kit',
   bottomLeftNote: 36, // C2
   rows: 8,
-  cols: 8
+  cols: 8,
+  layoutMode: 'drum_64'
 };
 
 const INITIAL_PROJECT_STATE: ProjectState = {
@@ -105,226 +106,216 @@ export const Workbench: React.FC = () => {
   const [viewAllSteps, setViewAllSteps] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
 
+  // Engine state
+  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+
+  /**
+   * Unified project load handler that processes MIDI files and updates project state atomically.
+   * This function handles both default loading and user file imports.
+   * 
+   * @param source - Either a File object or a URL string
+   * @param existingConfig - Optional existing instrument config to use as base
+   */
+  const handleProjectLoad = useCallback(async (
+    source: File | string,
+    existingConfig?: InstrumentConfig
+  ): Promise<void> => {
+    try {
+      // Use the unified import function
+      const projectData = typeof source === 'string'
+        ? await fetchMidiProject(source, existingConfig)
+        : await parseMidiFileToProject(source, existingConfig);
+
+      // Atomic state update - no setTimeout, no side effects
+      setProjectState(prevState => {
+        const layoutId = prevState.activeLayoutId || prevState.layouts[0]?.id || generateId('layout');
+        
+        // Update or create layout
+        const updatedLayouts = prevState.layouts.map(layout => 
+          layout.id === layoutId 
+            ? { ...layout, performance: projectData.performance }
+            : layout
+        );
+
+        if (!updatedLayouts.find(l => l.id === layoutId)) {
+          updatedLayouts.push({
+            id: layoutId,
+            name: projectData.performance.name || 'Imported Layout',
+            createdAt: new Date().toISOString(),
+            performance: projectData.performance,
+          });
+        }
+
+        // Update or create instrument config
+        const updatedInstrumentConfigs = prevState.instrumentConfigs.map(config =>
+          config.id === projectData.instrumentConfig.id
+            ? projectData.instrumentConfig
+            : config
+        );
+
+        if (!updatedInstrumentConfigs.find(c => c.id === projectData.instrumentConfig.id)) {
+          updatedInstrumentConfigs.push(projectData.instrumentConfig);
+        }
+
+        // Update or create section map
+        const updatedSectionMaps = prevState.sectionMaps.map(section =>
+          section.id === projectData.sectionMap.id
+            ? projectData.sectionMap
+            : section
+        );
+
+        if (!updatedSectionMaps.find(s => s.id === projectData.sectionMap.id)) {
+          updatedSectionMaps.push(projectData.sectionMap);
+        }
+
+        // Update or create grid mapping
+        const updatedMappings = prevState.mappings.map(mapping =>
+          mapping.id === projectData.gridMapping.id
+            ? projectData.gridMapping
+            : mapping
+        );
+
+        if (!updatedMappings.find(m => m.id === projectData.gridMapping.id)) {
+          updatedMappings.push(projectData.gridMapping);
+        }
+
+        // Merge voices (avoid duplicates by originalMidiNote)
+        const existingVoices = new Map<number, Voice>();
+        prevState.parkedSounds.forEach(voice => {
+          if (voice.originalMidiNote !== null) {
+            existingVoices.set(voice.originalMidiNote, voice);
+          }
+        });
+
+        const mergedVoices = [...prevState.parkedSounds];
+        projectData.voices.forEach(voice => {
+          if (voice.originalMidiNote !== null && !existingVoices.has(voice.originalMidiNote)) {
+            mergedVoices.push(voice);
+          }
+        });
+
+        // Merge ignoredNoteNumbers: Keep only notes that still exist
+        const newNoteNumbers = new Set(projectData.performance.events.map(e => e.noteNumber));
+        const previousIgnored = prevState.ignoredNoteNumbers || [];
+        const mergedIgnored = previousIgnored.filter(noteNum => newNoteNumbers.has(noteNum));
+
+        // Determine new active mapping ID
+        const newActiveMappingId = activeMappingId || projectData.gridMapping.id;
+
+        return {
+          ...prevState,
+          layouts: updatedLayouts,
+          activeLayoutId: layoutId,
+          instrumentConfigs: updatedInstrumentConfigs,
+          sectionMaps: updatedSectionMaps,
+          mappings: updatedMappings,
+          parkedSounds: mergedVoices,
+          projectTempo: projectData.performance.tempo || prevState.projectTempo,
+          ignoredNoteNumbers: mergedIgnored,
+        };
+      });
+
+      // Update active mapping ID if needed
+      if (!activeMappingId) {
+        setActiveMappingId(projectData.gridMapping.id);
+      }
+
+      // Verify engine works with the new data
+      const solver = new SectionAwareSolver([projectData.sectionMap]);
+      const engineResult = solver.solve(projectData.performance);
+      console.log('[Workbench] Engine verification result:', {
+        score: engineResult.score,
+        unplayableCount: engineResult.unplayableCount,
+        hardCount: engineResult.hardCount,
+        totalEvents: projectData.performance.events.length,
+        fingerUsageStats: engineResult.fingerUsageStats,
+      });
+
+      if (projectData.unmappedNoteCount > 0) {
+        console.warn(
+          `MIDI loaded with ${projectData.unmappedNoteCount} unmapped note event(s). ` +
+          `Root note adjusted to ${projectData.minNoteNumber || projectData.instrumentConfig.bottomLeftNote}.`
+        );
+      }
+
+      setDefaultMidiLoaded(true);
+    } catch (err) {
+      console.error('Failed to load MIDI project:', err);
+      setDefaultMidiLoaded(false);
+      throw err; // Re-throw so caller can handle
+    }
+  }, [setProjectState, activeMappingId, setActiveMappingId]);
+
   // Auto-load default test MIDI file if no performance events exist
   useEffect(() => {
-    // Only load if we have an active layout with no events and an active section
     if (!activeLayout || !activeSection) return;
     if (activeLayout.performance.events.length > 0) {
-      setDefaultMidiLoaded(false); // Reset if layout already has events
-      return; // Already has events, don't load
+      setDefaultMidiLoaded(false);
+      return;
     }
 
     let isMounted = true;
-
-    fetchAndParseMidiFile(DEFAULT_TEST_MIDI_URL, activeSection.instrumentConfig)
-      .then(({ performance, unmappedNoteCount, minNoteNumber }) => {
-        if (!isMounted) return; // Component unmounted, don't update state
-
-        // Intelligent Root Note Logic: Auto-set bottomLeftNote to minimum note
-        if (minNoteNumber !== null) {
-          // Update the active section's instrument config
-          setProjectState(prevState => {
-            const updatedSectionMaps = prevState.sectionMaps.map(section => {
-              if (section.id === activeSection.id) {
-                return {
-                  ...section,
-                  instrumentConfig: {
-                    ...section.instrumentConfig,
-                    bottomLeftNote: minNoteNumber
-                  }
-                };
-              }
-              return section;
-            });
-
-            // Also update the instrument config in the instrumentConfigs array
-            const updatedInstrumentConfigs = prevState.instrumentConfigs.map(config => {
-              if (config.id === activeSection.instrumentConfig.id) {
-                return {
-                  ...config,
-                  bottomLeftNote: minNoteNumber
-                };
-              }
-              return config;
-            });
-
-            return {
-              ...prevState,
-              sectionMaps: updatedSectionMaps,
-              instrumentConfigs: updatedInstrumentConfigs
-            };
-          });
+    handleProjectLoad(DEFAULT_TEST_MIDI_URL, activeSection.instrumentConfig)
+      .then(() => {
+        if (isMounted) {
+          setDefaultMidiLoaded(true);
         }
-
-        if (unmappedNoteCount > 0) {
-          console.warn(
-            `Default test MIDI loaded with ${unmappedNoteCount} unmapped note event(s). ` +
-            `Root note auto-adjusted to ${minNoteNumber !== null ? minNoteNumber : activeSection.instrumentConfig.bottomLeftNote} to fit all notes.`
-          );
-        }
-
-        // CRITICAL FIX: Extract unique notes and create SoundAssets + grid assignments
-        // This mirrors the logic in LayoutDesigner's handleMidiFileSelect
-        const uniqueNotes = new Set<number>();
-        performance.events.forEach(event => {
-          uniqueNotes.add(event.noteNumber);
-        });
-
-        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-        const getNoteName = (midiNote: number): string => {
-          const note = noteNames[midiNote % 12];
-          const octave = Math.floor(midiNote / 12) - 2;
-          return `${note}${octave}`;
-        };
-
-        const colors = [
-          '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
-          '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
-          '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
-        ];
-
-        // Create SoundAssets for each unique note
-        const newSounds: SoundAsset[] = [];
-        Array.from(uniqueNotes).forEach((noteNumber, index) => {
-          const noteName = getNoteName(noteNumber);
-          const newSound: SoundAsset = {
-            id: `sound-default-${noteNumber}-${Date.now()}-${index}`,
-            name: `${noteName} (${noteNumber})`,
-            sourceType: 'midi_track' as const,
-            sourceFile: DEFAULT_TEST_MIDI_URL,
-            originalMidiNote: noteNumber,
-            color: colors[index % colors.length],
-          };
-          newSounds.push(newSound);
-        });
-
-        // CRITICAL FIX: Ensure activeLayoutId is set and layout is properly created
-        // Update the active layout with the loaded performance
-        setProjectState(prevState => {
-          // Ensure we have an active layout ID
-          const layoutId = prevState.activeLayoutId || activeLayout.id;
-          
-          // Update or create the layout
-          const updatedLayouts = prevState.layouts.map(layout => {
-            if (layout.id === layoutId) {
-              return {
-                ...layout,
-                performance: performance
-              };
-            }
-            return layout;
-          });
-
-          // Ensure the layout exists (create if it doesn't)
-          const layoutExists = updatedLayouts.some(l => l.id === layoutId);
-          if (!layoutExists) {
-            updatedLayouts.push({
-              id: layoutId,
-              name: activeLayout.name || 'Default Layout',
-              createdAt: activeLayout.createdAt || new Date().toISOString(),
-              performance: performance
-            });
-          }
-
-          // Create or update mapping with grid cell assignments
-          let updatedMappings = [...prevState.mappings];
-          let mappingId = prevState.mappings.find(m => m.id === activeMappingId)?.id;
-          
-          // If no mapping exists, create one
-          if (!mappingId) {
-            mappingId = `mapping-${Date.now()}`;
-            const cellsToAssign: Record<string, SoundAsset> = {};
-            
-            // Map each sound to its grid position
-            newSounds.forEach(sound => {
-              if (sound.originalMidiNote !== null) {
-                const position = GridMapService.getPositionForNote(sound.originalMidiNote, activeSection.instrumentConfig);
-                if (position) {
-                  const cellKeyStr = cellKey(position.row, position.col);
-                  cellsToAssign[cellKeyStr] = sound;
-                }
-              }
-            });
-
-            const newMapping: GridMapping = {
-              id: mappingId,
-              name: `${performance.name || DEFAULT_TEST_MIDI_URL} Layout`,
-              cells: cellsToAssign,
-              fingerConstraints: {},
-              scoreCache: null,
-              notes: `Auto-generated from ${DEFAULT_TEST_MIDI_URL}`,
-            };
-            updatedMappings.push(newMapping);
-          } else {
-            // Update existing mapping with new sounds
-            updatedMappings = updatedMappings.map(m => {
-              if (m.id === mappingId) {
-                const cellsToAssign: Record<string, SoundAsset> = { ...m.cells };
-                
-                // Map each sound to its grid position
-                newSounds.forEach(sound => {
-                  if (sound.originalMidiNote !== null) {
-                    const position = GridMapService.getPositionForNote(sound.originalMidiNote, activeSection.instrumentConfig);
-                    if (position) {
-                      const cellKeyStr = cellKey(position.row, position.col);
-                      cellsToAssign[cellKeyStr] = sound;
-                    }
-                  }
-                });
-
-                return {
-                  ...m,
-                  cells: cellsToAssign,
-                  notes: m.notes 
-                    ? `${m.notes}\n\nAuto-populated from ${DEFAULT_TEST_MIDI_URL}`
-                    : `Auto-populated from ${DEFAULT_TEST_MIDI_URL}`,
-                };
-              }
-              return m;
-            });
-          }
-
-          // Set active mapping ID if we created a new mapping
-          if (mappingId && !activeMappingId) {
-            setTimeout(() => setActiveMappingId(mappingId!), 0);
-          }
-
-          // Intelligent Merge: Identify all unique noteNumbers in the new performance
-          const newNoteNumbers = new Set<number>();
-          performance.events.forEach(event => {
-            newNoteNumbers.add(event.noteNumber);
-          });
-          
-          // Merge ignoredNoteNumbers: Keep only ignored notes that still exist in the new performance
-          // Reset to empty array for new imports (all new voices visible by default)
-          const previousIgnored = prevState.ignoredNoteNumbers || [];
-          const mergedIgnored = previousIgnored.filter(noteNum => newNoteNumbers.has(noteNum));
-          
-          return {
-            ...prevState,
-            layouts: updatedLayouts,
-            activeLayoutId: layoutId, // Explicitly set activeLayoutId
-            projectTempo: performance.tempo || prevState.projectTempo,
-            parkedSounds: [...prevState.parkedSounds, ...newSounds], // Add new sounds to library (don't destroy previous)
-            mappings: updatedMappings,
-            // Intelligent Merge: Reset ignoredNoteNumbers for new MIDI import (all new voices visible)
-            // But preserve ignored state for notes that still exist
-            ignoredNoteNumbers: mergedIgnored,
-          };
-        });
-
-        setDefaultMidiLoaded(true);
       })
-      .catch((err) => {
-        console.error('Failed to auto-load default test MIDI file:', err);
-        setDefaultMidiLoaded(false);
-        // Silently fail - don't show error to user, just log it
+      .catch(() => {
+        if (isMounted) {
+          setDefaultMidiLoaded(false);
+        }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id]); // Include more dependencies to ensure proper updates
+  }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id, handleProjectLoad]);
+
+  // Reactive Solver Loop: Automatically run engine when layout changes
+  // Watches: activeMapping, activeLayout.performance, activeSection.instrumentConfig, ignoredNoteNumbers
+  useEffect(() => {
+    // Get filtered performance (excludes ignored notes)
+    const filteredPerformance = getActivePerformance(projectState);
+    
+    // Early exit conditions
+    if (!activeMapping || !filteredPerformance || !activeSection) {
+      setEngineResult(null);
+      return;
+    }
+
+    // Debounce engine execution (300ms) to avoid crashing browser during rapid drag operations
+    const timer = setTimeout(() => {
+      try {
+        const solver = new SectionAwareSolver(projectState.sectionMaps);
+        const result = solver.solve(filteredPerformance);
+        setEngineResult(result);
+        
+        // Update scoreCache in the mapping for quick reference
+        setProjectState(prevState => ({
+          ...prevState,
+          mappings: prevState.mappings.map(m => 
+            m.id === activeMapping.id 
+              ? { ...m, scoreCache: result.score }
+              : m
+          ),
+        }));
+      } catch (err) {
+        console.error('[Workbench] Engine execution failed:', err);
+        setEngineResult(null);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [
+    activeMapping?.id,
+    activeMapping?.cells, // Watch for cell changes (pad swaps/assignments)
+    activeLayout?.performance.events, // Watch for performance changes
+    activeSection?.instrumentConfig, // Watch for config changes
+    projectState.sectionMaps, // Watch for section map changes
+    projectState.ignoredNoteNumbers, // Watch for voice visibility changes
+    projectState, // Include full state for getActivePerformance selector
+  ]);
 
   const handleSaveProject = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectState, null, 2));
@@ -380,7 +371,7 @@ export const Workbench: React.FC = () => {
   };
 
   // LayoutDesigner handlers
-  const handleAssignSound = (cellKey: string, sound: SoundAsset) => {
+  const handleAssignSound = (cellKey: string, sound: Voice) => {
     if (!activeMapping) {
       // Create a new mapping if none exists
       const newMapping: GridMapping = {
@@ -415,7 +406,7 @@ export const Workbench: React.FC = () => {
     }
   };
 
-  const handleAssignSounds = (assignments: Record<string, SoundAsset>) => {
+  const handleAssignSounds = (assignments: Record<string, Voice>) => {
     if (!activeMapping) {
       // Create a new mapping with all assignments
       const newMapping: GridMapping = {
@@ -482,7 +473,7 @@ export const Workbench: React.FC = () => {
     // Stub for now - will be implemented later
     console.log('Scan MIDI clicked');
     // For testing, add a dummy sound
-    const dummySound: SoundAsset = {
+    const dummySound: Voice = {
       id: `sound-${Date.now()}`,
       name: `Sound ${projectState.parkedSounds.length + 1}`,
       sourceType: 'midi_track',
@@ -496,14 +487,14 @@ export const Workbench: React.FC = () => {
     }));
   };
 
-  const handleAddSound = (sound: SoundAsset) => {
+  const handleAddSound = (sound: Voice) => {
     setProjectState({
       ...projectState,
       parkedSounds: [...projectState.parkedSounds, sound],
     });
   };
 
-  const handleUpdateSound = (soundId: string, updates: Partial<SoundAsset>) => {
+  const handleUpdateSound = (soundId: string, updates: Partial<Voice>) => {
     // Update in parkedSounds
     const updatedParkedSounds = projectState.parkedSounds.map(s => 
       s.id === soundId ? { ...s, ...updates } : s
@@ -511,7 +502,7 @@ export const Workbench: React.FC = () => {
 
     // Also update in all mappings if the sound exists there
     const updatedMappings = projectState.mappings.map(m => {
-      const updatedCells: Record<string, SoundAsset> = {};
+      const updatedCells: Record<string, Voice> = {};
       let hasChanges = false;
 
       Object.entries(m.cells).forEach(([cellKey, sound]) => {
@@ -533,11 +524,11 @@ export const Workbench: React.FC = () => {
     });
   };
 
-  const handleUpdateMappingSound = (cellKey: string, updates: Partial<SoundAsset>) => {
+  const handleUpdateMappingSound = (cellKey: string, updates: Partial<Voice>) => {
     if (!activeMapping) return;
     
     let soundIdToUpdate: string | null = null;
-    let updatedCellSound: SoundAsset | null = null;
+    let updatedCellSound: Voice | null = null;
 
     // Update in the active mapping
     const updatedMappings = projectState.mappings.map(m => {
@@ -594,7 +585,7 @@ export const Workbench: React.FC = () => {
     
     // Also remove from all mappings if the sound is placed on the grid
     const updatedMappings = projectState.mappings.map(m => {
-      const updatedCells: Record<string, SoundAsset> = {};
+      const updatedCells: Record<string, Voice> = {};
       let hasChanges = false;
       
       Object.entries(m.cells).forEach(([cellKey, sound]) => {
@@ -855,6 +846,7 @@ export const Workbench: React.FC = () => {
           onDuplicateMapping={handleDuplicateMapping}
           onAddSound={handleAddSound}
           onUpdateSound={handleUpdateSound}
+          onImport={(file) => handleProjectLoad(file, activeSection?.instrumentConfig)}
           onUpdateMappingSound={handleUpdateMappingSound}
           onRemoveSound={handleRemoveSound}
           onDeleteSound={handleDeleteSound}
@@ -871,6 +863,7 @@ export const Workbench: React.FC = () => {
           showNoteLabels={showNoteLabels}
           viewAllSteps={viewAllSteps}
           showHeatmap={showHeatmap}
+          engineResult={engineResult}
         />
       </div>
     </div>

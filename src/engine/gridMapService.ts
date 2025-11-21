@@ -11,7 +11,7 @@
  * 
  * ⚠️ CRITICAL: Voice (MIDI 36) ≠ Pad ([0,0]). Voice is pitch; Pad is physical location.
  */
-import { InstrumentConfig } from '../data/models';
+import { InstrumentConfig } from '../types/performance';
 
 export class GridMapService {
   /**

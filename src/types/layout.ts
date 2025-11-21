@@ -30,9 +30,10 @@ export interface Voice {
 }
 
 /**
- * @deprecated Use Voice instead. This alias is maintained for backward compatibility.
+ * @deprecated Use Voice instead. This alias is removed - use Voice directly.
+ * Kept for reference only - do not use in new code.
  */
-export type SoundAsset = Voice;
+// export type SoundAsset = Voice; // REMOVED: Use Voice directly
 
 /**
  * GridMapping: Represents a grid mapping configuration.

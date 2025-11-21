@@ -1,9 +1,9 @@
 import { Midi } from '@tonejs/midi';
-import { Performance, NoteEvent } from '../types/performance';
-import { InstrumentConfig } from '../data/models';
+import { Performance, NoteEvent, InstrumentConfig, SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
-import { SoundAsset } from '../types/layout';
+import { Voice, GridMapping } from '../types/layout';
 import { generateId } from './performanceUtils';
+import { cellKey } from '../types/layout';
 
 /**
  * Result type for MIDI import with unmapped Voice count.
@@ -21,275 +21,296 @@ export interface MidiImportResult {
 }
 
 /**
- * Parses a MIDI file and converts it into a Performance object.
- * 
- * Also analyzes Voices (MIDI pitches) to check if they can be mapped to Pads via the Voice-to-Pad Assignment.
- * 
- * @param file The MIDI file to parse
- * @param config The instrument configuration defining the Voice-to-Pad Assignment mapping
- * @returns A Promise resolving to the parsed Performance object and unmapped Voice count
+ * Complete project data structure returned from parseMidiProject.
+ * Contains all consolidated types needed to initialize a project.
  */
-export const parseMidiFile = async (
+export interface MidiProjectData {
+  /** The parsed performance with all note events */
+  performance: Performance;
+  /** Unique voices extracted from the MIDI file */
+  voices: Voice[];
+  /** Instrument configuration with intelligent root note adjustment */
+  instrumentConfig: InstrumentConfig;
+  /** Section map for the imported performance */
+  sectionMap: SectionMap;
+  /** Initial grid mapping with voice assignments */
+  gridMapping: GridMapping;
+  /** Minimum note number found (for root note adjustment) */
+  minNoteNumber: number | null;
+  /** Count of notes that were out of bounds before root note adjustment */
+  unmappedNoteCount: number;
+}
+
+/**
+ * Parses a MIDI file from ArrayBuffer and creates a complete project structure.
+ * This is the unified entry point for MIDI import that returns all consolidated types.
+ * 
+ * @param arrayBuffer - The MIDI file as ArrayBuffer
+ * @param fileName - Optional file name for naming
+ * @param existingConfig - Optional existing instrument config to use as base
+ * @returns Complete project data structure
+ */
+export async function parseMidiProject(
+  arrayBuffer: ArrayBuffer,
+  fileName?: string,
+  existingConfig?: InstrumentConfig
+): Promise<MidiProjectData> {
+  const midiData = new Midi(arrayBuffer);
+  const events: NoteEvent[] = [];
+  let unmappedNoteCount = 0;
+
+  // Extract all note events
+  midiData.tracks.forEach((track) => {
+    track.notes.forEach((note) => {
+      const noteNumber = note.midi;
+      events.push({
+        noteNumber: noteNumber,
+        startTime: note.time,
+        duration: note.duration,
+        velocity: Math.round(note.velocity * 127),
+        channel: track.channel + 1
+      });
+    });
+  });
+
+  // Sort events by start time
+  events.sort((a, b) => a.startTime - b.startTime);
+
+  // Determine tempo
+  const tempo = midiData.header.tempos.length > 0 
+    ? Math.round(midiData.header.tempos[0].bpm) 
+    : 120;
+
+  // Find minimum note number for intelligent root note logic
+  const minNote = events.length > 0 
+    ? Math.min(...events.map(e => e.noteNumber))
+    : null;
+
+  // Create or update instrument config with intelligent root note
+  const baseConfig: InstrumentConfig = existingConfig || {
+    id: generateId('inst'),
+    name: 'Imported Kit',
+    rows: 8,
+    cols: 8,
+    bottomLeftNote: 36,
+    layoutMode: 'drum_64'
+  };
+
+  const instrumentConfig: InstrumentConfig = {
+    ...baseConfig,
+    bottomLeftNote: minNote !== null ? minNote : baseConfig.bottomLeftNote,
+  };
+
+  // Check unmapped notes with the adjusted config
+  const outOfBoundsNotes = new Set<number>();
+  events.forEach(event => {
+    const position = GridMapService.noteToGrid(event.noteNumber, instrumentConfig);
+    if (!position) {
+      unmappedNoteCount++;
+      outOfBoundsNotes.add(event.noteNumber);
+    }
+  });
+
+  // Create performance
+  const performance: Performance = {
+    events,
+    tempo,
+    name: fileName ? fileName.replace(/\.[^/.]+$/, "") : 'Imported Performance'
+  };
+
+  // Extract unique voices
+  const uniqueNotes = new Set<number>();
+  events.forEach(event => {
+    uniqueNotes.add(event.noteNumber);
+  });
+
+  // Generate note names
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const getNoteName = (midiNote: number): string => {
+    const note = noteNames[midiNote % 12];
+    const octave = Math.floor(midiNote / 12) - 2;
+    return `${note}${octave}`;
+  };
+
+  // Generate colors for voices
+  const colors = [
+    '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
+    '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
+    '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
+  ];
+
+  // Create voices
+  const voices: Voice[] = Array.from(uniqueNotes).map((noteNumber, index) => {
+    const noteName = getNoteName(noteNumber);
+    return {
+      id: generateId('sound'),
+      name: `${noteName} (${noteNumber})`,
+      sourceType: 'midi_track',
+      sourceFile: fileName || 'imported.mid',
+      originalMidiNote: noteNumber,
+      color: colors[index % colors.length],
+    };
+  });
+
+  // Create section map
+  const sectionMap: SectionMap = {
+    id: generateId('section'),
+    name: 'Main Section',
+    startMeasure: 1,
+    lengthInMeasures: 4, // Default, can be calculated from performance duration
+    instrumentConfig: instrumentConfig,
+  };
+
+  // Create initial grid mapping with voice assignments
+  const cells: Record<string, Voice> = {};
+  voices.forEach(voice => {
+    if (voice.originalMidiNote !== null) {
+      const position = GridMapService.noteToGrid(voice.originalMidiNote, instrumentConfig);
+      if (position) {
+        const cellKeyStr = cellKey(position.row, position.col);
+        cells[cellKeyStr] = voice;
+      }
+    }
+  });
+
+  const gridMapping: GridMapping = {
+    id: generateId('mapping'),
+    name: `${performance.name} Layout`,
+    cells,
+    fingerConstraints: {},
+    scoreCache: null,
+    notes: `Auto-generated from ${fileName || 'MIDI import'}`,
+  };
+
+  return {
+    performance,
+    voices,
+    instrumentConfig,
+    sectionMap,
+    gridMapping,
+    minNoteNumber: minNote,
+    unmappedNoteCount,
+  };
+}
+
+/**
+ * Fetches a MIDI file from a URL and parses it into a complete project structure.
+ * 
+ * @param url - The URL or path to the MIDI file
+ * @param existingConfig - Optional existing instrument config to use as base
+ * @returns Complete project data structure
+ */
+export async function fetchMidiProject(
+  url: string,
+  existingConfig?: InstrumentConfig
+): Promise<MidiProjectData> {
+  // Try multiple possible paths for the test MIDI file
+  const possiblePaths = [
+    `/TEST DATA/Scenario 1 Tests/${url}`,
+    `/${url}`,
+    url,
+    `./TEST DATA/Scenario 1 Tests/${url}`,
+  ];
+
+  let response: Response | null = null;
+  let lastError: Error | null = null;
+
+  for (const path of possiblePaths) {
+    try {
+      response = await fetch(path);
+      if (response.ok) {
+        break;
+      }
+    } catch (err) {
+      lastError = err as Error;
+      continue;
+    }
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(`Failed to fetch MIDI file: ${url}. Tried paths: ${possiblePaths.join(', ')}. ${lastError?.message || ''}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return parseMidiProject(arrayBuffer, url, existingConfig);
+}
+
+/**
+ * Parses a MIDI file from a File object and creates a complete project structure.
+ * 
+ * @param file - The MIDI file
+ * @param existingConfig - Optional existing instrument config to use as base
+ * @returns Complete project data structure
+ */
+export async function parseMidiFileToProject(
   file: File,
-  config: InstrumentConfig
-): Promise<MidiImportResult> => {
+  existingConfig?: InstrumentConfig
+): Promise<MidiProjectData> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         if (!e.target?.result) {
           throw new Error('Failed to read file');
         }
-
-        const midiData = new Midi(e.target.result as ArrayBuffer);
-        const events: NoteEvent[] = [];
-        let outOfBoundsCount = 0;
-
-        // Iterate through all tracks
-        midiData.tracks.forEach((track) => {
-          track.notes.forEach((note) => {
-            const noteNumber = note.midi;
-            
-        // Check if Voice (Cell/MIDI note) can be mapped to a Pad via Voice-to-Pad Assignment
-        const position = GridMapService.noteToGrid(noteNumber, config);
-        if (!position) {
-          outOfBoundsCount++;
-        }
-
-            events.push({
-              noteNumber: noteNumber,
-              startTime: note.time,
-              duration: note.duration,
-              velocity: Math.round(note.velocity * 127), // Convert 0-1 to 0-127
-              channel: track.channel + 1 // Convert 0-15 to 1-16
-            });
-          });
-        });
-
-        // Sort events by start time
-        events.sort((a, b) => a.startTime - b.startTime);
-
-        // Determine tempo (use the first tempo event or default to 120)
-        const tempo = midiData.header.tempos.length > 0 
-          ? Math.round(midiData.header.tempos[0].bpm) 
-          : 120;
-
-        // Find minimum note number for intelligent root note logic
-        const minNote = events.length > 0 
-          ? Math.min(...events.map(e => e.noteNumber))
-          : null;
-
-        // W3: Return performance with unmapped note count
-        resolve({
-          performance: {
-            events,
-            tempo,
-            name: file.name.replace(/\.[^/.]+$/, "") // Remove extension
-          },
-          unmappedNoteCount: outOfBoundsCount,
-          minNoteNumber: minNote
-        });
-
+        const result = await parseMidiProject(e.target.result as ArrayBuffer, file.name, existingConfig);
+        resolve(result);
       } catch (err) {
         reject(err);
       }
     };
-
     reader.onerror = (err) => reject(err);
     reader.readAsArrayBuffer(file);
   });
+}
+
+// Legacy exports for backward compatibility
+export const parseMidiFile = async (
+  file: File,
+  config: InstrumentConfig
+): Promise<MidiImportResult> => {
+  const projectData = await parseMidiFileToProject(file, config);
+  return {
+    performance: projectData.performance,
+    unmappedNoteCount: projectData.unmappedNoteCount,
+    minNoteNumber: projectData.minNoteNumber,
+  };
+};
+
+export const fetchAndParseMidiFile = async (
+  url: string,
+  config: InstrumentConfig
+): Promise<MidiImportResult> => {
+  const projectData = await fetchMidiProject(url, config);
+  return {
+    performance: projectData.performance,
+    unmappedNoteCount: projectData.unmappedNoteCount,
+    minNoteNumber: projectData.minNoteNumber,
+  };
 };
 
 /**
  * Processes multiple MIDI files and extracts unique Voices (one per unique MIDI pitch).
  * 
- * Applies smart naming heuristics based on the number of unique Voices found.
- * Each Voice is stored as a SoundAsset (deprecated alias for Voice).
- * 
- * TERMINOLOGY (see TERMINOLOGY.md):
- * - Voice: A unique MIDI pitch (e.g., MIDI Note 36) - stored as SoundAsset
- * 
  * @param files Array of MIDI files to process
- * @returns Promise resolving to a flat array of Voice objects (as SoundAsset)
+ * @returns Promise resolving to a flat array of Voice objects
  */
-export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => {
-  const allAssets: SoundAsset[] = [];
+export const processMidiFiles = async (files: File[]): Promise<Voice[]> => {
+  const allAssets: Voice[] = [];
 
-  // Process each file
   for (const file of files) {
     try {
-      // Read and parse MIDI file
-      const midiData = await new Promise<Midi>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            if (!e.target?.result) {
-              throw new Error('Failed to read file');
-            }
-            const midi = new Midi(e.target.result as ArrayBuffer);
-            resolve(midi);
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = (err) => reject(err);
-        reader.readAsArrayBuffer(file);
+      const projectData = await parseMidiFileToProject(file);
+      // Merge voices, avoiding duplicates by originalMidiNote
+      projectData.voices.forEach(voice => {
+        if (!allAssets.find(v => v.originalMidiNote === voice.originalMidiNote)) {
+          allAssets.push(voice);
+        }
       });
-
-      // Extract all unique Voices (MIDI pitch values) from all tracks
-      const uniquePitches = new Set<number>();
-      midiData.tracks.forEach((track) => {
-        track.notes.forEach((note) => {
-          uniquePitches.add(note.midi);
-        });
-      });
-
-      const uniquePitchesArray = Array.from(uniquePitches).sort((a, b) => a - b);
-      const fileName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
-
-      // Apply naming heuristic
-      if (uniquePitchesArray.length === 1) {
-        // Single Voice: use filename
-        const asset: SoundAsset = {
-          id: generateId('sound'),
-          name: fileName,
-          sourceType: 'midi_track',
-          sourceFile: file.name,
-          originalMidiNote: uniquePitchesArray[0],
-          color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
-        };
-        allAssets.push(asset);
-      } else if (uniquePitchesArray.length > 1) {
-        // Multiple Voices: use filename with index
-        uniquePitchesArray.forEach((pitch, index) => {
-          const asset: SoundAsset = {
-            id: generateId('sound'),
-            name: `${fileName} ${index + 1}`,
-            sourceType: 'midi_track',
-            sourceFile: file.name,
-            originalMidiNote: pitch,
-            color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
-          };
-          allAssets.push(asset);
-        });
-      }
-      // If no pitches found, skip this file (empty MIDI file)
-      // If no pitches found, skip this file (empty MIDI file)
     } catch (err) {
       console.error(`Failed to process file ${file.name}:`, err);
-      // Continue processing other files even if one fails
     }
   }
 
   return allAssets;
 };
-
-/**
- * Fetches a MIDI file from a URL and parses it into a Performance object.
- * 
- * Used for automatically loading test MIDI files during development.
- * 
- * @param url The URL or path to the MIDI file
- * @param config The instrument configuration defining the Voice-to-Pad Assignment mapping
- * @returns A Promise resolving to the parsed Performance object and unmapped Voice count
- */
-export const fetchAndParseMidiFile = async (
-  url: string,
-  config: InstrumentConfig
-): Promise<MidiImportResult> => {
-  try {
-    // Try multiple possible paths for the test MIDI file
-    // Note: In Vite, static files must be in the public folder to be served
-    // The TEST DATA folder should be copied to public/TEST DATA
-    const possiblePaths = [
-      `/TEST DATA/Scenario 1 Tests/${url}`, // Public folder path (most likely)
-      `/${url}`, // Root path (public folder in Vite)
-      url, // Direct path
-      `./TEST DATA/Scenario 1 Tests/${url}`, // Relative path (fallback)
-    ];
-
-    let response: Response | null = null;
-    let lastError: Error | null = null;
-
-    // Try each path until one works
-    for (const path of possiblePaths) {
-      try {
-        response = await fetch(path);
-        if (response.ok) {
-          break;
-        }
-      } catch (err) {
-        lastError = err as Error;
-        continue;
-      }
-    }
-
-    if (!response || !response.ok) {
-      throw new Error(`Failed to fetch MIDI file: ${url}. Tried paths: ${possiblePaths.join(', ')}. ${lastError?.message || ''}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const midiData = new Midi(arrayBuffer);
-    const events: NoteEvent[] = [];
-    let unmappedNoteCount = 0;
-
-    // Track unique out-of-bounds notes to avoid spam
-    const outOfBoundsNotes = new Set<number>();
-    
-    // Iterate through all tracks
-    midiData.tracks.forEach((track) => {
-      track.notes.forEach((note) => {
-        const noteNumber = note.midi;
-
-        // Check if note is within the 8x8 grid
-        const position = GridMapService.noteToGrid(noteNumber, config);
-        if (!position) {
-          unmappedNoteCount++;
-          outOfBoundsNotes.add(noteNumber);
-        }
-
-        events.push({
-          noteNumber: noteNumber,
-          startTime: note.time,
-        });
-      });
-    });
-
-    // Log out-of-bounds notes once (batch warning)
-    if (outOfBoundsNotes.size > 0) {
-      const notesList = Array.from(outOfBoundsNotes).sort((a, b) => a - b).join(', ');
-      console.warn(
-        `${unmappedNoteCount} note event(s) are out of bounds for current config (bottomLeftNote: ${config.bottomLeftNote}). ` +
-        `Unmapped note numbers: ${notesList}`
-      );
-    }
-
-    // Sort events by start time
-    events.sort((a, b) => a.startTime - b.startTime);
-
-    // Determine tempo (use the first tempo event or default to 120)
-    const tempo = midiData.header.tempos.length > 0
-      ? Math.round(midiData.header.tempos[0].bpm)
-      : 120;
-
-    // Find minimum note number for intelligent root note logic
-    const minNote = events.length > 0 
-      ? Math.min(...events.map(e => e.noteNumber))
-      : null;
-
-    return {
-      performance: {
-        events,
-        tempo,
-        name: url.replace(/\.[^/.]+$/, "") // Remove extension
-      },
-      unmappedNoteCount,
-      minNoteNumber: minNote
-    };
-  } catch (err) {
-    console.error(`Failed to fetch and parse MIDI file from ${url}:`, err);
-    throw err;
-  }
-};
-

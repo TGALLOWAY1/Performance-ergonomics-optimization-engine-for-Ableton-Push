@@ -13,18 +13,17 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { SoundAsset, GridMapping, cellKey, parseCellKey, TemplateId, LAYOUT_TEMPLATES, LayoutTemplate } from '../types/layout';
+import { Voice, GridMapping, cellKey, parseCellKey, TemplateId, LAYOUT_TEMPLATES, LayoutTemplate } from '../types/layout';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
-import { parseMidiFile } from '../utils/midiImport';
-import { InstrumentConfig, SectionMap } from '../data/models';
+// MIDI import logic removed - handled by parent Workbench component
+import { InstrumentConfig, SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { ImportWizard } from './ImportWizard';
-import { runEngine } from '../engine/runEngine';
 import { EngineResult } from '../engine/core';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
@@ -35,32 +34,32 @@ import { getActivePerformance, getRawActivePerformance } from '../utils/performa
  * LayoutDesigner Component
  * 
  * TERMINOLOGY (see TERMINOLOGY.md):
- * - Voice: A unique MIDI pitch (e.g., MIDI Note 36) - stored as SoundAsset (deprecated alias)
+ * - Voice: A unique MIDI pitch (e.g., MIDI Note 36)
  * - Cell: A slot in the 128 Drum Rack (Index 0-127)
  * - Pad: A specific x/y coordinate on the 8x8 grid
  * - Assignment: The mapping of a Voice/Cell to a Pad
  */
 interface LayoutDesignerProps {
   /** Staging area for Voices before Assignment to Pads (legacy name: parkedSounds) */
-  parkedSounds: SoundAsset[];
+  parkedSounds: Voice[];
   /** Currently active mapping being edited (defines Pad-to-Voice Assignments) */
   activeMapping: GridMapping | null;
   /** Instrument configuration for MIDI import (defines Voice-to-Pad Assignment mapping) */
   instrumentConfig: InstrumentConfig | null;
   /** Callback when a Voice is assigned to a Pad (Assignment relationship) */
-  onAssignSound: (cellKey: string, sound: SoundAsset) => void;
+  onAssignSound: (cellKey: string, sound: Voice) => void;
   /** Callback to assign multiple Voices to Pads at once (batch Assignment operations) */
-  onAssignSounds: (assignments: Record<string, SoundAsset>) => void;
+  onAssignSounds: (assignments: Record<string, Voice>) => void;
   /** Callback when mapping metadata is updated */
   onUpdateMapping: (updates: Partial<GridMapping>) => void;
   /** Callback to duplicate the current mapping */
   onDuplicateMapping: () => void;
   /** Callback to add a new Voice to parkedSounds (staging area) */
-  onAddSound: (sound: SoundAsset) => void;
+  onAddSound: (sound: Voice) => void;
   /** Callback to update a Voice in parkedSounds (staging area) */
-  onUpdateSound: (soundId: string, updates: Partial<SoundAsset>) => void;
+  onUpdateSound: (soundId: string, updates: Partial<Voice>) => void;
   /** Callback to update a Voice in the active mapping (Pad Assignment) */
-  onUpdateMappingSound: (cellKey: string, updates: Partial<SoundAsset>) => void;
+  onUpdateMappingSound: (cellKey: string, updates: Partial<Voice>) => void;
   /** Callback to remove a Voice Assignment from a Pad */
   onRemoveSound: (cellKey: string) => void;
   /** Callback to delete a Voice from parkedSounds (staging area) */
@@ -91,19 +90,23 @@ interface LayoutDesignerProps {
   viewAllSteps?: boolean;
   /** View Settings: Show heatmap overlay */
   showHeatmap?: boolean;
+  /** Callback when user wants to import a MIDI file */
+  onImport?: (file: File) => void;
+  /** Engine result from Workbench (reactive solver loop) */
+  engineResult?: EngineResult | null;
 }
 
 /**
  * Draggable Voice Item Component
  * 
- * A Voice (stored as SoundAsset) can be dragged and assigned to a Pad.
+ * A Voice can be dragged and assigned to a Pad.
  * This creates an Assignment relationship: Voice → Pad.
  */
 interface DraggableSoundProps {
-  sound: SoundAsset;
+  sound: Voice;
   isSelected: boolean;
   onSelect: () => void;
-  onEdit: (updates: Partial<SoundAsset>) => void;
+  onEdit: (updates: Partial<Voice>) => void;
   onDelete: () => void;
   /** Whether this Voice is visible (not ignored) */
   isVisible?: boolean;
@@ -278,7 +281,7 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({
 
 // Placed Voice Item Component (for Library "Placed on Grid" section - shows Pad assignments)
 interface PlacedSoundItemProps {
-  sound: SoundAsset;
+  sound: Voice;
   cellKey: string; // Pad key "row,col"
   isSelected: boolean;
   onSelect: () => void;
@@ -346,7 +349,7 @@ const DroppableStagingArea: React.FC<DroppableStagingAreaProps> = ({ children })
 interface DroppableCellProps {
   row: number;
   col: number;
-  assignedSound: SoundAsset | null;
+  assignedSound: Voice | null;
   isOver: boolean;
   isSelected: boolean;
   isHighlighted?: boolean;
@@ -569,13 +572,15 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   showNoteLabels = false,
   viewAllSteps = false,
   showHeatmap = false,
+  onImport,
+  engineResult: engineResultProp = null,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const loadProjectInputRef = useRef<HTMLInputElement>(null);
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [draggedSound, setDraggedSound] = useState<SoundAsset | null>(null);
+  const [draggedSound, setDraggedSound] = useState<Voice | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>('none');
   const [selectedSoundId, setSelectedSoundId] = useState<string | null>(null);
@@ -589,7 +594,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [timelineForceVisible, setTimelineForceVisible] = useState(false);
   const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
-  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
+  // Engine result is now passed from Workbench (reactive solver loop)
+  // Use prop if provided, otherwise fall back to null
+  const engineResult = engineResultProp;
   const [currentStep, setCurrentStep] = useState(0);
   const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
   const [leftPanelTab, setLeftPanelTab] = useState<'library' | 'sections'>('library');
@@ -673,7 +680,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     // Check if dragging from a cell (format: "cell-row,col")
     const activeIdStr = active.id as string;
-    let sound: SoundAsset | null = null;
+    let sound: Voice | null = null;
     let sourceCellKey: string | null = null;
 
     if (activeIdStr.startsWith('cell-')) {
@@ -780,7 +787,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
         // Create new cells object for atomic update
         // Start fresh to prevent any duplicates
-        const newCells: Record<string, SoundAsset> = {};
+        const newCells: Record<string, Voice> = {};
         
         // Copy all cells except source and target (we'll handle those separately)
         Object.entries(currentCells).forEach(([key, value]) => {
@@ -846,7 +853,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Get the sound assigned to a cell
-  const getCellSound = (row: number, col: number): SoundAsset | null => {
+  const getCellSound = (row: number, col: number): Voice | null => {
     if (!activeMapping) return null;
     const key = cellKey(row, col);
     return activeMapping.cells[key] || null;
@@ -866,7 +873,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   // Handle creating new sound
   const handleNewSound = () => {
-    const newSound: SoundAsset = {
+    const newSound: Voice = {
       id: `sound-${Date.now()}`,
       name: 'New Sound',
       sourceType: 'midi_track',
@@ -878,171 +885,23 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     setSelectedSoundId(newSound.id);
   };
 
-  // Handle MIDI file import
-  const handleMidiFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle MIDI file import - delegate to parent component (Workbench)
+  // All MIDI parsing and state updates are handled by Workbench.handleProjectLoad
+  const handleMidiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !instrumentConfig) {
+    if (!file) {
       event.target.value = '';
       return;
     }
 
-    try {
-      // W3: Get import result with unmapped note count
-      const importResult = await parseMidiFile(file, instrumentConfig);
-      const performance = importResult.performance;
-      
-      // Intelligent Root Note Logic: Auto-set bottomLeftNote to minimum note
-      if (importResult.minNoteNumber !== null && onUpdateSection && projectState.sectionMaps.length > 0) {
-        const activeSection = projectState.sectionMaps[0]; // Single Static Section model
-        onUpdateSection(activeSection.id, { 
-          field: 'bottomLeftNote', 
-          value: importResult.minNoteNumber 
-        });
-      }
-      
-      // W3: Show warning if there are unmapped notes (should be 0 after auto-adjustment)
-      if (importResult.unmappedNoteCount > 0) {
-        console.warn(
-          `Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the 8x8 grid window. ` +
-          `Root note auto-adjusted to ${importResult.minNoteNumber !== null ? importResult.minNoteNumber : instrumentConfig.bottomLeftNote} to fit all notes.`
-        );
-      }
-      
-      // Extract unique note numbers from the performance
-      const uniqueNotes = new Set<number>();
-      performance.events.forEach(event => {
-        uniqueNotes.add(event.noteNumber);
-      });
-
-      // Create SoundAssets for each unique note
-      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-      const getNoteName = (midiNote: number): string => {
-        const note = noteNames[midiNote % 12];
-        // MIDI note 0 = C-2, so octave = floor(0/12) - 2 = -2
-        const octave = Math.floor(midiNote / 12) - 2;
-        return `${note}${octave}`;
-      };
-
-      // Generate colors for each note (distinct colors)
-      const colors = [
-        '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
-        '#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
-        '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
-      ];
-
-      // Check for existing sounds to avoid duplicates
-      const existingNoteMap = new Map<number, SoundAsset>();
-      parkedSounds.forEach(sound => {
-        if (sound.originalMidiNote !== null) {
-          existingNoteMap.set(sound.originalMidiNote, sound);
-        }
-      });
-
-      const newSounds: SoundAsset[] = [];
-      Array.from(uniqueNotes).forEach((noteNumber, index) => {
-        // Check if a sound for this note already exists
-        const existing = existingNoteMap.get(noteNumber);
-        if (existing) {
-          // Use existing sound instead of creating a duplicate
-          newSounds.push(existing);
-        } else {
-          // Create new sound
-          const noteName = getNoteName(noteNumber);
-          const newSound: SoundAsset = {
-            id: `sound-${file.name}-${noteNumber}-${Date.now()}-${index}`,
-            name: `${noteName} (${noteNumber})`,
-            sourceType: 'midi_track' as const,
-            sourceFile: file.name,
-            originalMidiNote: noteNumber,
-            color: colors[index % colors.length],
-          };
-          newSounds.push(newSound);
-          // Add to library only if it's new
-          onAddSound(newSound);
-        }
-      });
-
-      // Automatically populate the grid based on Cell (MIDI note numbers)
-      if (instrumentConfig) {
-        // Assignment: Map each Voice to its Pad position based on its Cell (MIDI note number)
-        const assignments: Array<{ cellKey: string; sound: SoundAsset }> = [];
-        
-        newSounds.forEach(sound => {
-          if (sound.originalMidiNote !== null) {
-            const position = GridMapService.getPositionForNote(sound.originalMidiNote, instrumentConfig);
-            if (position) {
-              const cellKeyStr = cellKey(position.row, position.col);
-              assignments.push({ cellKey: cellKeyStr, sound });
-              console.log(`Assignment: Cell ${sound.originalMidiNote} (Voice: ${sound.name}) -> Pad [${position.row},${position.col}]`);
-            } else {
-              console.warn(`Cell ${sound.originalMidiNote} (Voice: ${sound.name}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
-            }
-          }
-        });
-
-        // Batch all assignments together to avoid state update conflicts
-        if (assignments.length > 0) {
-          const cellsToAssign: Record<string, SoundAsset> = {};
-          assignments.forEach(({ cellKey, sound }) => {
-            cellsToAssign[cellKey] = sound;
-          });
-
-          // Use batch assignment if available, otherwise fall back to individual calls
-          if (onAssignSounds) {
-            onAssignSounds(cellsToAssign);
-          } else {
-            // Fallback: assign individually (may have race conditions)
-            assignments.forEach(({ cellKey, sound }) => {
-              onAssignSound(cellKey, sound);
-            });
-          }
-
-          // Update mapping metadata
-          if (!activeMapping) {
-            // Wait for mapping to be created, then update metadata
-            setTimeout(() => {
-              onUpdateMapping({
-                name: `${performance.name || file.name} Layout`,
-                notes: `Auto-generated from ${file.name}`,
-              });
-            }, 50);
-          } else {
-            onUpdateMapping({
-              notes: activeMapping.notes 
-                ? `${activeMapping.notes}\n\nAuto-populated from ${file.name}`
-                : `Auto-populated from ${file.name}`,
-            });
-          }
-        }
-      }
-
-      // Intelligent Merge: Update ignoredNoteNumbers intelligently
-      // Identify all unique noteNumbers in the new performance
-      const newNoteNumbers = new Set<number>();
-      performance.events.forEach(event => {
-        newNoteNumbers.add(event.noteNumber);
-      });
-      
-      // Merge ignoredNoteNumbers: Keep only ignored notes that still exist in the new performance
-      // Reset to empty array for new imports (all new voices visible by default)
-      const previousIgnored = projectState.ignoredNoteNumbers || [];
-      const mergedIgnored = previousIgnored.filter(noteNum => newNoteNumbers.has(noteNum));
-      
-      // Update project state with merged ignoredNoteNumbers
-      if (mergedIgnored.length !== previousIgnored.length) {
-        onUpdateProjectState({
-          ...projectState,
-          ignoredNoteNumbers: mergedIgnored,
-        });
-      }
-
-      // Reset file input
-      event.target.value = '';
-    } catch (err) {
-      console.error('Failed to import MIDI file:', err);
-      alert(`Failed to import MIDI file: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      event.target.value = '';
+    if (onImport) {
+      onImport(file);
+    } else {
+      console.warn('onImport callback not provided - cannot import MIDI file');
     }
+
+    // Reset input value so same file can be loaded again if needed
+    event.target.value = '';
   };
 
   // Handle scan MIDI button click - show ImportWizard
@@ -1051,7 +910,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Handle ImportWizard confirm - add assets to parkedSounds
-  const handleImportConfirm = (assets: SoundAsset[]) => {
+  const handleImportConfirm = (assets: Voice[]) => {
     assets.forEach((asset) => {
       onAddSound(asset);
     });
@@ -1196,7 +1055,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     // Collect all sounds that have originalMidiNote set
     // Use derived lists to avoid duplicates
-    const soundsWithNotes: SoundAsset[] = [
+    const soundsWithNotes: Voice[] = [
       ...placedAssets.filter(s => s.originalMidiNote !== null),
       ...stagingAssets.filter(s => s.originalMidiNote !== null),
     ];
@@ -1400,7 +1259,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     const shuffledPads = [...emptyPads].sort(() => Math.random() - 0.5);
 
     // Map voices to pads (up to the minimum of available voices and empty pads)
-    const assignments: Record<string, SoundAsset> = {};
+    const assignments: Record<string, Voice> = {};
     const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
     
     for (let i = 0; i < maxAssignments; i++) {
@@ -1472,33 +1331,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     return getRawActivePerformance(projectState);
   }, [projectState]);
 
-  // Real-time engine execution: Run whenever activeMapping, activeLayout.performance, or ignoredNoteNumbers changes
-  useEffect(() => {
-    if (!activeMapping || !filteredPerformance) {
-      setEngineResult(null);
-      return;
-    }
-
-    // Debounce engine execution for performance
-    const timer = setTimeout(() => {
-      // Use filtered performance from selector (excludes ignored notes)
-      const basicResult = runEngine(filteredPerformance, activeMapping);
-      // Adapter: Convert basic EngineResult to extended EngineResult expected by EngineResultsPanel
-      // EngineResultsPanel handles missing fields gracefully, so we use type assertion
-      const extendedResult: EngineResult = {
-        ...basicResult,
-        fingerUsageStats: {},
-        fatigueMap: {},
-        averageDrift: 0,
-      } as EngineResult;
-      setEngineResult(extendedResult);
-      
-      // Update scoreCache in the mapping
-      onUpdateMapping({ scoreCache: basicResult.score });
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [activeMapping, filteredPerformance, onUpdateMapping]);
+  // Engine execution moved to Workbench.tsx (reactive solver loop)
+  // Engine result is now passed as a prop from Workbench
 
   // Responsive timeline hiding: Hide if container height < 200px or window width < 768px
   useEffect(() => {
@@ -1874,7 +1708,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 )}
               </div>
 
-              {/* Staging Area Section - Draggable SoundAssets */}
+              {/* Staging Area Section - Draggable Voices */}
               <div>
                 <button
                   onClick={() => setStagingAreaSectionCollapsed(!stagingAreaSectionCollapsed)}

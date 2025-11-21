@@ -6,7 +6,7 @@
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { FingerID } from '../types/engine';
 import { Hand, MAX_HAND_SPAN, MAX_REACH_GRID_UNITS } from './ergonomics';
-import { FingerType, HandState, GridPos, DEFAULT_ENGINE_CONSTANTS } from './models';
+import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS } from './models';
 
 /**
  * Checks if the distance from wrist to target position is within the maximum hand span.
@@ -158,35 +158,34 @@ export function getReachabilityMap(
 }
 
 /**
- * Calculates the Euclidean distance between two grid positions as tuples.
+ * Calculates the Euclidean distance between two grid positions.
+ * Uses GridPosition (object-based) for consistency.
  * 
- * @param start - Starting position [row, col]
- * @param end - Ending position [row, col]
+ * @param start - Starting position
+ * @param end - Ending position
  * @returns The Euclidean distance between the two points
  */
-function calculateDistance(start: GridPos, end: GridPos): number {
-  const rowDiff = end[0] - start[0];
-  const colDiff = end[1] - start[1];
-  return Math.sqrt((rowDiff * rowDiff) + (colDiff * colDiff));
+function calculateDistance(start: GridPosition, end: GridPosition): number {
+  return calculateGridDistance(start, end);
 }
 
 /**
  * Checks if a reach from start to end position is possible for a given finger.
  * Returns false if the distance exceeds the maximum reach constant.
  * 
- * @param start - Starting position [row, col]
- * @param end - Ending position [row, col]
+ * @param start - Starting position (object-based)
+ * @param end - Ending position (object-based)
  * @param finger - The finger type attempting the reach
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
  * @returns true if the reach is possible, false if distance exceeds max reach
  */
 export function isReachPossible(
-  start: GridPos,
-  end: GridPos,
+  start: GridPosition,
+  end: GridPosition,
   finger: FingerType,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): boolean {
-  const distance = calculateDistance(start, end);
+  const distance = calculateGridDistance(start, end);
   
   // Use maxReach as the maximum reach distance
   // All fingers use the same max reach for now, but this could be finger-specific
@@ -199,13 +198,13 @@ export function isReachPossible(
  * thumb crossing above middle finger).
  * 
  * @param handState - Current state of the hand
- * @param newAssignment - The new finger assignment {finger: FingerType, pos: GridPos}
+ * @param newAssignment - The new finger assignment {finger: FingerType, pos: GridPosition}
  * @param handSide - Which hand (left or right)
  * @returns true if the assignment is geometrically valid, false otherwise
  */
 export function isValidFingerOrder(
   handState: HandState,
-  newAssignment: { finger: FingerType; pos: GridPos },
+  newAssignment: { finger: FingerType; pos: GridPosition },
   handSide: 'left' | 'right'
 ): boolean {
   const { finger: newFinger, pos: newPos } = newAssignment;
@@ -231,12 +230,12 @@ export function isValidFingerOrder(
   // For left hand: thumb should be right (higher col) or bottom (lower row) of pinky
   if (thumbPos && pinkyPos) {
     if (handSide === 'right') {
-      if (thumbPos[1] >= pinkyPos[1] && thumbPos[0] >= pinkyPos[0]) {
+      if (thumbPos.col >= pinkyPos.col && thumbPos.row >= pinkyPos.row) {
         return false; // Thumb is to the right and above pinky (invalid)
       }
     } else {
       // left hand
-      if (thumbPos[1] <= pinkyPos[1] && thumbPos[0] >= pinkyPos[0]) {
+      if (thumbPos.col <= pinkyPos.col && thumbPos.row >= pinkyPos.row) {
         return false; // Thumb is to the left and above pinky (invalid)
       }
     }
@@ -247,12 +246,12 @@ export function isValidFingerOrder(
   // For left hand: index should be to the left (lower col) of pinky
   if (indexPos && pinkyPos) {
     if (handSide === 'right') {
-      if (indexPos[1] < pinkyPos[1]) {
+      if (indexPos.col < pinkyPos.col) {
         return false; // Index is to the left of pinky (crossed over)
       }
     } else {
       // left hand
-      if (indexPos[1] > pinkyPos[1]) {
+      if (indexPos.col > pinkyPos.col) {
         return false; // Index is to the right of pinky (crossed over)
       }
     }
@@ -261,7 +260,7 @@ export function isValidFingerOrder(
   // Rule 3: Thumb should not cross above middle finger
   // Thumb should generally be at the same row or below middle finger
   if (thumbPos && middlePos) {
-    if (thumbPos[0] > middlePos[0]) {
+    if (thumbPos.row > middlePos.row) {
       return false; // Thumb is above middle finger (invalid)
     }
   }
@@ -282,12 +281,12 @@ export function isValidFingerOrder(
     if (pos1 && pos2) {
       if (handSide === 'right') {
         // Right hand: each finger should be to the right (higher col) of the previous
-        if (pos1[1] >= pos2[1]) {
+        if (pos1.col >= pos2.col) {
           return false; // Fingers are out of order
         }
       } else {
         // Left hand: each finger should be to the left (lower col) of the previous
-        if (pos1[1] <= pos2[1]) {
+        if (pos1.col <= pos2.col) {
           return false; // Fingers are out of order
         }
       }
@@ -302,20 +301,20 @@ export function isValidFingerOrder(
  */
 export interface ChordFingerAssignment {
   finger: FingerType;
-  pos: GridPos;
+  pos: GridPosition;
 }
 
 /**
  * Checks chord feasibility and returns valid finger combinations.
  * Rejects combinations that require overlapping fingers or impossible spans.
  * 
- * @param notes - Array of note positions [row, col] in the chord
+ * @param notes - Array of note positions (object-based) in the chord
  * @param handSide - Which hand (left or right)
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
  * @returns Array of valid finger assignment combinations, or empty array if no valid combination exists
  */
 export function checkChordFeasibility(
-  notes: GridPos[],
+  notes: GridPosition[],
   handSide: 'left' | 'right',
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): ChordFingerAssignment[][] {
@@ -334,7 +333,7 @@ export function checkChordFeasibility(
   // Generate all possible finger-to-note assignments
   // We'll use a recursive approach to generate permutations
   function generateAssignments(
-    remainingNotes: GridPos[],
+    remainingNotes: GridPosition[],
     remainingFingers: FingerType[],
     currentAssignment: ChordFingerAssignment[]
   ): void {
@@ -383,7 +382,7 @@ function isChordAssignmentValid(
   // Check 1: No overlapping fingers (same position)
   const positions = new Set<string>();
   for (const { pos } of assignment) {
-    const posKey = `${pos[0]},${pos[1]}`;
+    const posKey = `${pos.row},${pos.col}`;
     if (positions.has(posKey)) {
       return false; // Overlapping fingers
     }
