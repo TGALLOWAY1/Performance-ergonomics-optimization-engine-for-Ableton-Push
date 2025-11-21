@@ -8,7 +8,7 @@
  * Represents a single MIDI note event in a performance.
  */
 export interface NoteEvent {
-  /** MIDI note number (0-127) */
+  /** Cell: MIDI note number (0-127) representing a slot in the 128 Drum Rack */
   noteNumber: number;
   /** Absolute start time in seconds */
   startTime: number;
@@ -26,14 +26,14 @@ export interface InstrumentConfig {
   rows: 8;
   /** Number of columns in the grid. Fixed at 8 for 64-pad mode. */
   cols: 8;
-  /** The MIDI note at row 0, col 0 (bottom-left corner). */
+  /** Cell: The MIDI note number (0-127) at Pad [0,0] (bottom-left Pad). */
   bottomLeftNote: number;
 }
 
 /**
  * A3: SectionMap
  * Maps a specific time range in the song to a specific grid configuration.
- * If a note falls within these measures, this specific instrumentConfig is used to calculate its grid position.
+ * If a Cell (MIDI note) falls within these measures, this specific instrumentConfig is used to calculate its Pad position.
  */
 export interface SectionMap {
   id: string;
@@ -42,7 +42,7 @@ export interface SectionMap {
   startMeasure: number;
   /** Length of the section in measures. End measure is calculated as: startMeasure + lengthInMeasures - 1 */
   lengthInMeasures: number;
-  /** The instrument configuration active during this section */
+  /** The instrument configuration active during this section (defines Cell-to-Pad mapping) */
   instrumentConfig: InstrumentConfig;
 }
 

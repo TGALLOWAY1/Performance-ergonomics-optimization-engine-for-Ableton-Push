@@ -6,20 +6,22 @@ import { SoundAsset } from '../types/layout';
 import { generateId } from './performanceUtils';
 
 /**
- * W3: Result type for MIDI import with unmapped note count
+ * W3: Result type for MIDI import with unmapped Cell count
  */
 export interface MidiImportResult {
   performance: Performance;
   unmappedNoteCount: number;
+  /** Minimum Cell (MIDI note number) found in the MIDI file (for intelligent root note logic) */
+  minNoteNumber: number | null;
 }
 
 /**
  * W3: Parses a MIDI file and converts it into a Performance object.
- * Also analyzes notes to check if they fall within the 8x8 grid view.
+ * Also analyzes Cells (MIDI notes) to check if they fall within the 8x8 grid view (can be mapped to Pads).
  * 
  * @param file The MIDI file to parse
- * @param config The instrument configuration to check against (for out-of-bounds detection)
- * @returns A Promise resolving to the parsed Performance object and unmapped note count
+ * @param config The instrument configuration to check against (for Cell-to-Pad mapping and out-of-bounds detection)
+ * @returns A Promise resolving to the parsed Performance object and unmapped Cell count
  */
 export const parseMidiFile = async (
   file: File,
@@ -43,12 +45,11 @@ export const parseMidiFile = async (
           track.notes.forEach((note) => {
             const noteNumber = note.midi;
             
-            // W3: Check if note is within the 8x8 grid using noteToGrid
-            const position = GridMapService.noteToGrid(noteNumber, config);
-            if (!position) {
-              outOfBoundsCount++;
-              console.warn(`Note ${noteNumber} (${note.name}) is out of bounds for current config.`);
-            }
+        // W3: Check if Cell (MIDI note) can be mapped to a Pad using noteToGrid
+        const position = GridMapService.noteToGrid(noteNumber, config);
+        if (!position) {
+          outOfBoundsCount++;
+        }
 
             events.push({
               noteNumber: noteNumber,
@@ -68,6 +69,11 @@ export const parseMidiFile = async (
           ? Math.round(midiData.header.tempos[0].bpm) 
           : 120;
 
+        // Find minimum note number for intelligent root note logic
+        const minNote = events.length > 0 
+          ? Math.min(...events.map(e => e.noteNumber))
+          : null;
+
         // W3: Return performance with unmapped note count
         resolve({
           performance: {
@@ -75,7 +81,8 @@ export const parseMidiFile = async (
             tempo,
             name: file.name.replace(/\.[^/.]+$/, "") // Remove extension
           },
-          unmappedNoteCount: outOfBoundsCount
+          unmappedNoteCount: outOfBoundsCount,
+          minNoteNumber: minNote
         });
 
       } catch (err) {
@@ -157,6 +164,7 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
         });
       }
       // If no pitches found, skip this file (empty MIDI file)
+      // If no pitches found, skip this file (empty MIDI file)
     } catch (err) {
       console.error(`Failed to process file ${file.name}:`, err);
       // Continue processing other files even if one fails
@@ -164,5 +172,112 @@ export const processMidiFiles = async (files: File[]): Promise<SoundAsset[]> => 
   }
 
   return allAssets;
+};
+
+/**
+ * Fetches a MIDI file from a URL and parses it into a Performance object.
+ * Used for automatically loading test MIDI files during development.
+ * 
+ * @param url The URL or path to the MIDI file
+ * @param config The instrument configuration to check against
+ * @returns A Promise resolving to the parsed Performance object and unmapped note count
+ */
+export const fetchAndParseMidiFile = async (
+  url: string,
+  config: InstrumentConfig
+): Promise<MidiImportResult> => {
+  try {
+    // Try multiple possible paths for the test MIDI file
+    // Note: In Vite, static files must be in the public folder to be served
+    // The TEST DATA folder should be copied to public/TEST DATA
+    const possiblePaths = [
+      `/TEST DATA/Scenario 1 Tests/${url}`, // Public folder path (most likely)
+      `/${url}`, // Root path (public folder in Vite)
+      url, // Direct path
+      `./TEST DATA/Scenario 1 Tests/${url}`, // Relative path (fallback)
+    ];
+
+    let response: Response | null = null;
+    let lastError: Error | null = null;
+
+    // Try each path until one works
+    for (const path of possiblePaths) {
+      try {
+        response = await fetch(path);
+        if (response.ok) {
+          break;
+        }
+      } catch (err) {
+        lastError = err as Error;
+        continue;
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Failed to fetch MIDI file: ${url}. Tried paths: ${possiblePaths.join(', ')}. ${lastError?.message || ''}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const midiData = new Midi(arrayBuffer);
+    const events: NoteEvent[] = [];
+    let unmappedNoteCount = 0;
+
+    // Track unique out-of-bounds notes to avoid spam
+    const outOfBoundsNotes = new Set<number>();
+    
+    // Iterate through all tracks
+    midiData.tracks.forEach((track) => {
+      track.notes.forEach((note) => {
+        const noteNumber = note.midi;
+
+        // Check if note is within the 8x8 grid
+        const position = GridMapService.noteToGrid(noteNumber, config);
+        if (!position) {
+          unmappedNoteCount++;
+          outOfBoundsNotes.add(noteNumber);
+        }
+
+        events.push({
+          noteNumber: noteNumber,
+          startTime: note.time,
+        });
+      });
+    });
+
+    // Log out-of-bounds notes once (batch warning)
+    if (outOfBoundsNotes.size > 0) {
+      const notesList = Array.from(outOfBoundsNotes).sort((a, b) => a - b).join(', ');
+      console.warn(
+        `${unmappedNoteCount} note event(s) are out of bounds for current config (bottomLeftNote: ${config.bottomLeftNote}). ` +
+        `Unmapped note numbers: ${notesList}`
+      );
+    }
+
+    // Sort events by start time
+    events.sort((a, b) => a.startTime - b.startTime);
+
+    // Determine tempo (use the first tempo event or default to 120)
+    const tempo = midiData.header.tempos.length > 0
+      ? Math.round(midiData.header.tempos[0].bpm)
+      : 120;
+
+    // Find minimum note number for intelligent root note logic
+    const minNote = events.length > 0 
+      ? Math.min(...events.map(e => e.noteNumber))
+      : null;
+
+    return {
+      performance: {
+        events,
+        tempo,
+        name: url.replace(/\.[^/.]+$/, "") // Remove extension
+      },
+      unmappedNoteCount,
+      minNoteNumber: minNote
+    };
+  } catch (err) {
+    console.error(`Failed to fetch and parse MIDI file from ${url}:`, err);
+    throw err;
+  }
 };
 

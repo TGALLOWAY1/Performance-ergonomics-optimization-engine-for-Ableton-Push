@@ -18,20 +18,20 @@ interface GridEditorProps {
   gridPattern: GridPattern | null;
   onTogglePad: (step: number, row: number, col: number) => void;
   showDebugLabels: boolean;
-  /** When true, ignore step time and show any pad that appears in performance.events as active. */
+  /** When true, ignore step time and show any Pad that appears in performance.events as active. */
   viewAllSteps: boolean;
   engineResult: EngineResult | null;
   /** When true, show visual dividers for Drum Rack Banks */
   showBankGuides?: boolean;
-  /** Optional callback when a cell is clicked (for selection purposes) */
+  /** Optional callback when a Pad is clicked (for selection purposes) */
   onCellClick?: (row: number, col: number) => void;
-  /** Active mapping for custom layout (used in Analysis mode) */
+  /** Active mapping for custom layout (defines Pad-to-Voice Assignments, used in Analysis mode) */
   activeMapping?: GridMapping | null;
-  /** When true, grid is read-only and shows SoundAsset info from activeMapping */
+  /** When true, grid is read-only and shows Voice info from activeMapping */
   readOnly?: boolean;
-  /** Highlighted cell coordinates (for external highlighting) */
+  /** Highlighted Pad coordinates (for external highlighting) */
   highlightedCell?: { row: number; col: number } | null;
-  /** Callback to update finger constraints (for Analysis mode) */
+  /** Callback to update finger constraints for a Pad (for Analysis mode) */
   onUpdateFingerConstraint?: (cellKey: string, constraint: string | null) => void;
 }
 
@@ -48,6 +48,21 @@ const DIFFICULTY_RANK: Record<DifficultyLabel, number> = {
   'Medium': 1,
   'Hard': 2,
   'Unplayable': 3
+};
+
+/**
+ * Converts FingerID (1-5) to abbreviation (T, I, M, R, P)
+ * 1 = Thumb (T), 2 = Index (I), 3 = Middle (M), 4 = Ring (R), 5 = Pinky (P)
+ */
+const getFingerAbbreviation = (finger: FingerID): string => {
+  const map: Record<FingerID, string> = {
+    1: 'T',
+    2: 'I',
+    3: 'M',
+    4: 'R',
+    5: 'P',
+  };
+  return map[finger];
 };
 
 interface ReachabilityConfig {
@@ -93,7 +108,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       )
     : null;
 
-  // W4: Calculate per-pad note count from activeLayout.performance
+  // W4: Calculate per-Pad Cell (MIDI note) count from activeLayout.performance
   const padNoteCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     
@@ -190,9 +205,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     );
   }
 
-  // Helper to find relevant debug event for a pad
+  // Helper to find relevant debug event for a pad at the current step
   const getDebugEventForPad = (row: number, col: number): EngineDebugEvent | null => {
-    if (!engineResult) return null;
+    if (!engineResult || !activeLayout) return null;
 
     // If we have activeMapping, find the note by looking up the cell's SoundAsset
     // Otherwise, use the standard position-to-note conversion
@@ -225,24 +240,32 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       }, noteEvents[0]);
     } else {
       // Find event matching current step time
-      // We need to approximate the time window for the current step
-      // Assuming 16th notes at 120 BPM for now as a simplification, or use gridPattern logic
-      // Ideally we'd pass the exact time window, but for now let's match loosely if we can
-      // Or better: check if the pad is active in the gridPattern for this step, 
-      // and if so, find the event that corresponds to this step index.
+      // Calculate step duration: 16th notes = 1/4 of a beat
+      const tempo = activeLayout.performance.tempo || 120; // Default to 120 BPM
+      const beatDuration = 60 / tempo; // seconds per beat
+      const stepDuration = beatDuration / 4; // 16th note duration
       
-      // Since gridPattern is step-based, let's try to map step to time
-      // This is tricky without exact quantization info, but let's try:
-      // If the pad is active at this step, we want to show its difficulty.
-      // But we don't easily know WHICH event index corresponds to this step without re-calculating.
+      // Calculate time window for current step
+      const stepStartTime = currentStep * stepDuration;
+      const stepEndTime = (currentStep + 1) * stepDuration;
       
-      // Fallback: If the pad is active in the UI, show the worst case for that note to be safe?
-      // Or try to find an event close to the step time.
-      // Let's use the "worst case" logic for now even in single step mode if multiple exist,
-      // as it's safer to show the problem than hide it.
-      // But strictly, we should filter by time.
+      // Find events that fall within this time window
+      const eventsInStep = noteEvents.filter(e => 
+        e.startTime >= stepStartTime && e.startTime < stepEndTime
+      );
       
-      // Let's just return the worst case for this note for now to ensure visibility of issues.
+      if (eventsInStep.length > 0) {
+        // Return the first event in this step (or worst case if multiple)
+        return eventsInStep.reduce((worst, current) => {
+          if (DIFFICULTY_RANK[current.difficulty] > DIFFICULTY_RANK[worst.difficulty]) {
+            return current;
+          }
+          return worst;
+        }, eventsInStep[0]);
+      }
+      
+      // Fallback: If no event in this exact step, return the worst case for this note
+      // (This handles quantization mismatches)
       return noteEvents.reduce((worst, current) => {
         if (DIFFICULTY_RANK[current.difficulty] > DIFFICULTY_RANK[worst.difficulty]) {
           return current;
@@ -266,7 +289,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         className="grid grid-cols-8 gap-2 bg-slate-900 p-4 rounded-xl shadow-2xl border border-slate-800 relative"
         style={{ width: 'fit-content' }}
       >
-        {rows.map((row, rowIndex) => (
+        {rows.map((row) => (
           <React.Fragment key={`row-${row}`}>
             {cols.map((col) => {
               // Get SoundAsset from activeMapping if available
@@ -316,11 +339,18 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               // Check if this cell is highlighted
               const isHighlighted = highlightedCell?.row === row && highlightedCell?.col === col;
 
-              // Compute styling based on difficulty
+              // Compute styling based on difficulty and hand assignment
               let difficultyStyle = '';
               let dynamicStyle: React.CSSProperties | undefined;
+              let handBorderColor: string | undefined; // For finger visualization border
               
               if (isActive) {
+                // Determine hand-based border color for finger visualization
+                if (debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
+                  const hand = debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left' ? 'left' : 'right';
+                  handBorderColor = hand === 'left' ? '#3b82f6' : '#f97316'; // Blue for Left, Orange for Right
+                }
+                
                 if (debugEvent) {
                   switch (debugEvent.difficulty) {
                     case 'Unplayable':
@@ -334,7 +364,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                       break;
                     case 'Easy':
                     default:
-                      difficultyStyle = 'bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]';
+                      // Use hand-based border color if available, otherwise default blue
+                      if (handBorderColor) {
+                        difficultyStyle = `bg-blue-500 border-4 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]`;
+                      } else {
+                        difficultyStyle = 'bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]';
+                      }
                       break;
                   }
                 } else {
@@ -396,7 +431,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               }
 
               // Handle cell click - only allow in non-readOnly mode
-              const handleCellClick = (e: React.MouseEvent) => {
+              const handleCellClick = () => {
                 if (readOnly) return; // Disable clicks in readOnly mode
                 // Call the standard toggle handler
                 onTogglePad(currentStep, row, col);
@@ -425,6 +460,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                     ...dynamicStyle,
                     borderLeftWidth: soundAsset ? '4px' : undefined,
                     borderLeftColor: cellColor || undefined,
+                    // Apply hand-based border color for finger visualization (overrides difficulty border for Easy)
+                    ...(isActive && handBorderColor && (!debugEvent || debugEvent.difficulty === 'Easy') 
+                      ? { borderColor: handBorderColor, borderWidth: '4px' }
+                      : {}),
                   }}
                   onClick={handleCellClick}
                   onContextMenu={readOnly ? undefined : (e) => handleContextMenu(e, row, col)}
@@ -441,14 +480,23 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                     </div>
                   )}
                   
-                  {/* Finger Badge - Always show when available, even in readOnly mode */}
-                  {isActive && debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable' && (
-                    <div className={`
-                      absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm z-10
-                      ${debugEvent.assignedHand === 'LH' ? 'bg-blue-200 text-blue-900' : 'bg-red-200 text-red-900'}
-                    `}>
-                      {formatFinger(normalizeHand(debugEvent.assignedHand), debugEvent.finger)}
-                    </div>
+                  {/* Finger Visualization Badge - Show finger assignment for active pads */}
+                  {isActive && (
+                    debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable' ? (
+                      <div className={`
+                        absolute top-1 right-1 px-1.5 py-0.5 rounded flex items-center justify-center text-[9px] font-bold shadow-sm z-10 border-2
+                        ${debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left' 
+                          ? 'bg-blue-500/90 text-white border-blue-300' 
+                          : 'bg-orange-500/90 text-white border-orange-300'}
+                      `}>
+                        {normalizeHand(debugEvent.assignedHand as 'LH' | 'RH')}-{getFingerAbbreviation(debugEvent.finger)}
+                      </div>
+                    ) : (
+                      // Show '?' if pad is active but no analysis data available
+                      <div className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-600/80 text-slate-200 border-2 border-slate-500 shadow-sm z-10">
+                        ?
+                      </div>
+                    )
                   )}
 
                   {showDebugLabels && (

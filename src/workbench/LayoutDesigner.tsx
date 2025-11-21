@@ -24,35 +24,36 @@ import { mapToQuadrants } from '../utils/autoLayout';
 import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { ImportWizard } from './ImportWizard';
-import { runEngine, EngineResult } from '../engine/runEngine';
+import { runEngine } from '../engine/runEngine';
+import { EngineResult } from '../engine/core';
 import { TimelineArea } from './TimelineArea';
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { SectionMapList } from './SectionMapList';
 
 interface LayoutDesignerProps {
-  /** Staging area for sound assets before assignment to grid */
+  /** Staging area for Voices before Assignment to Pads */
   parkedSounds: SoundAsset[];
-  /** Currently active mapping being edited */
+  /** Currently active mapping being edited (defines Pad-to-Voice Assignments) */
   activeMapping: GridMapping | null;
-  /** Instrument configuration for MIDI import */
+  /** Instrument configuration for MIDI import (defines Cell-to-Pad mapping) */
   instrumentConfig: InstrumentConfig | null;
-  /** Callback when a sound is dropped on a grid cell */
+  /** Callback when a Voice is assigned to a Pad */
   onAssignSound: (cellKey: string, sound: SoundAsset) => void;
-  /** Callback to assign multiple sounds at once (for batch operations) */
+  /** Callback to assign multiple Voices to Pads at once (for batch operations) */
   onAssignSounds: (assignments: Record<string, SoundAsset>) => void;
   /** Callback when mapping metadata is updated */
   onUpdateMapping: (updates: Partial<GridMapping>) => void;
   /** Callback to duplicate the current mapping */
   onDuplicateMapping: () => void;
-  /** Callback to add a new sound to parkedSounds */
+  /** Callback to add a new Voice to parkedSounds */
   onAddSound: (sound: SoundAsset) => void;
-  /** Callback to update a sound in parkedSounds */
+  /** Callback to update a Voice in parkedSounds */
   onUpdateSound: (soundId: string, updates: Partial<SoundAsset>) => void;
-  /** Callback to update a sound in the active mapping */
+  /** Callback to update a Voice in the active mapping (Pad assignment) */
   onUpdateMappingSound: (cellKey: string, updates: Partial<SoundAsset>) => void;
-  /** Callback to remove a sound from a cell */
+  /** Callback to remove a Voice Assignment from a Pad */
   onRemoveSound: (cellKey: string) => void;
-  /** Callback to delete a sound from parkedSounds */
+  /** Callback to delete a Voice from parkedSounds */
   onDeleteSound?: (soundId: string) => void;
   /** Current project state (for save/load operations) */
   projectState: ProjectState;
@@ -74,7 +75,7 @@ interface LayoutDesignerProps {
   onUpdateInstrumentConfig?: (id: string, updates: Partial<InstrumentConfig>) => void;
   /** W1: Callback to delete instrument config */
   onDeleteInstrumentConfig?: (id: string) => void;
-  /** View Settings: Show note labels (MIDI pitch) on grid cells */
+  /** View Settings: Show Cell labels (MIDI note numbers) on Pads */
   showNoteLabels?: boolean;
   /** View Settings: View all steps (flatten time) */
   viewAllSteps?: boolean;
@@ -82,7 +83,7 @@ interface LayoutDesignerProps {
   showHeatmap?: boolean;
 }
 
-// Draggable Sound Item Component
+// Draggable Voice Item Component (Voice can be assigned to a Pad)
 interface DraggableSoundProps {
   sound: SoundAsset;
   isSelected: boolean;
@@ -229,10 +230,10 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSe
   );
 };
 
-// Placed Sound Item Component (for Library "Placed on Grid" section)
+// Placed Voice Item Component (for Library "Placed on Grid" section - shows Pad assignments)
 interface PlacedSoundItemProps {
   sound: SoundAsset;
-  cellKey: string;
+  cellKey: string; // Pad key "row,col"
   isSelected: boolean;
   onSelect: () => void;
 }
@@ -295,7 +296,7 @@ const DroppableStagingArea: React.FC<DroppableStagingAreaProps> = ({ children })
   );
 };
 
-// Droppable Grid Cell Component
+// Droppable Pad Component (represents a Pad on the 8x8 grid)
 interface DroppableCellProps {
   row: number;
   col: number;
@@ -335,7 +336,7 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
   onDoubleClick,
   onContextMenu,
 }) => {
-  // Get note number for label display
+  // Get Cell (MIDI note number) for label display on this Pad
   const noteNumber = assignedSound && assignedSound.originalMidiNote !== null
     ? assignedSound.originalMidiNote
     : instrumentConfig
@@ -914,9 +915,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         }
       });
 
-      // Automatically populate the grid based on MIDI note numbers
+      // Automatically populate the grid based on Cell (MIDI note numbers)
       if (instrumentConfig) {
-        // Map each sound to its grid position based on MIDI note number
+        // Assignment: Map each Voice to its Pad position based on its Cell (MIDI note number)
         const assignments: Array<{ cellKey: string; sound: SoundAsset }> = [];
         
         newSounds.forEach(sound => {
@@ -925,9 +926,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
             if (position) {
               const cellKeyStr = cellKey(position.row, position.col);
               assignments.push({ cellKey: cellKeyStr, sound });
-              console.log(`Mapping note ${sound.originalMidiNote} (${sound.name}) to grid [${position.row},${position.col}]`);
+              console.log(`Assignment: Cell ${sound.originalMidiNote} (Voice: ${sound.name}) -> Pad [${position.row},${position.col}]`);
             } else {
-              console.warn(`Note ${sound.originalMidiNote} (${sound.name}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
+              console.warn(`Cell ${sound.originalMidiNote} (Voice: ${sound.name}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
             }
           }
         });
@@ -1240,6 +1241,62 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   
   const stagingAssets = parkedSounds.filter(sound => !placedAssetIds.has(sound.id));
 
+  // Handle auto-assign random: Map unassigned Voices to empty Pads
+  const handleAutoAssignRandom = () => {
+    if (!activeMapping || !instrumentConfig) {
+      alert('No active mapping or instrument config available. Please create a mapping first.');
+      return;
+    }
+
+    // Find all unassigned Voices (in staging, not yet assigned to a Pad)
+    const unassignedVoices = stagingAssets;
+
+    if (unassignedVoices.length === 0) {
+      alert('No unassigned Voices found. All Voices are already assigned to Pads.');
+      return;
+    }
+
+    // Find all empty Pads (8x8 grid positions without a Voice assignment)
+    const emptyPads: Array<{ row: number; col: number; key: string }> = [];
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const key = cellKey(row, col);
+        if (!activeMapping.cells[key]) {
+          emptyPads.push({ row, col, key });
+        }
+      }
+    }
+
+    if (emptyPads.length === 0) {
+      alert('No empty Pads available. All 64 Pads are already assigned.');
+      return;
+    }
+
+    // Randomly shuffle both arrays
+    const shuffledVoices = [...unassignedVoices].sort(() => Math.random() - 0.5);
+    const shuffledPads = [...emptyPads].sort(() => Math.random() - 0.5);
+
+    // Map voices to pads (up to the minimum of available voices and empty pads)
+    const assignments: Record<string, SoundAsset> = {};
+    const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
+    
+    for (let i = 0; i < maxAssignments; i++) {
+      assignments[shuffledPads[i].key] = shuffledVoices[i];
+    }
+
+    // Batch assign all at once
+    if (Object.keys(assignments).length > 0) {
+      if (onAssignSounds) {
+        onAssignSounds(assignments);
+      } else {
+        // Fallback: assign individually
+        Object.entries(assignments).forEach(([key, voice]) => {
+          onAssignSound(key, voice);
+        });
+      }
+    }
+  };
+
   // Get selected sound (from library or grid)
   const selectedSound = selectedCellKey && activeMapping
     ? activeMapping.cells[selectedCellKey] || null
@@ -1290,11 +1347,19 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     // Debounce engine execution for performance
     const timer = setTimeout(() => {
-      const result = runEngine(activeLayout.performance, activeMapping);
-      setEngineResult(result);
+      const basicResult = runEngine(activeLayout.performance, activeMapping);
+      // Adapter: Convert basic EngineResult to extended EngineResult expected by EngineResultsPanel
+      // EngineResultsPanel handles missing fields gracefully, so we use type assertion
+      const extendedResult: EngineResult = {
+        ...basicResult,
+        fingerUsageStats: {},
+        fatigueMap: {},
+        averageDrift: 0,
+      } as EngineResult;
+      setEngineResult(extendedResult);
       
       // Update scoreCache in the mapping
-      onUpdateMapping({ scoreCache: result.score });
+      onUpdateMapping({ scoreCache: basicResult.score });
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timer);
@@ -1570,15 +1635,15 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </div>
             
             <div className="space-y-4">
-              {/* Staging Area Section */}
+              {/* Detected Voices Section (formerly Staging Area) */}
               <div>
                 <button
                   onClick={() => setStagingAreaCollapsed(!stagingAreaCollapsed)}
                   className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
                 >
-                  <span>Staging Area</span>
+                  <span>Detected Voices</span>
                   <span className="text-xs text-slate-500">
-                    {stagingAssets.length} {stagingAssets.length === 1 ? 'sound' : 'sounds'}
+                    {stagingAssets.length} {stagingAssets.length === 1 ? 'voice' : 'voices'}
                   </span>
                   <span className="text-slate-500">
                     {stagingAreaCollapsed ? '▼' : '▲'}
@@ -1586,14 +1651,37 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 </button>
                 {!stagingAreaCollapsed && (
                   <DroppableStagingArea>
+                    {/* Assign Actions Toolbar */}
+                    {stagingAssets.length > 0 && (
+                      <div className="mb-3 p-2 bg-slate-800/50 rounded border border-slate-700">
+                        <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Assign Actions</div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleAutoAssignRandom}
+                            disabled={!activeMapping || !instrumentConfig || stagingAssets.length === 0}
+                            className="flex-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded border border-blue-500 disabled:border-slate-600 transition-colors"
+                            title={!activeMapping || !instrumentConfig ? 'No active mapping or instrument config' : 'Randomly assign unassigned Voices to empty Pads'}
+                          >
+                            Auto-Assign (Random)
+                          </button>
+                          <button
+                            disabled
+                            className="flex-1 px-3 py-1.5 text-xs bg-slate-700 text-slate-500 cursor-not-allowed rounded border border-slate-600 flex items-center justify-center gap-1"
+                            title="AI Optimization coming in v2"
+                          >
+                            Auto-Assign (Optimize) 🧠
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2 mt-2">
                       {stagingAssets.length === 0 ? (
                         <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
-                          No sounds in staging
+                          No Voices detected
                           <br />
-                          <span className="text-xs">Click "+ New" or "Import MIDI" to add sounds</span>
+                          <span className="text-xs">Click "+ New" or "Import MIDI" to add Voices</span>
                           <br />
-                          <span className="text-xs">Or drag sounds from grid here to unassign</span>
+                          <span className="text-xs">Or drag Voices from grid here to unassign</span>
                         </div>
                       ) : (
                         stagingAssets.map((sound) => (
@@ -1709,8 +1797,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                           return currentRank > worstRank ? current : worst;
                         }, noteEvents[0]);
                         heatmapDifficulty = worstEvent.difficulty;
-                        heatmapFinger = worstEvent.finger;
-                        heatmapHand = worstEvent.assignedHand === 'Unplayable' ? null : worstEvent.assignedHand as 'LH' | 'RH';
+                        // Type assertion: runtime data from runEngine uses FingerID (1-5), not FingerType
+                        heatmapFinger = worstEvent.finger as FingerID | null;
+                        // Type assertion: runtime data from runEngine uses 'LH'/'RH', but type says 'left'/'right'
+                        const hand = worstEvent.assignedHand as 'left' | 'right' | 'Unplayable' | 'LH' | 'RH';
+                        heatmapHand = hand === 'Unplayable' ? null : (hand === 'left' || hand === 'LH' ? 'LH' : 'RH');
                       }
                     }
                   }

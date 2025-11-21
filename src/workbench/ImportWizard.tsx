@@ -3,9 +3,9 @@ import { SoundAsset } from '../types/layout';
 import { processMidiFiles } from '../utils/midiImport';
 
 interface ImportWizardProps {
-  /** Existing sound assets to check for conflicts */
+  /** Existing Voices to check for conflicts */
   existingSounds: SoundAsset[];
-  /** Callback when import is confirmed with final assets */
+  /** Callback when import is confirmed with final Voices */
   onConfirm: (assets: SoundAsset[]) => void;
   /** Callback when import is cancelled */
   onCancel: () => void;
@@ -14,13 +14,14 @@ interface ImportWizardProps {
 interface StagedAsset extends SoundAsset {
   /** Temporary name that can be edited before import */
   tempName: string;
-  /** Whether this asset has a naming conflict */
+  /** Whether this Voice has a naming conflict */
   hasConflict: boolean;
 }
 
 /**
  * ImportWizard component for batch importing MIDI files with smart naming.
- * Shows a preview/staging area where users can review and rename assets before importing.
+ * Extracts unique Voices (MIDI pitches) from MIDI files and shows a preview/staging area
+ * where users can review and rename Voices before importing.
  */
 export const ImportWizard: React.FC<ImportWizardProps> = ({
   existingSounds,
@@ -33,7 +34,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /**
-   * Checks if a name conflicts with existing sounds and returns a unique name.
+   * Checks if a name conflicts with existing Voices and returns a unique name.
    */
   const resolveConflict = (name: string, existingNames: Set<string>): string => {
     if (!existingNames.has(name)) {
@@ -51,6 +52,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
 
   /**
    * Processes files and stages them for preview.
+   * FIX: Collect all assets first, then perform a single state update to prevent overwrite bug.
    */
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -58,13 +60,27 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
     setIsProcessing(true);
     try {
       const fileArray = Array.from(files);
-      const assets = await processMidiFiles(fileArray);
+      
+      // FIX: Process all files and collect ALL assets into a single array
+      const allAssets: SoundAsset[] = [];
+      
+      for (const file of fileArray) {
+        try {
+          // Process each file individually to get all sounds from multi-track MIDI files
+          const fileAssets = await processMidiFiles([file]);
+          allAssets.push(...fileAssets); // Accumulate all assets
+        } catch (err) {
+          console.error(`Failed to process file ${file.name}:`, err);
+          // Continue processing other files even if one fails
+        }
+      }
 
       // Get existing sound names for conflict checking
       const existingNames = new Set(existingSounds.map(s => s.name));
 
       // Create staged assets with conflict resolution
-      const staged: StagedAsset[] = assets.map((asset) => {
+      // FIX: Process all collected assets in a single batch
+      const staged: StagedAsset[] = allAssets.map((asset) => {
         const resolvedName = resolveConflict(asset.name, existingNames);
         const hasConflict = resolvedName !== asset.name;
         
@@ -78,6 +94,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
         };
       });
 
+      // FIX: Single state update with all assets to prevent overwrite
       setStagedAssets(staged);
     } catch (err) {
       console.error('Failed to process MIDI files:', err);
@@ -152,6 +169,14 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   };
 
   /**
+   * Removes a staged asset from the preview.
+   * FIX: Restore delete functionality.
+   */
+  const removeStagedAsset = (id: string) => {
+    setStagedAssets((prev) => prev.filter((asset) => asset.id !== id));
+  };
+
+  /**
    * Confirms import with final asset names.
    */
   const handleConfirm = () => {
@@ -194,10 +219,10 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
                   className="flex items-center gap-3 p-3 bg-slate-900 rounded border border-slate-700"
                 >
                   <div
-                    className="w-4 h-4 rounded"
+                    className="w-4 h-4 rounded flex-shrink-0"
                     style={{ backgroundColor: asset.color }}
                   />
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <input
                       type="text"
                       value={asset.tempName}
@@ -217,6 +242,26 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
                       )}
                     </div>
                   </div>
+                  {/* FIX: Restore delete button */}
+                  <button
+                    onClick={() => removeStagedAsset(asset.id)}
+                    className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                    title="Remove from import"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
                 </div>
               ))}
             </div>
