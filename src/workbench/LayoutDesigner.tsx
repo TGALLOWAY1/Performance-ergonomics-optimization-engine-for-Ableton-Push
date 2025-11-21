@@ -52,6 +52,8 @@ interface LayoutDesignerProps {
   onUpdateMappingSound: (cellKey: string, updates: Partial<SoundAsset>) => void;
   /** Callback to remove a sound from a cell */
   onRemoveSound: (cellKey: string) => void;
+  /** Callback to delete a sound from parkedSounds */
+  onDeleteSound?: (soundId: string) => void;
   /** Current project state (for save/load operations) */
   projectState: ProjectState;
   /** Callback to update the entire project state */
@@ -72,6 +74,12 @@ interface LayoutDesignerProps {
   onUpdateInstrumentConfig?: (id: string, updates: Partial<InstrumentConfig>) => void;
   /** W1: Callback to delete instrument config */
   onDeleteInstrumentConfig?: (id: string) => void;
+  /** View Settings: Show note labels (MIDI pitch) on grid cells */
+  showNoteLabels?: boolean;
+  /** View Settings: View all steps (flatten time) */
+  viewAllSteps?: boolean;
+  /** View Settings: Show heatmap overlay */
+  showHeatmap?: boolean;
 }
 
 // Draggable Sound Item Component
@@ -80,9 +88,10 @@ interface DraggableSoundProps {
   isSelected: boolean;
   onSelect: () => void;
   onEdit: (updates: Partial<SoundAsset>) => void;
+  onDelete: () => void;
 }
 
-const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSelect, onEdit }) => {
+const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSelect, onEdit, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(sound.name);
   const [editColor, setEditColor] = useState(sound.color || '#6366f1');
@@ -166,12 +175,42 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({ sound, isSelected, onSe
         </div>
       ) : (
         <>
-          <div className="font-medium text-slate-200 text-sm">
-            {sound.name}
-          </div>
-          <div className="text-xs text-slate-400 mt-1">
-            {sound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
-            {sound.originalMidiNote !== null && ` • Note ${sound.originalMidiNote}`}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-slate-200 text-sm">
+                {sound.name}
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                {sound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
+                {sound.originalMidiNote !== null && ` • Note ${sound.originalMidiNote}`}
+              </div>
+            </div>
+            {/* Delete button - always visible */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Delete "${sound.name}" from staging?`)) {
+                  onDelete();
+                }
+              }}
+              className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+              title="Delete sound"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </button>
           </div>
           {isSelected && (
             <button
@@ -270,6 +309,8 @@ interface DroppableCellProps {
   heatmapFinger?: FingerID | null;
   heatmapHand?: 'LH' | 'RH' | null;
   fingerConstraint?: string | null;
+  showNoteLabels?: boolean;
+  instrumentConfig?: InstrumentConfig | null;
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -288,10 +329,25 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
   heatmapFinger,
   heatmapHand,
   fingerConstraint,
+  showNoteLabels = false,
+  instrumentConfig = null,
   onClick,
   onDoubleClick,
   onContextMenu,
 }) => {
+  // Get note number for label display
+  const noteNumber = assignedSound && assignedSound.originalMidiNote !== null
+    ? assignedSound.originalMidiNote
+    : instrumentConfig
+      ? GridMapService.getNoteForPosition(row, col, instrumentConfig)
+      : null;
+  
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const getNoteName = (midiNote: number): string => {
+    const note = NOTE_NAMES[midiNote % 12];
+    const octave = Math.floor(midiNote / 12) - 2;
+    return `${note}${octave}`;
+  };
   const key = cellKey(row, col);
   const { setNodeRef, isOver: isDroppableOver } = useDroppable({
     id: key,
@@ -392,6 +448,13 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
           <span className="text-[10px] text-slate-400 mt-0.5">
             [{row},{col}]
           </span>
+          {/* Note Label - Show MIDI pitch when showNoteLabels is enabled */}
+          {showNoteLabels && noteNumber !== null && (
+            <div className="absolute bottom-1 left-0 right-0 flex flex-col items-center text-[9px] opacity-60 leading-tight pointer-events-none font-mono">
+              <span>{noteNumber}</span>
+              <span>{getNoteName(noteNumber)}</span>
+            </div>
+          )}
           {/* Finger Badge - Always show when available from engine */}
           {heatmapFinger && heatmapHand && (
             <div className={`
@@ -445,6 +508,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onUpdateSound,
   onUpdateMappingSound,
   onRemoveSound,
+  onDeleteSound,
   projectState,
   onUpdateProjectState,
   onSetActiveMappingId,
@@ -455,6 +519,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onCreateSectionMap,
   onUpdateInstrumentConfig,
   onDeleteInstrumentConfig,
+  showNoteLabels = false,
+  viewAllSteps = false,
+  showHeatmap = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -469,9 +536,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const [stagingAreaCollapsed, setStagingAreaCollapsed] = useState(false);
   const [placedSoundsCollapsed, setPlacedSoundsCollapsed] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
-  const [showHeatmapOverlay, setShowHeatmapOverlay] = useState(false);
-  const [showDebugLabels, setShowDebugLabels] = useState(false);
-  const [viewAllSteps, setViewAllSteps] = useState(false);
+  // View Settings are now passed as props from Workbench
+  // Keep local state for backward compatibility if needed, but use props
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [timelineForceVisible, setTimelineForceVisible] = useState(false);
   const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
@@ -777,9 +843,21 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       const importResult = await parseMidiFile(file, instrumentConfig);
       const performance = importResult.performance;
       
-      // W3: Show warning if there are unmapped notes
+      // Intelligent Root Note Logic: Auto-set bottomLeftNote to minimum note
+      if (importResult.minNoteNumber !== null && onUpdateSection && projectState.sectionMaps.length > 0) {
+        const activeSection = projectState.sectionMaps[0]; // Single Static Section model
+        onUpdateSection(activeSection.id, { 
+          field: 'bottomLeftNote', 
+          value: importResult.minNoteNumber 
+        });
+      }
+      
+      // W3: Show warning if there are unmapped notes (should be 0 after auto-adjustment)
       if (importResult.unmappedNoteCount > 0) {
-        alert(`Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the current 8x8 grid window (bottomLeftNote: ${instrumentConfig.bottomLeftNote}). These notes will not be mapped to the grid.`);
+        console.warn(
+          `Warning: ${importResult.unmappedNoteCount} note${importResult.unmappedNoteCount === 1 ? '' : 's'} in the MIDI file fall outside the 8x8 grid window. ` +
+          `Root note auto-adjusted to ${importResult.minNoteNumber !== null ? importResult.minNoteNumber : instrumentConfig.bottomLeftNote} to fit all notes.`
+        );
       }
       
       // Extract unique note numbers from the performance
@@ -915,6 +993,20 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Handle ImportWizard cancel
   const handleImportCancel = () => {
     setShowImportWizard(false);
+  };
+
+  // Handle clear staging area - remove all sounds from staging
+  const handleClearStaging = () => {
+    if (stagingAssets.length === 0) {
+      return; // Nothing to clear
+    }
+    
+    if (window.confirm(`Are you sure you want to remove all ${stagingAssets.length} sound(s) from staging? This will permanently delete them.`)) {
+      // Delete all staging sounds
+      stagingAssets.forEach(sound => {
+        onDeleteSound?.(sound.id);
+      });
+    }
   };
 
   // Handle clear grid - moves all sounds back to staging
@@ -1286,39 +1378,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 
                 <div className="h-4 w-px bg-slate-700" />
                 
-                {/* Debug Toggles */}
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={showDebugLabels} 
-                    onChange={(e) => setShowDebugLabels(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  Show Note Labels
-                </label>
-                
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={viewAllSteps} 
-                    onChange={(e) => setViewAllSteps(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  View All Steps
-                </label>
-                
-                <div className="h-4 w-px bg-slate-700" />
-                
-                {/* Heatmap Toggle */}
-                <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={showHeatmapOverlay} 
-                    onChange={(e) => setShowHeatmapOverlay(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800"
-                  />
-                  Show Heatmap
-                </label>
+                {/* View Settings are now controlled from Workbench header */}
+                <span className="text-xs text-slate-500 italic">View Settings controlled from main header</span>
               </div>
               
               <div className="h-6 w-px bg-slate-700" />
@@ -1439,6 +1500,14 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 >
                   Clear Grid
                 </button>
+                <button
+                  onClick={handleClearStaging}
+                  disabled={stagingAssets.length === 0}
+                  className="w-full px-3 py-1.5 text-xs bg-orange-900/30 hover:bg-orange-900/50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-orange-300 disabled:text-slate-500 rounded border border-orange-900/50 disabled:border-slate-700 transition-colors"
+                  title={stagingAssets.length === 0 ? 'No sounds in staging' : `Remove all ${stagingAssets.length} sound(s) from staging`}
+                >
+                  Clear Staging
+                </button>
               </div>
             </div>
             
@@ -1537,6 +1606,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                               setSelectedCellKey(null);
                             }}
                             onEdit={(updates) => onUpdateSound(sound.id, updates)}
+                            onDelete={() => onDeleteSound?.(sound.id)}
                           />
                         ))
                       )}
@@ -1622,9 +1692,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   let heatmapFinger: FingerID | null = null;
                   let heatmapHand: 'LH' | 'RH' | null = null;
                   
-                  if (showHeatmapOverlay && engineResult && activeLayout && activeLayout.performance.events.length > 0 && assignedSound) {
+                  if (showHeatmap && engineResult && activeLayout && activeLayout.performance.events.length > 0 && assignedSound) {
                     // Find the debug event for this cell's note
-                    const noteNumber = assignedSound.originalMidiNote;
+                    const noteNumber = assignedSound?.originalMidiNote ?? null;
                     if (noteNumber !== null) {
                       // Find the worst-case event for this note
                       const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
@@ -1665,6 +1735,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                       heatmapFinger={heatmapFinger}
                       heatmapHand={heatmapHand}
                       fingerConstraint={fingerConstraint}
+                      showNoteLabels={showNoteLabels}
+                      instrumentConfig={instrumentConfig}
                       onClick={() => handleCellClick(row, col)}
                       onDoubleClick={() => handleCellDoubleClick(row, col)}
                       onContextMenu={(e) => handleCellContextMenu(e, row, col)}
@@ -1724,6 +1796,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                     currentStep={currentStep}
                     onStepSelect={setCurrentStep}
                     sectionMaps={projectState.sectionMaps}
+                    viewAllSteps={viewAllSteps}
                     onUpdateSectionMeasure={(id, field, value) => {
                       if (onUpdateSection) {
                         onUpdateSection(id, { field, value });
