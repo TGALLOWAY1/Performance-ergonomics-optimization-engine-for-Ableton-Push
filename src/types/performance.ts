@@ -71,19 +71,4 @@ export interface InstrumentConfig {
   layoutMode?: 'drum_64';
 }
 
-/**
- * SectionMap: Maps a specific time range in the song to a specific Pad grid configuration.
- * 
- * If a Voice (Cell) falls within these measures, this InstrumentConfig is used to calculate 
- * its Pad position via the Voice-to-Pad Assignment mapping.
- */
-export interface SectionMap {
-  id: string;
-  name: string;
-  /** Start measure (1-based index) */
-  startMeasure: number;
-  /** Length of the section in measures. End measure is calculated as: startMeasure + lengthInMeasures - 1 */
-  lengthInMeasures: number;
-  /** The instrument configuration active during this section (defines Voice-to-Pad Assignment mapping) */
-  instrumentConfig: InstrumentConfig;
-}
+

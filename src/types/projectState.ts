@@ -1,6 +1,7 @@
+
 import { Performance } from './performance';
 import { Voice, GridMapping } from './layout';
-import { InstrumentConfig, SectionMap } from '../types/performance';
+import { InstrumentConfig } from '../types/performance';
 
 export interface LayoutSnapshot {
   id: string;
@@ -18,7 +19,9 @@ export interface ProjectState {
   /** A5: Array of instrument configurations available in the project */
   instrumentConfigs: InstrumentConfig[];
   /** A5: Array of section maps that define time-based grid configurations */
-  sectionMaps: SectionMap[];
+  sectionMaps: any[]; // Using any[] temporarily to fix build, should be SectionMap[]
+
+  instrumentConfig: InstrumentConfig;
   activeLayoutId: string | null;
   projectTempo: number;
   /** Staging area for sound assets before assignment to grid */

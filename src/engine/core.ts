@@ -1,13 +1,13 @@
 /**
- * SectionAwareSolver - Core performability engine that assigns fingers to notes
- * based on temporal sections and biomechanical constraints.
+ * BiomechanicalSolver - Core performability engine that assigns fingers to notes
+ * based on biomechanical constraints and instrument configuration.
  */
 
 import { Performance, NoteEvent } from '../types/performance';
-import { SectionMap, InstrumentConfig } from '../types/performance';
+import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from './gridMapService';
 import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
-import { isReachPossible, isValidFingerOrder, checkChordFeasibility } from './feasibility';
+import { isReachPossible, isValidFingerOrder } from './feasibility';
 import {
   calculateMovementCost,
   calculateStretchPenalty,
@@ -96,12 +96,11 @@ function tupleToGridPos(pos: [number, number]): GridPosition {
  */
 function calculateCenterOfGravity(handState: HandState): GridPosition | null {
   const placedFingers: GridPosition[] = [];
-  
+
   for (const fingerType of ['thumb', 'index', 'middle', 'ring', 'pinky'] as FingerType[]) {
     const pos = handState.fingers[fingerType].currentGridPos;
     if (pos !== null) {
-      // Convert tuple to GridPosition if needed
-      placedFingers.push(Array.isArray(pos) ? tupleToGridPos(pos) : pos);
+      placedFingers.push(pos);
     }
   }
 
@@ -111,7 +110,7 @@ function calculateCenterOfGravity(handState: HandState): GridPosition | null {
 
   const sumRow = placedFingers.reduce((sum, pos) => sum + pos.row, 0);
   const sumCol = placedFingers.reduce((sum, pos) => sum + pos.col, 0);
-  
+
   return {
     row: sumRow / placedFingers.length,
     col: sumCol / placedFingers.length
@@ -129,10 +128,9 @@ function calculateSpanWidth(handState: HandState): number {
     return 0;
   }
 
-  // Convert tuples to GridPosition if needed
-  const thumb = Array.isArray(thumbPos) ? tupleToGridPos(thumbPos) : thumbPos;
-  const pinky = Array.isArray(pinkyPos) ? tupleToGridPos(pinkyPos) : pinkyPos;
-  
+  const thumb = thumbPos;
+  const pinky = pinkyPos;
+
   return calculateGridDistance(thumb, pinky);
 }
 
@@ -164,20 +162,19 @@ function createInitialHandState(): HandState {
 }
 
 /**
- * Determines home position for a hand based on SectionMap.
- * Home position is calculated relative to the section's bottomLeftNote.
+ * Determines home position for a hand based on InstrumentConfig.
  * Left hand home is typically at the bottom-left area (C1/C2).
  * Right hand home is typically offset to the right (F2/G2).
  * 
- * @param sectionMap - The section map defining the instrument config
+ * @param instrumentConfig - The instrument configuration
  * @param hand - Which hand ('left' or 'right')
  * @returns Home position (object-based) for the hand
  */
-function getHomePosition(sectionMap: SectionMap, hand: 'left' | 'right'): GridPosition {
+function getHomePosition(instrumentConfig: InstrumentConfig, hand: 'left' | 'right'): GridPosition {
   // Base home position: bottom-left corner (row 0, col 0) = bottomLeftNote
   // Left hand: stays near bottom-left (row 0-1, col 0-2)
   // Right hand: offset to the right (row 0-1, col 4-6)
-  
+
   if (hand === 'left') {
     // Left hand home: bottom-left area (C1/C2 region)
     // Position: row 0 (bottom), col 1 (slightly right of left edge)
@@ -190,49 +187,24 @@ function getHomePosition(sectionMap: SectionMap, hand: 'left' | 'right'): GridPo
 }
 
 /**
- * SectionAwareSolver - Main solver class.
+ * BiomechanicalSolver - Main solver class.
  */
-export class SectionAwareSolver {
+export class BiomechanicalSolver {
   private leftHandState: HandState;
   private rightHandState: HandState;
-  private sectionMaps: SectionMap[];
+  private instrumentConfig: InstrumentConfig;
   private constants: EngineConstants;
   private lastEventTime: number;
 
-  constructor(sectionMaps: SectionMap[], constants: EngineConstants = DEFAULT_ENGINE_CONSTANTS) {
-    this.sectionMaps = sectionMaps;
+  constructor(instrumentConfig: InstrumentConfig, constants: EngineConstants = DEFAULT_ENGINE_CONSTANTS) {
+    this.instrumentConfig = instrumentConfig;
     this.constants = constants;
     this.leftHandState = createInitialHandState();
     this.rightHandState = createInitialHandState();
     this.lastEventTime = -1;
-    
+
     // Clear note history on initialization
     clearNoteHistory();
-  }
-
-  /**
-   * Gets the active SectionMap for a given time (in seconds).
-   * Converts time to measure number based on tempo.
-   * 
-   * @param time - Time in seconds
-   * @param tempo - Tempo in BPM
-   * @returns The active SectionMap, or null if none found
-   */
-  private getActiveSection(time: number, tempo: number): SectionMap | null {
-    // Convert time to measure number
-    // Assuming 4/4 time: 1 measure = 4 beats = 4 * (60 / tempo) seconds
-    const secondsPerMeasure = (60 / tempo) * 4;
-    const measureNumber = Math.floor(time / secondsPerMeasure) + 1;
-
-    // Find section that contains this measure
-    for (const section of this.sectionMaps) {
-      const endMeasure = section.startMeasure + section.lengthInMeasures - 1;
-      if (measureNumber >= section.startMeasure && measureNumber <= endMeasure) {
-        return section;
-      }
-    }
-
-    return null;
   }
 
   /**
@@ -244,7 +216,7 @@ export class SectionAwareSolver {
    */
   private identifyCandidateHands(targetPos: GridPosition): ('left' | 'right')[] {
     const col = targetPos.col;
-    
+
     // Simple split: left half (cols 0-3) = left hand, right half (cols 4-7) = right hand
     // But allow both hands as candidates for flexibility (hands can cross over)
     if (col <= 3) {
@@ -272,10 +244,10 @@ export class SectionAwareSolver {
 
     for (const finger of allFingers) {
       const currentPos = handState.fingers[finger].currentGridPos;
-      
+
       // If finger is not placed, use center of gravity or home position as start
       const startPos: GridPosition = currentPos || handState.centerOfGravity || { row: 0, col: 0 };
-      
+
       // Check if reach is possible
       if (isReachPossible(startPos, targetPos, finger, this.constants)) {
         candidates.push(finger);
@@ -290,7 +262,6 @@ export class SectionAwareSolver {
    * 
    * @param candidate - The candidate assignment
    * @param targetPos - Target position (object-based)
-   * @param sectionMap - Active section map
    * @param currentTime - Current time in seconds
    * @param noteNumber - MIDI note number
    * @returns Total cost for this candidate
@@ -298,7 +269,6 @@ export class SectionAwareSolver {
   private calculateTotalCost(
     candidate: FingerCandidate,
     targetPos: GridPosition,
-    sectionMap: SectionMap,
     currentTime: number,
     noteNumber: number
   ): number {
@@ -312,7 +282,7 @@ export class SectionAwareSolver {
     const stretchPenalty = calculateStretchPenalty(handState, targetPos, finger, this.constants);
 
     // 3. Drift penalty (distance from home)
-    const homePos = getHomePosition(sectionMap, hand);
+    const homePos = getHomePosition(this.instrumentConfig, hand);
     const driftPenalty = calculateDriftPenalty(handState, homePos, this.constants);
 
     // 4. Finger bounce penalty (stickiness heuristic)
@@ -332,7 +302,6 @@ export class SectionAwareSolver {
    * @param currentCandidate - Current candidate assignment
    * @param currentTargetPos - Current note's target position (object-based)
    * @param nextNote - Next note event (if available)
-   * @param sectionMap - Active section map for next note
    * @param currentTime - Current time
    * @returns Future cost penalty (0 if no penalty)
    */
@@ -340,18 +309,18 @@ export class SectionAwareSolver {
     currentCandidate: FingerCandidate,
     currentTargetPos: GridPosition,
     nextNote: NoteEvent | null,
-    sectionMap: SectionMap | null,
     currentTime: number
   ): number {
-    if (!nextNote || !sectionMap) {
+    if (!nextNote) {
       return 0; // No next note, no future cost
     }
 
     // Get target position for next note
-    const nextTargetPos = GridMapService.noteToGrid(nextNote.noteNumber, sectionMap.instrumentConfig);
-    if (!nextTargetPos) {
+    const nextTargetTuple = GridMapService.noteToGrid(nextNote.noteNumber, this.instrumentConfig);
+    if (!nextTargetTuple) {
       return 0; // Next note is unmapped, no penalty
     }
+    const nextTargetPos: GridPosition = { row: nextTargetTuple[0], col: nextTargetTuple[1] };
 
     // Create temporary hand state with current assignment applied
     const tempHandState: HandState = {
@@ -407,7 +376,6 @@ export class SectionAwareSolver {
       const nextCost = this.calculateTotalCost(
         nextCandidate,
         nextTargetPos,
-        sectionMap,
         nextNote.startTime,
         nextNote.noteNumber
       );
@@ -451,7 +419,7 @@ export class SectionAwareSolver {
 
     // Update assigned finger position
     handState.fingers[finger].currentGridPos = targetPos;
-    
+
     // Accumulate fatigue for used finger (simple: add 0.1 per use)
     handState.fingers[finger].fatigueLevel += 0.1;
 
@@ -486,40 +454,21 @@ export class SectionAwareSolver {
     let unplayableCount = 0;
     let hardCount = 0;
 
-    // Initialize home positions based on first section
-    const firstSection = this.sectionMaps[0];
-    if (firstSection) {
-      const leftHome = getHomePosition(firstSection, 'left');
-      const rightHome = getHomePosition(firstSection, 'right');
-      // Set initial center of gravity to home positions
-      this.leftHandState.centerOfGravity = leftHome;
-      this.rightHandState.centerOfGravity = rightHome;
-    }
+    // Initialize home positions
+    const leftHome = getHomePosition(this.instrumentConfig, 'left');
+    const rightHome = getHomePosition(this.instrumentConfig, 'right');
+    // Set initial center of gravity to home positions
+    this.leftHandState.centerOfGravity = leftHome;
+    this.rightHandState.centerOfGravity = rightHome;
 
     // Event loop: process each note
     for (let i = 0; i < sortedEvents.length; i++) {
       const note = sortedEvents[i];
       const nextNote = i < sortedEvents.length - 1 ? sortedEvents[i + 1] : null;
 
-      // Get active section for this note
-      const activeSection = this.getActiveSection(note.startTime, performance.tempo || 120);
-      if (!activeSection) {
-        // No active section, mark as unplayable
-        unplayableCount++;
-        debugEvents.push({
-          noteNumber: note.noteNumber,
-          startTime: note.startTime,
-          assignedHand: 'Unplayable',
-          finger: null,
-          cost: Infinity,
-          difficulty: 'Unplayable',
-        });
-        continue;
-      }
-
       // Get target position for this note
-      const targetPos = GridMapService.noteToGrid(note.noteNumber, activeSection.instrumentConfig);
-      if (!targetPos) {
+      const targetTuple = GridMapService.noteToGrid(note.noteNumber, this.instrumentConfig);
+      if (!targetTuple) {
         // Note is outside grid, mark as unplayable
         unplayableCount++;
         debugEvents.push({
@@ -532,6 +481,7 @@ export class SectionAwareSolver {
         });
         continue;
       }
+      const targetPos: GridPosition = { row: targetTuple[0], col: targetTuple[1] };
 
       // Calculate time delta
       const timeDelta = this.lastEventTime >= 0 ? note.startTime - this.lastEventTime : 0;
@@ -578,14 +528,12 @@ export class SectionAwareSolver {
           const baseCost = this.calculateTotalCost(
             candidate,
             targetPos,
-            activeSection,
             note.startTime,
             note.noteNumber
           );
 
           // Add future cost penalty (lookahead)
-          const nextSection = nextNote ? this.getActiveSection(nextNote.startTime, performance.tempo || 120) : null;
-          const futureCost = this.calculateFutureCost(candidate, targetPos, nextNote, nextSection, note.startTime);
+          const futureCost = this.calculateFutureCost(candidate, targetPos, nextNote, note.startTime);
 
           candidate.cost = baseCost + futureCost;
           candidates.push(candidate);
@@ -609,7 +557,7 @@ export class SectionAwareSolver {
         continue;
       }
 
-      const winner = candidates.reduce((best, candidate) => 
+      const winner = candidates.reduce((best, candidate) =>
         candidate.cost < best.cost ? candidate : best
       );
 
@@ -657,13 +605,13 @@ export class SectionAwareSolver {
     // Calculate fatigue map (final fatigue levels from hand states)
     const fatigueMap: FatigueMap = {};
     const fingerTypes: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-    
+
     // Left hand fatigue
     fingerTypes.forEach(finger => {
       const fingerKey = `L-${finger.charAt(0).toUpperCase() + finger.slice(1)}`;
       fatigueMap[fingerKey] = this.leftHandState.fingers[finger].fatigueLevel;
     });
-    
+
     // Right hand fatigue
     fingerTypes.forEach(finger => {
       const fingerKey = `R-${finger.charAt(0).toUpperCase() + finger.slice(1)}`;
@@ -673,37 +621,16 @@ export class SectionAwareSolver {
     // Calculate average drift from home positions
     let totalDrift = 0;
     let driftCount = 0;
-    
-    // Calculate drift for each section
-    for (const section of this.sectionMaps) {
-      const leftHome = getHomePosition(section, 'left');
-      const rightHome = getHomePosition(section, 'right');
-      
-      // Get all events in this section
-      // Convert measures to time: 1 measure = 4 beats = 4 * (60 / tempo) seconds
-      const secondsPerBeat = 60 / (performance.tempo || 120);
-      const secondsPerMeasure = secondsPerBeat * 4;
-      const sectionStartTime = (section.startMeasure - 1) * secondsPerMeasure;
-      const sectionEndTime = (section.startMeasure + section.lengthInMeasures - 1) * secondsPerMeasure;
-      
-      const sectionEvents = debugEvents.filter(e => {
-        const isInSection = e.startTime >= sectionStartTime && e.startTime <= sectionEndTime;
-        const isAssigned = e.assignedHand !== 'Unplayable' && (e.assignedHand === 'left' || e.assignedHand === 'right');
-        const hasPosition = e.row !== undefined && e.col !== undefined;
-        return isInSection && isAssigned && hasPosition;
-      });
 
-      // Calculate drift for events in this section
-      sectionEvents.forEach(event => {
-        if (event.row !== undefined && event.col !== undefined) {
-          const eventPos: GridPosition = { row: event.row, col: event.col };
-          const homePos = (event.assignedHand === 'left') ? leftHome : rightHome;
-          const drift = calculateGridDistance(eventPos, homePos);
-          totalDrift += drift;
-          driftCount++;
-        }
-      });
-    }
+    debugEvents.forEach(event => {
+      if (event.row !== undefined && event.col !== undefined && event.assignedHand !== 'Unplayable') {
+        const eventPos: GridPosition = { row: event.row, col: event.col };
+        const homePos = (event.assignedHand === 'left') ? leftHome : rightHome;
+        const drift = calculateGridDistance(eventPos, homePos);
+        totalDrift += drift;
+        driftCount++;
+      }
+    });
 
     const averageDrift = driftCount > 0 ? totalDrift / driftCount : 0;
 

@@ -1,57 +1,17 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { useProject } from '../context/ProjectContext';
 import { LayoutDesigner } from './LayoutDesigner';
-import { ProjectState } from '../types/projectState';
 import { GridMapping, Voice } from '../types/layout';
-import { InstrumentConfig, SectionMap } from '../types/performance';
+import { InstrumentConfig } from '../types/performance';
 import { useProjectHistory } from '../hooks/useProjectHistory';
 import { generateId } from '../utils/performanceUtils';
-import { DEFAULT_TEST_MIDI_URL } from '../data/testData';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
-import { SectionAwareSolver, EngineResult } from '../engine/core';
+import { BiomechanicalSolver, EngineResult } from '../engine/core';
 import { getActivePerformance } from '../utils/performanceSelectors';
-import { EngineResultsPanel } from './EngineResultsPanel';
-import { TimelineArea } from './TimelineArea';
+import { AnalysisPanel } from './AnalysisPanel';
 
-// Dummy Initial Data
-const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
-  id: 'inst-1',
-  name: 'Standard Drum Kit',
-  bottomLeftNote: 36, // C2
-  rows: 8,
-  cols: 8,
-  layoutMode: 'drum_64'
-};
 
-const INITIAL_PROJECT_STATE: ProjectState = {
-  layouts: [
-    {
-      id: 'layout-1',
-      name: 'My First Layout',
-      createdAt: new Date().toISOString(),
-      performance: {
-        events: [],
-        tempo: 120,
-        name: 'Demo Performance'
-      }
-    }
-  ],
-  instrumentConfigs: [INITIAL_INSTRUMENT_CONFIG],
-  sectionMaps: [
-    {
-      id: 'section-1',
-      name: 'Section 1',
-      startMeasure: 1,
-      lengthInMeasures: 4,
-      instrumentConfig: INITIAL_INSTRUMENT_CONFIG
-    }
-  ],
-  activeLayoutId: 'layout-1',
-  projectTempo: 120,
-  parkedSounds: [],
-  mappings: [],
-  // Safety Check: Default ignoredNoteNumbers to empty array (all voices visible by default)
-  ignoredNoteNumbers: []
-};
 
 export const Workbench: React.FC = () => {
   const {
@@ -61,26 +21,25 @@ export const Workbench: React.FC = () => {
     redo,
     canUndo,
     canRedo,
-  } = useProjectHistory(INITIAL_PROJECT_STATE);
-  
+    engineResult,
+    setEngineResult,
+  } = useProject();
+
   const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
 
-  const activeLayout = useMemo(() => 
+  const activeLayout = useMemo(() =>
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
     [projectState.layouts, projectState.activeLayoutId]
   );
 
-  const activeSection = useMemo(() => 
-    projectState.sectionMaps[0] || null, // Simplified: just take first section for now
-    [projectState.sectionMaps]
-  );
+
 
   // Get active mapping for LayoutDesigner
-  const activeMapping = useMemo(() => 
-    activeMappingId 
+  const activeMapping = useMemo(() =>
+    activeMappingId
       ? projectState.mappings.find(m => m.id === activeMappingId) || null
-      : projectState.mappings.length > 0 
-        ? projectState.mappings[0] 
+      : projectState.mappings.length > 0
+        ? projectState.mappings[0]
         : null,
     [projectState.mappings, activeMappingId]
   );
@@ -101,7 +60,6 @@ export const Workbench: React.FC = () => {
   }, [activeMappingId, projectState.mappings]);
 
   // Track if default MIDI has been loaded to show status indicator
-  const [defaultMidiLoaded, setDefaultMidiLoaded] = useState(false);
 
   // View Settings state
   const [showNoteLabels, setShowNoteLabels] = useState(false);
@@ -109,43 +67,11 @@ export const Workbench: React.FC = () => {
   const [showHeatmap, setShowHeatmap] = useState(false);
 
   // Engine state
-  const [engineResult, setEngineResult] = useState<EngineResult | null>(null);
-  
+
+
   // Timeline state
-  const [currentStep, setCurrentStep] = useState(0);
-  
-  // Calculate steps from filtered performance for Timeline
-  const filteredPerformance = useMemo(() => {
-    const result = getActivePerformance(projectState);
-    // DEBUG: Log filtered performance
-    if (result) {
-      console.log('[Workbench] Filtered performance computed:', {
-        activeLayoutId: projectState.activeLayoutId,
-        eventsCount: result.events.length,
-        performanceName: result.name,
-      });
-    } else {
-      console.warn('[Workbench] Filtered performance is null:', {
-        activeLayoutId: projectState.activeLayoutId,
-        layoutsCount: projectState.layouts.length,
-        availableLayoutIds: projectState.layouts.map(l => l.id),
-      });
-    }
-    return result;
-  }, [projectState]);
-  const timelineSteps = useMemo(() => {
-    if (!filteredPerformance || filteredPerformance.events.length === 0) {
-      return 64; // Default to 4 bars
-    }
-    
-    const tempo = filteredPerformance.tempo || 120;
-    const stepDuration = (60 / tempo) / 4; // 16th note duration in seconds
-    const latestEvent = filteredPerformance.events.reduce((latest, event) => 
-      event.startTime > latest.startTime ? event : latest
-    );
-    const totalSteps = Math.ceil(latestEvent.startTime / stepDuration) + 1;
-    return Math.max(totalSteps, 64); // Minimum 4 bars
-  }, [filteredPerformance]);
+  const filteredPerformance = useMemo(() => getActivePerformance(projectState), [projectState]);
+
 
   /**
    * Unified project load handler that processes MIDI files and updates project state atomically.
@@ -163,14 +89,14 @@ export const Workbench: React.FC = () => {
       sourceName: typeof source === 'string' ? source : source.name,
       hasExistingConfig: !!existingConfig,
     });
-    
+
     try {
       // Use the unified import function
       console.log('[Workbench] handleProjectLoad - Starting MIDI parsing...');
       const projectData = typeof source === 'string'
         ? await fetchMidiProject(source, existingConfig)
         : await parseMidiFileToProject(source, existingConfig);
-      
+
       console.log('[Workbench] handleProjectLoad - MIDI parsing complete:', {
         voicesCount: projectData.voices.length,
         performanceEvents: projectData.performance.events.length,
@@ -181,7 +107,7 @@ export const Workbench: React.FC = () => {
       setProjectState(prevState => {
         // HARD RESET: Always create a new layout for the imported MIDI
         const layoutId = generateId('layout');
-        
+
         // DEBUG: Log layout creation
         console.log('[Workbench] handleProjectLoad - Creating new layout:', {
           layoutId,
@@ -190,7 +116,7 @@ export const Workbench: React.FC = () => {
           prevActiveLayoutId: prevState.activeLayoutId,
           prevLayoutsCount: prevState.layouts.length,
         });
-        
+
         // Create new layout (don't merge with existing)
         const updatedLayouts = [{
           id: layoutId,
@@ -198,7 +124,7 @@ export const Workbench: React.FC = () => {
           createdAt: new Date().toISOString(),
           performance: projectData.performance,
         }];
-        
+
         // DEBUG: Verify performance has events
         console.log('[Workbench] handleProjectLoad - New layout performance:', {
           layoutId,
@@ -206,32 +132,31 @@ export const Workbench: React.FC = () => {
           performanceName: updatedLayouts[0].performance.name,
         });
 
-        // HARD RESET: Replace instrument configs, section maps, and mappings entirely
+        // HARD RESET: Replace instrument configs and mappings entirely
         const updatedInstrumentConfigs = [projectData.instrumentConfig];
-        const updatedSectionMaps = [projectData.sectionMap];
         const updatedMappings = [projectData.gridMapping];
 
         // HARD RESET: Replace voices entirely, don't merge
         // Reset ignoredNoteNumbers to empty (all new voices visible by default)
-        const newActiveMappingId = projectData.gridMapping.id;
+        // const newActiveMappingId = projectData.gridMapping.id;
 
         // DEBUG: Log voices being set
         console.log('[Workbench] handleProjectLoad - Setting voices:', projectData.voices.length);
         projectData.voices.forEach(v => console.log(`  - ${v.name} (MIDI ${v.originalMidiNote})`));
-        
+
         // DEBUG: Log state being set
         const newState = {
           ...prevState,
           layouts: updatedLayouts,
           activeLayoutId: layoutId, // Set to new layout
           instrumentConfigs: updatedInstrumentConfigs,
-          sectionMaps: updatedSectionMaps,
+          instrumentConfig: projectData.instrumentConfig,
           mappings: updatedMappings,
           parkedSounds: projectData.voices, // REPLACE, don't merge - ALL voices go here
           projectTempo: projectData.performance.tempo || prevState.projectTempo,
           ignoredNoteNumbers: [], // Reset to empty on new import
         };
-        
+
         console.log('[Workbench] handleProjectLoad - Setting state:', {
           layoutId,
           newActiveLayoutId: newState.activeLayoutId,
@@ -240,7 +165,7 @@ export const Workbench: React.FC = () => {
           parkedSoundsCount: newState.parkedSounds.length,
           mappingsCount: newState.mappings.length,
         });
-        
+
         // DEBUG: Verify the new layout is in the state
         const newLayoutInState = newState.layouts.find(l => l.id === layoutId);
         console.log('[Workbench] handleProjectLoad - Verification:', {
@@ -256,12 +181,12 @@ export const Workbench: React.FC = () => {
 
       // Always set active mapping ID to the new mapping (hard reset)
       setActiveMappingId(projectData.gridMapping.id);
-      
+
       // DEBUG: Log mapping ID being set
       console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
 
       // Verify engine works with the new data
-      const solver = new SectionAwareSolver([projectData.sectionMap]);
+      const solver = new BiomechanicalSolver(projectData.instrumentConfig);
       const engineResult = solver.solve(projectData.performance);
       console.log('[Workbench] Engine verification result:', {
         score: engineResult.score,
@@ -271,17 +196,8 @@ export const Workbench: React.FC = () => {
         fingerUsageStats: engineResult.fingerUsageStats,
       });
 
-      if (projectData.unmappedNoteCount > 0) {
-        console.warn(
-          `MIDI loaded with ${projectData.unmappedNoteCount} unmapped note event(s). ` +
-          `Root note adjusted to ${projectData.minNoteNumber || projectData.instrumentConfig.bottomLeftNote}.`
-        );
-      }
-
-      setDefaultMidiLoaded(true);
     } catch (err) {
       console.error('Failed to load MIDI project:', err);
-      setDefaultMidiLoaded(false);
       throw err; // Re-throw so caller can handle
     }
   }, [setProjectState, activeMappingId, setActiveMappingId]);
@@ -318,25 +234,67 @@ export const Workbench: React.FC = () => {
   useEffect(() => {
     // Get filtered performance (excludes ignored notes)
     const filteredPerformance = getActivePerformance(projectState);
-    
-    // Early exit conditions
-    if (!activeMapping || !filteredPerformance || !activeSection) {
-      setEngineResult(null);
-      return;
-    }
 
+    // Early exit conditions
     // Debounce engine execution (300ms) to avoid crashing browser during rapid drag operations
     const timer = setTimeout(() => {
       try {
-        const solver = new SectionAwareSolver(projectState.sectionMaps);
+        // Run solver with project instrument config
+        if (!filteredPerformance) return;
+        const solver = new BiomechanicalSolver(projectState.instrumentConfig);
         const result = solver.solve(filteredPerformance);
+
+        // DEBUG: Log engine result to verify finger assignments
+        console.log('[Workbench] Engine result generated:', {
+          score: result.score,
+          hardCount: result.hardCount,
+          unplayableCount: result.unplayableCount,
+          debugEventsCount: result.debugEvents.length,
+          fingerUsageStats: result.fingerUsageStats,
+          fatigueMap: result.fatigueMap,
+          averageDrift: result.averageDrift,
+          sampleDebugEvents: result.debugEvents.slice(0, 5), // First 5 events
+          playableEventsCount: result.debugEvents.filter(e => e.assignedHand !== 'Unplayable').length,
+        });
+
+        // DIAGNOSTIC: If all events are unplayable, log why
+        if (result.unplayableCount === result.debugEvents.length && result.debugEvents.length > 0) {
+          console.warn('⚠️ [Workbench] ALL events are Unplayable! This means:');
+          console.warn('  1. No sounds have been assigned to grid cells, OR');
+          console.warn('  2. Grid mapping doesn\'t match MIDI note numbers, OR');
+          console.warn('  3. Instrument config is incorrect');
+
+          // Detailed diagnostics
+          console.group('📊 Diagnostic Information:');
+          console.log('Active mapping cells:', Object.keys(activeMapping?.cells || {}).length);
+          console.log('Sample event note numbers:', result.debugEvents.slice(0, 5).map(e => e.noteNumber));
+
+          // Show what's in the grid mapping
+          if (activeMapping) {
+            const gridNoteNumbers = Object.values(activeMapping.cells).map(c => c.originalMidiNote).filter(n => n !== null);
+            console.log('Grid has notes:', gridNoteNumbers);
+            console.log('Grid cells:', Object.entries(activeMapping.cells).slice(0, 5).map(([key, sound]) => ({
+              cellKey: key,
+              soundName: sound.name,
+              midiNote: sound.originalMidiNote,
+            })));
+          }
+
+          console.log('Instrument config:', {
+            name: projectState.instrumentConfig.name,
+            bottomLeftNote: projectState.instrumentConfig.bottomLeftNote,
+            layoutMode: projectState.instrumentConfig.layoutMode,
+          });
+
+          console.groupEnd();
+        }
         setEngineResult(result);
-        
+
         // Update scoreCache in the mapping for quick reference
         setProjectState(prevState => ({
           ...prevState,
-          mappings: prevState.mappings.map(m => 
-            m.id === activeMapping.id 
+          mappings: prevState.mappings.map(m =>
+            activeMapping && m.id === activeMapping.id
               ? { ...m, scoreCache: result.score }
               : m
           ),
@@ -352,8 +310,7 @@ export const Workbench: React.FC = () => {
     activeMapping?.id,
     activeMapping?.cells, // Watch for cell changes (pad swaps/assignments)
     activeLayout?.performance.events, // Watch for performance changes
-    activeSection?.instrumentConfig, // Watch for config changes
-    projectState.sectionMaps, // Watch for section map changes
+    projectState.instrumentConfig, // Watch for config changes
     projectState.ignoredNoteNumbers, // Watch for voice visibility changes
     projectState, // Include full state for getActivePerformance selector
   ]);
@@ -377,29 +334,28 @@ export const Workbench: React.FC = () => {
       try {
         const content = e.target?.result as string;
         const parsed = JSON.parse(content);
-        
+
         // Basic validation
         if (
-          parsed && 
-          Array.isArray(parsed.layouts) && 
-          Array.isArray(parsed.sectionMaps) &&
+          parsed &&
+          Array.isArray(parsed.layouts) &&
           typeof parsed.projectTempo === 'number'
         ) {
-           // Ensure new fields are initialized if missing (for backward compatibility)
-           const loadedState: ProjectState = {
-             ...parsed,
-             parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-             mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
-             // Safety Check: Default ignoredNoteNumbers to empty array if undefined
-             ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : []
-           };
-           setProjectState(loadedState, true); // Skip history on load
-           // Initialize activeMappingId if mappings exist
-           if (loadedState.mappings.length > 0) {
-             setActiveMappingId(loadedState.mappings[0].id);
-           }
+          // Ensure new fields are initialized if missing (for backward compatibility)
+          const loadedState: ProjectState = {
+            ...parsed,
+            parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
+            mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
+            // Safety Check: Default ignoredNoteNumbers to empty array if undefined
+            ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : []
+          };
+          setProjectState(loadedState, true); // Skip history on load
+          // Initialize activeMappingId if mappings exist
+          if (loadedState.mappings.length > 0) {
+            setActiveMappingId(loadedState.mappings[0].id);
+          }
         } else {
-           alert("Invalid project file structure");
+          alert("Invalid project file structure");
         }
       } catch (err) {
         console.error(err);
@@ -484,7 +440,7 @@ export const Workbench: React.FC = () => {
 
   const handleUpdateMapping = (updates: Partial<GridMapping>) => {
     if (!activeMapping) return;
-    
+
     setProjectState({
       ...projectState,
       mappings: projectState.mappings.map(m => {
@@ -496,13 +452,13 @@ export const Workbench: React.FC = () => {
 
   const handleDuplicateMapping = () => {
     if (!activeMapping) return;
-    
+
     const newMapping: GridMapping = {
       ...activeMapping,
       id: `mapping-${Date.now()}`,
       name: `${activeMapping.name} (Copy)`,
     };
-    
+
     setProjectState({
       ...projectState,
       mappings: [...projectState.mappings, newMapping],
@@ -520,7 +476,7 @@ export const Workbench: React.FC = () => {
       sourceType: 'midi_track',
       sourceFile: '',
       originalMidiNote: 36 + projectState.parkedSounds.length,
-      color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
+      color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
     };
     setProjectState(prev => ({
       ...prev,
@@ -537,7 +493,7 @@ export const Workbench: React.FC = () => {
 
   const handleUpdateSound = (soundId: string, updates: Partial<Voice>) => {
     // Update in parkedSounds
-    const updatedParkedSounds = projectState.parkedSounds.map(s => 
+    const updatedParkedSounds = projectState.parkedSounds.map(s =>
       s.id === soundId ? { ...s, ...updates } : s
     );
 
@@ -567,7 +523,7 @@ export const Workbench: React.FC = () => {
 
   const handleUpdateMappingSound = (cellKey: string, updates: Partial<Voice>) => {
     if (!activeMapping) return;
-    
+
     let soundIdToUpdate: string | null = null;
     let updatedCellSound: Voice | null = null;
 
@@ -576,10 +532,10 @@ export const Workbench: React.FC = () => {
       if (m.id !== activeMapping.id) return m;
       const cellSound = m.cells[cellKey];
       if (!cellSound) return m;
-      
+
       soundIdToUpdate = cellSound.id;
       updatedCellSound = { ...cellSound, ...updates };
-      
+
       return {
         ...m,
         cells: {
@@ -591,9 +547,9 @@ export const Workbench: React.FC = () => {
 
     // Also update in parkedSounds if the sound exists there
     const updatedParkedSounds = soundIdToUpdate
-      ? projectState.parkedSounds.map(s => 
-          s.id === soundIdToUpdate ? { ...s, ...updates } : s
-        )
+      ? projectState.parkedSounds.map(s =>
+        s.id === soundIdToUpdate ? { ...s, ...updates } : s
+      )
       : projectState.parkedSounds;
 
     setProjectState({
@@ -605,7 +561,7 @@ export const Workbench: React.FC = () => {
 
   const handleRemoveSound = (cellKey: string) => {
     if (!activeMapping) return;
-    
+
     setProjectState({
       ...projectState,
       mappings: projectState.mappings.map(m => {
@@ -623,12 +579,12 @@ export const Workbench: React.FC = () => {
   const handleDeleteSound = (soundId: string) => {
     // Remove from parkedSounds
     const updatedParkedSounds = projectState.parkedSounds.filter(s => s.id !== soundId);
-    
+
     // Also remove from all mappings if the sound is placed on the grid
     const updatedMappings = projectState.mappings.map(m => {
       const updatedCells: Record<string, Voice> = {};
       let hasChanges = false;
-      
+
       Object.entries(m.cells).forEach(([cellKey, sound]) => {
         if (sound.id !== soundId) {
           updatedCells[cellKey] = sound;
@@ -636,7 +592,7 @@ export const Workbench: React.FC = () => {
           hasChanges = true;
         }
       });
-      
+
       if (hasChanges) {
         return {
           ...m,
@@ -645,7 +601,7 @@ export const Workbench: React.FC = () => {
       }
       return m;
     });
-    
+
     setProjectState({
       ...projectState,
       parkedSounds: updatedParkedSounds,
@@ -653,112 +609,7 @@ export const Workbench: React.FC = () => {
     });
   };
 
-  const handleUpdateSection = (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => {
-    setProjectState({
-      ...projectState,
-      sectionMaps: projectState.sectionMaps.map(section => {
-        if (section.id !== id) return section;
-        
-        // Handle legacy format: { field, value }
-        if ('field' in updates && 'value' in updates) {
-          const { field, value } = updates;
-          if (field === 'bottomLeftNote') {
-            return {
-              ...section,
-              instrumentConfig: {
-                ...section.instrumentConfig,
-                bottomLeftNote: value
-              }
-            };
-          }
-          return {
-            ...section,
-            [field]: value
-          };
-        }
-        
-        // Handle new format: Partial<SectionMap>
-        if ('instrumentConfig' in updates) {
-          return {
-            ...section,
-            instrumentConfig: updates.instrumentConfig!
-          };
-        }
-        
-        return {
-          ...section,
-          ...updates
-        };
-      })
-    });
-  };
 
-  const handleDeleteSection = (id: string) => {
-    setProjectState({
-      ...projectState,
-      sectionMaps: projectState.sectionMaps.filter(s => s.id !== id)
-    });
-  };
-
-  // W1: Handler for creating new InstrumentConfig
-  const handleCreateInstrumentConfig = (config: Omit<InstrumentConfig, 'id'>) => {
-    const newConfig: InstrumentConfig = {
-      ...config,
-      id: generateId('inst'),
-    };
-    setProjectState({
-      ...projectState,
-      instrumentConfigs: [...projectState.instrumentConfigs, newConfig],
-    });
-  };
-
-  // W1: Handler for creating new SectionMap
-  const handleCreateSectionMap = (sectionMap: Omit<SectionMap, 'id'>) => {
-    const newSection: SectionMap = {
-      ...sectionMap,
-      id: generateId('section'),
-    };
-    setProjectState({
-      ...projectState,
-      sectionMaps: [...projectState.sectionMaps, newSection],
-    });
-  };
-
-  // W1: Handler for updating InstrumentConfig
-  const handleUpdateInstrumentConfig = (id: string, updates: Partial<InstrumentConfig>) => {
-    setProjectState({
-      ...projectState,
-      instrumentConfigs: projectState.instrumentConfigs.map(config =>
-        config.id === id ? { ...config, ...updates } : config
-      ),
-      // Also update sectionMaps that reference this config
-      sectionMaps: projectState.sectionMaps.map(section =>
-        section.instrumentConfig.id === id
-          ? {
-              ...section,
-              instrumentConfig: { ...section.instrumentConfig, ...updates },
-            }
-          : section
-      ),
-    });
-  };
-
-  // W1: Handler for deleting InstrumentConfig
-  const handleDeleteInstrumentConfig = (id: string) => {
-    // Prevent deletion if any section maps reference it
-    const isReferenced = projectState.sectionMaps.some(
-      section => section.instrumentConfig.id === id
-    );
-    if (isReferenced) {
-      alert('Cannot delete instrument config: it is referenced by one or more section maps.');
-      return;
-    }
-    
-    setProjectState({
-      ...projectState,
-      instrumentConfigs: projectState.instrumentConfigs.filter(c => c.id !== id),
-    });
-  };
 
   // Keyboard shortcuts for Undo/Redo
   useEffect(() => {
@@ -779,176 +630,189 @@ export const Workbench: React.FC = () => {
   const loadProjectInputRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-gray-900 text-white overflow-hidden">
-      {/* Header (Top) */}
-      <div className="flex-none h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4">
-        {/* Left: App Title & Status Indicator */}
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-slate-200">Push 3 Optimizer</h1>
-          {/* UI Polish: Status indicator for default MIDI load */}
-          {defaultMidiLoaded && (
-            <div className="px-2 py-1 text-xs bg-blue-900/30 text-blue-300 border border-blue-700/50 rounded">
-              Loaded Default: {DEFAULT_TEST_MIDI_URL}
-            </div>
-          )}
-        </div>
-
-        {/* Center: View Settings */}
-        <div className="flex items-center gap-4 border border-slate-700 rounded px-3 py-1.5">
-          <span className="text-xs text-slate-400 font-semibold">View Settings:</span>
-          
-          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={showNoteLabels} 
-              onChange={(e) => setShowNoteLabels(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800"
-            />
-            Show Note Labels
-          </label>
-          
-          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={viewAllSteps} 
-              onChange={(e) => setViewAllSteps(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800"
-            />
-            View All Steps
-          </label>
-          
-          <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={showHeatmap} 
-              onChange={(e) => setShowHeatmap(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800"
-            />
-            Show Heatmap
-          </label>
-        </div>
-
-        {/* Right: Undo/Redo & Save/Load Project */}
-        <div className="flex items-center gap-2">
-          {/* Undo/Redo */}
-          <div className="flex items-center gap-1 border border-slate-700 rounded p-1">
-            <button
-              onClick={undo}
-              disabled={!canUndo}
-              className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded transition-colors"
-              title="Undo (Ctrl/Cmd+Z)"
-            >
-              ↶ Undo
-            </button>
-            <button
-              onClick={redo}
-              disabled={!canRedo}
-              className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-200 rounded transition-colors"
-              title="Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)"
-            >
-              ↷ Redo
-            </button>
+    <div className="h-screen w-screen flex flex-col bg-slate-900 text-white overflow-hidden font-sans selection:bg-blue-500/30">
+      {/* Header (Top) - Premium Glassmorphism Look */}
+      <div className="flex-none h-16 glass-panel-strong border-b border-slate-700/50 flex items-center justify-between px-6 z-50 relative">
+        {/* Left: App Title & Branding */}
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col">
+            <h1 className="text-xl font-bold text-slate-100 tracking-tight">Performability Engine</h1>
+            <span className="text-[10px] text-slate-400 font-medium tracking-wider uppercase">Section Layout Optimizer</span>
           </div>
-          
-          <div className="h-6 w-px bg-slate-800" />
-          
-          {/* Save/Load */}
-          <button
-            onClick={handleSaveProject}
-            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+
+          {/* Divider */}
+          <div className="h-8 w-px bg-slate-700/50 mx-2" />
+
+          {/* Song Section Selector (Mockup Style) */}
+          <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg p-1 border border-slate-700/50">
+            <span className="text-xs text-slate-400 pl-2">Song Section:</span>
+            <select className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1 pr-2">
+              <option>DROP A</option>
+              <option>DROP B</option>
+              <option>VERSE 1</option>
+              <option>CHORUS 1</option>
+            </select>
+          </div>
+
+          <Link
+            to="/timeline"
+            className="ml-4 px-3 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg border border-slate-600 transition-all"
           >
-            Save Project
-          </button>
-          <button
-            onClick={() => loadProjectInputRef.current?.click()}
-            className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
-          >
-            Load Project
-          </button>
-          <input
-            ref={loadProjectInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleLoadProject}
-            className="hidden"
-          />
+            Timeline View
+          </Link>
+        </div>
+
+        {/* Right: Global Settings & Actions */}
+        <div className="flex items-center gap-6">
+          {/* Status Indicators */}
+          <div className="flex items-center gap-4 text-xs font-medium text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+              <span>Auto-Map Enabled</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+              <span>Ergonomic Scoring: ON</span>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-slate-700/50" />
+
+          {/* Undo/Redo & Save/Load */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-slate-800/50 rounded-lg border border-slate-700/50 p-0.5">
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                className="p-2 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Undo"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
+              </button>
+              <div className="w-px h-4 bg-slate-700/50"></div>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                className="p-2 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Redo"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
+              </button>
+            </div>
+
+            <button
+              onClick={handleSaveProject}
+              className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-900/20 transition-all"
+            >
+              Save Project
+            </button>
+            <button
+              onClick={() => loadProjectInputRef.current?.click()}
+              className="px-4 py-2 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg border border-slate-600 transition-all"
+            >
+              Load
+            </button>
+            <input
+              ref={loadProjectInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleLoadProject}
+              className="hidden"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Dashboard Section - Engine Results & Timeline */}
-      {filteredPerformance && filteredPerformance.events.length > 0 && (
-        <div className="flex-none border-b border-slate-700 bg-slate-900" style={{ minHeight: '300px', maxHeight: '400px', height: '350px' }}>
-          <div className="h-full flex flex-row">
-            {/* Left: Engine Results Panel */}
-            <div className="w-80 flex-none border-r border-slate-700 overflow-hidden">
-              <EngineResultsPanel
-                result={engineResult}
-                activeMapping={activeMapping}
-                onHighlightCell={(row, col) => {
-                  // Highlight cell in grid (could be passed to LayoutDesigner if needed)
-                  console.log(`[Dashboard] Highlight cell: [${row}, ${col}]`);
-                }}
-              />
+      {/* Main Content Area - 2 Column Layout */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Background Ambient Glow */}
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-900/5 to-slate-900 pointer-events-none z-0" />
+
+        {/* Center: Pad Grid (Layout Designer) */}
+        <div className="flex-1 relative z-10 flex flex-col min-w-0">
+          {/* Toolbar / Breadcrumbs */}
+          <div className="flex-none h-12 flex items-center justify-between px-6 border-b border-slate-800/50">
+            <div className="flex items-center gap-2 text-sm text-slate-400">
+              <span className="font-semibold text-slate-200">Layout View</span>
+              <span>/</span>
+              <span>Grid Editor</span>
             </div>
-            
-            {/* Right: Timeline */}
-            <div className="flex-1 overflow-hidden" style={{ minHeight: '300px', height: '100%' }}>
-              <TimelineArea
-                steps={timelineSteps}
-                currentStep={currentStep}
-                onStepSelect={setCurrentStep}
-                sectionMaps={projectState.sectionMaps}
+
+            {/* View Toggles */}
+            <div className="flex items-center gap-3 bg-slate-800/30 rounded-full px-1 py-1 border border-slate-700/30">
+              <button
+                onClick={() => setShowNoteLabels(!showNoteLabels)}
+                className={`px-3 py-1 text-xs rounded-full transition-all ${showNoteLabels ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Notes
+              </button>
+              <button
+                onClick={() => setShowHeatmap(!showHeatmap)}
+                className={`px-3 py-1 text-xs rounded-full transition-all ${showHeatmap ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Heatmap
+              </button>
+            </div>
+          </div>
+
+          {/* Grid Container */}
+          <div className="flex-1 overflow-hidden flex items-center justify-center bg-slate-900/50">
+            <div className="w-full h-full flex flex-col">
+              <LayoutDesigner
+                parkedSounds={projectState.parkedSounds}
+                activeMapping={activeMapping}
+                instrumentConfig={projectState.instrumentConfig}
+                onAssignSound={handleAssignSound}
+                onAssignSounds={handleAssignSounds}
+                onUpdateMapping={handleUpdateMapping}
+                onDuplicateMapping={handleDuplicateMapping}
+                onAddSound={handleAddSound}
+                onUpdateSound={handleUpdateSound}
+                onImport={(file) => handleProjectLoad(file, projectState.instrumentConfig)}
+                onUpdateMappingSound={handleUpdateMappingSound}
+                onRemoveSound={handleRemoveSound}
+                onDeleteSound={handleDeleteSound}
+                projectState={projectState}
+                onUpdateProjectState={setProjectState}
+                onSetActiveMappingId={setActiveMappingId}
+                activeLayout={activeLayout}
+                showNoteLabels={showNoteLabels}
                 viewAllSteps={viewAllSteps}
-                onUpdateSectionMeasure={(id, field, value) => {
-                  // Update section map measure
-                  if (field === 'startMeasure' || field === 'lengthInMeasures') {
-                    setProjectState(prevState => ({
-                      ...prevState,
-                      sectionMaps: prevState.sectionMaps.map(section =>
-                        section.id === id
-                          ? { ...section, [field]: value }
-                          : section
-                      ),
-                    }));
-                  }
-                }}
+                showHeatmap={showHeatmap}
+                engineResult={engineResult}
               />
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Main Body (Middle) - Unified Workbench */}
-      <div className="flex-1 overflow-hidden">
-        <LayoutDesigner
-          parkedSounds={projectState.parkedSounds}
-          activeMapping={activeMapping}
-          instrumentConfig={activeSection?.instrumentConfig || null}
-          onAssignSound={handleAssignSound}
-          onAssignSounds={handleAssignSounds}
-          onUpdateMapping={handleUpdateMapping}
-          onDuplicateMapping={handleDuplicateMapping}
-          onAddSound={handleAddSound}
-          onUpdateSound={handleUpdateSound}
-          onImport={(file) => handleProjectLoad(file, activeSection?.instrumentConfig)}
-          onUpdateMappingSound={handleUpdateMappingSound}
-          onRemoveSound={handleRemoveSound}
-          onDeleteSound={handleDeleteSound}
-          projectState={projectState}
-          onUpdateProjectState={setProjectState}
-          onSetActiveMappingId={setActiveMappingId}
-          activeLayout={activeLayout}
-          onUpdateSection={handleUpdateSection}
-          onDeleteSection={handleDeleteSection}
-          onCreateInstrumentConfig={handleCreateInstrumentConfig}
-          onCreateSectionMap={handleCreateSectionMap}
-          onUpdateInstrumentConfig={handleUpdateInstrumentConfig}
-          onDeleteInstrumentConfig={handleDeleteInstrumentConfig}
-          showNoteLabels={showNoteLabels}
-          viewAllSteps={viewAllSteps}
-          showHeatmap={showHeatmap}
-          engineResult={engineResult}
-        />
+          {/* Bottom Status Bar (Ergonomic Score) */}
+          <div className="flex-none h-12 glass-panel border-t border-slate-700/50 flex items-center justify-center px-6">
+            {engineResult ? (
+              <div className="flex items-center gap-3 px-4 py-1.5 bg-slate-800/80 rounded-full border border-slate-700 shadow-lg">
+                <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Section Ergonomic Score:</span>
+                <span className={`text-sm font-bold ${engineResult.score >= 0.8 ? 'text-emerald-400' :
+                  engineResult.score >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                  }`}>
+                  {engineResult.score.toFixed(2)}
+                  <span className="text-xs font-normal opacity-70 ml-1">
+                    ({engineResult.score >= 0.8 ? 'Excellent' : engineResult.score >= 0.6 ? 'Good' : 'Poor'})
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-500">Waiting for analysis...</span>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Analysis Panel */}
+        <div className="w-96 flex-none z-20 relative shadow-2xl shadow-black/50">
+          <AnalysisPanel
+            engineResult={engineResult}
+            activeMapping={activeMapping}
+            performance={filteredPerformance}
+          />
+        </div>
       </div>
     </div>
   );

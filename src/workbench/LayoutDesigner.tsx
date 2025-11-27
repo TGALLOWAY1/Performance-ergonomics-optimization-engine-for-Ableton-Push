@@ -18,16 +18,15 @@ import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
 // MIDI import logic removed - handled by parent Workbench component
-import { InstrumentConfig, SectionMap } from '../types/performance';
+import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
-import { saveProject, loadProject, exportLayout, importLayout } from '../utils/projectPersistence';
+import { exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { ImportWizard } from './ImportWizard';
 import { EngineResult } from '../engine/core';
-import { TimelineArea } from './TimelineArea';
-import { EngineResultsPanel } from './EngineResultsPanel';
-import { SectionMapList } from './SectionMapList';
+
+import { SoundAssignmentTable } from './SoundAssignmentTable';
 import { getActivePerformance, getRawActivePerformance } from '../utils/performanceSelectors';
 
 /**
@@ -72,18 +71,8 @@ interface LayoutDesignerProps {
   onSetActiveMappingId?: (id: string) => void;
   /** Active layout for performance analysis */
   activeLayout: LayoutSnapshot | null;
-  /** Callback to update section map */
-  onUpdateSection?: (id: string, updates: Partial<SectionMap> | { field: 'startMeasure' | 'lengthInMeasures' | 'bottomLeftNote'; value: number }) => void;
-  /** Callback to delete section map */
-  onDeleteSection?: (id: string) => void;
-  /** W1: Callback to create new instrument config */
-  onCreateInstrumentConfig?: (config: Omit<InstrumentConfig, 'id'>) => void;
-  /** W1: Callback to create new section map */
-  onCreateSectionMap?: (sectionMap: Omit<SectionMap, 'id'>) => void;
-  /** W1: Callback to update instrument config */
-  onUpdateInstrumentConfig?: (id: string, updates: Partial<InstrumentConfig>) => void;
-  /** W1: Callback to delete instrument config */
-  onDeleteInstrumentConfig?: (id: string) => void;
+
+
   /** View Settings: Show Cell labels (Voice MIDI note numbers) on Pads */
   showNoteLabels?: boolean;
   /** View Settings: View all steps (flatten time) */
@@ -114,11 +103,11 @@ interface DraggableSoundProps {
   onToggleVisibility?: (noteNumber: number) => void;
 }
 
-const DraggableSound: React.FC<DraggableSoundProps> = ({ 
-  sound, 
-  isSelected, 
-  onSelect, 
-  onEdit, 
+const DraggableSound: React.FC<DraggableSoundProps> = ({
+  sound,
+  isSelected,
+  onSelect,
+  onEdit,
   onDelete,
   isVisible = true,
   onToggleVisibility,
@@ -132,8 +121,8 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({
 
   const style = transform
     ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-      }
+      transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    }
     : undefined;
 
   const handleSave = () => {
@@ -158,10 +147,10 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({
         ${isDragging
           ? 'bg-blue-600 border-blue-400 shadow-lg scale-105 opacity-50 cursor-grabbing'
           : isEditing
-          ? 'bg-slate-700 border-blue-500 cursor-default'
-          : isSelected
-          ? 'bg-slate-700 border-blue-500 cursor-pointer'
-          : 'bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 cursor-grab active:cursor-grabbing'
+            ? 'bg-slate-700 border-blue-500 cursor-default'
+            : isSelected
+              ? 'bg-slate-700 border-blue-500 cursor-pointer'
+              : 'bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 cursor-grab active:cursor-grabbing'
         }
       `}
       style={{
@@ -224,11 +213,10 @@ const DraggableSound: React.FC<DraggableSoundProps> = ({
                     e.stopPropagation();
                     onToggleVisibility(sound.originalMidiNote!);
                   }}
-                  className={`flex-shrink-0 p-1.5 rounded transition-colors ${
-                    isVisible 
-                      ? 'text-green-400 hover:bg-green-900/20' 
-                      : 'text-slate-500 hover:bg-slate-700'
-                  }`}
+                  className={`flex-shrink-0 p-1.5 rounded transition-colors ${isVisible
+                    ? 'text-green-400 hover:bg-green-900/20'
+                    : 'text-slate-500 hover:bg-slate-700'
+                    }`}
                   title={isVisible ? 'Hide Voice' : 'Show Voice'}
                 >
                   {isVisible ? '👁️' : '🚫'}
@@ -366,20 +354,20 @@ interface DroppableCellProps {
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
-const DroppableCell: React.FC<DroppableCellProps> = ({ 
-  row, 
-  col, 
-  assignedSound, 
-  isOver, 
+const DroppableCell: React.FC<DroppableCellProps> = ({
+  row,
+  col,
+  assignedSound,
+  isOver,
   isSelected,
   isHighlighted = false,
   templateSlot,
-  reachabilityLevel,
+  // reachabilityLevel,
   heatmapDifficulty,
   heatmapFinger,
   heatmapHand,
   fingerConstraint,
-  showNoteLabels = false,
+  // showNoteLabels = false,
   instrumentConfig = null,
   onClick,
   onDoubleClick,
@@ -391,7 +379,7 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
     : instrumentConfig
       ? GridMapService.getNoteForPosition(row, col, instrumentConfig)
       : null;
-  
+
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const getNoteName = (midiNote: number): string => {
     const note = NOTE_NAMES[midiNote % 12];
@@ -412,8 +400,9 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
 
   const dragStyle = transform
     ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-      }
+      transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      zIndex: 50,
+    }
     : undefined;
 
   // Combine refs for both droppable and draggable
@@ -424,11 +413,37 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
     }
   };
 
+  // Dynamic Styles based on state
+  const getBackgroundStyle = () => {
+    if (assignedSound) {
+      // If heatmap is active, overlay color
+      if (heatmapDifficulty) {
+        switch (heatmapDifficulty) {
+          case 'Unplayable': return 'linear-gradient(135deg, #ef4444 0%, #7f1d1d 100%)'; // Red
+          case 'Hard': return 'linear-gradient(135deg, #f97316 0%, #9a3412 100%)'; // Orange
+          case 'Medium': return 'linear-gradient(135deg, #eab308 0%, #854d0e 100%)'; // Yellow
+          default: return 'linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%)'; // Blue (Easy)
+        }
+      }
+      // Default sound color gradient
+      return `linear-gradient(135deg, ${assignedSound.color || '#6366f1'} 0%, ${adjustColorBrightness(assignedSound.color || '#6366f1', -40)} 100%)`;
+    }
+
+    // Empty Cell State
+    if (isDroppableOver || isOver) return 'rgba(59, 130, 246, 0.2)'; // Blue tint on hover
+    return 'rgba(30, 41, 59, 0.4)'; // Default slate-800/40
+  };
+
+  // Helper to darken color for gradient
+  const adjustColorBrightness = (hex: string, _percent: number) => {
+    // Simple placeholder - in real app use a proper color lib
+    return hex;
+  }
+
   return (
     <div
       ref={combinedRef}
       onClick={(e) => {
-        // Only fire if not dragging - activation constraint (5px) should prevent drag from starting on clicks
         if (!isDragging) {
           e.stopPropagation();
           onClick();
@@ -439,105 +454,68 @@ const DroppableCell: React.FC<DroppableCellProps> = ({
       {...(assignedSound && !isDragging ? listeners : {})}
       {...(assignedSound && !isDragging ? attributes : {})}
       className={`
-        w-16 h-16 flex flex-col items-center justify-center rounded-md
-        border transition-all duration-100 relative
-        ${isHighlighted ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-slate-900 z-20' : ''}
+        w-full aspect-square rounded-xl flex flex-col items-center justify-center
+        transition-all duration-200 relative select-none
+        ${isHighlighted ? 'ring-2 ring-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.5)] z-20' : ''}
         ${assignedSound
           ? isSelected
-            ? 'bg-blue-900/50 border-blue-400 border-2 cursor-grab active:cursor-grabbing'
+            ? 'ring-2 ring-white shadow-lg scale-[1.02] z-10'
             : isDragging
-            ? 'bg-blue-600 border-blue-400 opacity-50 cursor-grabbing'
-            : 'bg-slate-700 border-slate-600 cursor-grab active:cursor-grabbing'
+              ? 'opacity-50 scale-95 cursor-grabbing'
+              : 'shadow-md hover:shadow-lg hover:scale-[1.02] cursor-grab active:cursor-grabbing'
           : isDroppableOver || isOver
-          ? 'bg-slate-800 border-blue-500 border-dashed border-2 cursor-pointer'
-          : 'bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 cursor-pointer'
+            ? 'border-2 border-dashed border-blue-500/50 scale-95'
+            : 'border border-slate-700/30 hover:bg-slate-700/30'
         }
       `}
       style={{
         ...dragStyle,
-        borderLeftWidth: assignedSound ? '4px' : undefined,
-        borderLeftColor: assignedSound?.color || undefined,
-        // Apply heatmap overlay if enabled (behind the sound chip)
-        ...(heatmapDifficulty && assignedSound ? {
-          backgroundColor: heatmapDifficulty === 'Unplayable'
-            ? 'rgba(239, 68, 68, 0.3)'
-            : heatmapDifficulty === 'Hard'
-            ? 'rgba(249, 115, 22, 0.3)'
-            : heatmapDifficulty === 'Medium'
-            ? 'rgba(234, 179, 8, 0.3)'
-            : 'rgba(59, 130, 246, 0.2)',
-          borderColor: heatmapDifficulty === 'Unplayable'
-            ? 'rgba(239, 68, 68, 0.6)'
-            : heatmapDifficulty === 'Hard'
-            ? 'rgba(249, 115, 22, 0.6)'
-            : heatmapDifficulty === 'Medium'
-            ? 'rgba(234, 179, 8, 0.6)'
-            : 'rgba(59, 130, 246, 0.4)',
-          borderWidth: heatmapDifficulty === 'Unplayable' || heatmapDifficulty === 'Hard' ? '3px' : '2px',
-        } : {}),
-        // Apply reachability overlay for empty cells
-        ...(reachabilityLevel && !assignedSound ? {
-          backgroundColor: reachabilityLevel === 'green' 
-            ? 'rgba(34, 197, 94, 0.25)' 
-            : reachabilityLevel === 'yellow'
-            ? 'rgba(234, 179, 8, 0.25)'
-            : 'rgba(107, 114, 128, 0.3)',
-          borderColor: reachabilityLevel === 'green'
-            ? 'rgba(34, 197, 94, 0.5)'
-            : reachabilityLevel === 'yellow'
-            ? 'rgba(234, 179, 8, 0.5)'
-            : 'rgba(107, 114, 128, 0.4)',
-        } : {}),
+        background: getBackgroundStyle(),
+        boxShadow: assignedSound && !isDragging ? 'inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 6px -1px rgba(0,0,0,0.3)' : undefined,
       }}
     >
       {assignedSound ? (
         <>
-          <span className="text-xs font-semibold text-slate-200">
+          {/* Sound Name */}
+          <span className="text-[10px] font-bold text-white/90 tracking-wide uppercase truncate max-w-[90%] drop-shadow-md">
             {assignedSound.name}
           </span>
-          <span className="text-[10px] text-slate-400 mt-0.5">
-            [{row},{col}]
+
+          {/* Note Info */}
+          <span className="text-[9px] text-white/60 mt-0.5 font-mono">
+            {noteNumber !== null ? getNoteName(noteNumber) : ''}
           </span>
-          {/* Note Label - Show MIDI pitch when showNoteLabels is enabled */}
-          {showNoteLabels && noteNumber !== null && (
-            <div className="absolute bottom-1 left-0 right-0 flex flex-col items-center text-[9px] opacity-60 leading-tight pointer-events-none font-mono">
-              <span>{noteNumber}</span>
-              <span>{getNoteName(noteNumber)}</span>
-            </div>
-          )}
-          {/* Finger Badge - Always show when available from engine */}
+
+          {/* Finger Badge (Top Right) */}
           {heatmapFinger && heatmapHand && (
             <div className={`
-              absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold shadow-sm z-10
-              ${heatmapHand === 'LH' ? 'bg-blue-200 text-blue-900' : 'bg-red-200 text-red-900'}
+              absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-sm z-10 border border-white/20
+              ${heatmapHand === 'LH' ? 'bg-blue-500 text-white' : 'bg-rose-500 text-white'}
             `}>
               {heatmapHand === 'LH' ? 'L' : 'R'}{heatmapFinger}
             </div>
           )}
-          {/* Finger Constraint Lock Icon - Show when constraint exists */}
+
+          {/* Finger Constraint Lock (Top Left) */}
           {fingerConstraint && (
-            <div className="absolute top-1 left-1 flex items-center gap-1 bg-slate-800/90 border border-slate-600 rounded px-1 py-0.5 z-10">
-              <span className="text-[10px]">🔒</span>
-              <span className="text-[10px] font-semibold text-slate-200">{fingerConstraint}</span>
+            <div className="absolute -top-1 -left-1 bg-slate-900/80 rounded-full p-0.5 border border-slate-600">
+              <span className="text-[8px]">🔒</span>
             </div>
           )}
         </>
       ) : (
         <>
+          {/* Empty State Content */}
           {templateSlot ? (
-            <>
-              <span className="text-[10px] font-medium text-slate-500/60">
+            <div className="flex flex-col items-center opacity-40">
+              <span className="text-[9px] font-medium text-slate-400 uppercase tracking-wider">
                 {templateSlot.label}
               </span>
-              {templateSlot.suggestedNote !== undefined && (
-                <span className="text-[8px] text-slate-600/50 mt-0.5">
-                  {templateSlot.suggestedNote}
-                </span>
-              )}
-            </>
+            </div>
           ) : (
-            <span className="text-xs text-slate-500">
-              [{row},{col}]
+            // Subtle coordinate for empty cells
+            <span className="text-[8px] text-slate-600 font-mono opacity-0 hover:opacity-100 transition-opacity">
+              {row},{col}
             </span>
           )}
         </>
@@ -563,21 +541,16 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onUpdateProjectState,
   onSetActiveMappingId,
   activeLayout,
-  onUpdateSection,
-  onDeleteSection,
-  onCreateInstrumentConfig,
-  onCreateSectionMap,
-  onUpdateInstrumentConfig,
-  onDeleteInstrumentConfig,
+
+
   showNoteLabels = false,
-  viewAllSteps = false,
+  // viewAllSteps = false,
   showHeatmap = false,
   onImport,
   engineResult: engineResultProp = null,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const loadProjectInputRef = useRef<HTMLInputElement>(null);
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draggedSound, setDraggedSound] = useState<Voice | null>(null);
@@ -591,19 +564,16 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const [showImportWizard, setShowImportWizard] = useState(false);
   // View Settings are now passed as props from Workbench
   // Keep local state for backward compatibility if needed, but use props
-  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
-  const [timelineForceVisible, setTimelineForceVisible] = useState(false);
-  const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
+  // const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  // const [timelineForceVisible, setTimelineForceVisible] = useState(false);
+  // const [timelineAutoHidden, setTimelineAutoHidden] = useState(false);
   // Engine result is now passed from Workbench (reactive solver loop)
   // Use prop if provided, otherwise fall back to null
   const engineResult = engineResultProp;
-  const [currentStep, setCurrentStep] = useState(0);
-  const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
-  const [leftPanelTab, setLeftPanelTab] = useState<'library' | 'sections'>('library');
-  const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
   const [autoLayoutDropdownOpen, setAutoLayoutDropdownOpen] = useState(false);
   const autoLayoutDropdownRef = useRef<HTMLDivElement>(null);
-  
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -642,9 +612,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
     setActiveId(active.id as string);
-    
+
     const activeIdStr = active.id as string;
-    
+
     // Check if dragging from a cell
     if (activeIdStr.startsWith('cell-')) {
       const cellKey = activeIdStr.replace('cell-', '');
@@ -670,7 +640,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    
+
     if (!over) {
       setActiveId(null);
       setDraggedSound(null);
@@ -718,7 +688,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     // Check if dropped on a grid cell
     let targetCellKey = over.id as string;
     const parsed = parseCellKey(targetCellKey);
-    
+
     if (parsed) {
       // Magnetic snap: If a template is active, check if we're near a template slot
       if (selectedTemplate !== 'none') {
@@ -733,7 +703,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
             const dx = slot.col - parsed.col;
             const dy = slot.row - parsed.row;
             const distance = Math.sqrt(dx * dx + dy * dy);
-            
+
             if (distance < snapDistance && distance < minDistance) {
               minDistance = distance;
               nearestSlot = slot;
@@ -763,7 +733,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       if (!sourceCellKey) {
         // Just assign the sound to the target cell
         onAssignSound(targetCellKey, sound);
-      } 
+      }
       // Scenario B: Dragging from Grid (Move)
       else if (sourceCellKey !== targetCellKey) {
         // Get current cells state
@@ -788,7 +758,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         // Create new cells object for atomic update
         // Start fresh to prevent any duplicates
         const newCells: Record<string, Voice> = {};
-        
+
         // Copy all cells except source and target (we'll handle those separately)
         Object.entries(currentCells).forEach(([key, value]) => {
           if (key !== sourceCellKey && key !== targetCellKey) {
@@ -808,7 +778,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
         // Update finger constraints if they exist
         const newFingerConstraints = { ...activeMapping.fingerConstraints };
-        
+
         // If source had a constraint, move it to target (or clear if swapping)
         if (newFingerConstraints[sourceCellKey]) {
           if (targetSound && newFingerConstraints[targetCellKey]) {
@@ -927,7 +897,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       fileInputRefExists: !!fileInputRef.current,
       fileInputRefValue: fileInputRef.current?.value,
     });
-    
+
     if (fileInputRef.current) {
       console.log('[LayoutDesigner] handleScanMidiClick - Triggering file input click');
       fileInputRef.current.click();
@@ -956,7 +926,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     if (stagingAssets.length === 0) {
       return; // Nothing to clear
     }
-    
+
     if (window.confirm(`Are you sure you want to remove all ${stagingAssets.length} sound(s) from staging? This will permanently delete them.`)) {
       // Delete all staging sounds
       stagingAssets.forEach(sound => {
@@ -974,7 +944,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     if (window.confirm('Are you sure you want to clear all sounds from the grid? All sounds will be moved back to staging.')) {
       // Collect all sounds from the grid
       const soundsToMove = Object.values(activeMapping.cells);
-      
+
       // Add sounds back to parkedSounds if they're not already there
       soundsToMove.forEach(sound => {
         const isInParked = parkedSounds.some(s => s.id === sound.id);
@@ -982,7 +952,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
           onAddSound(sound);
         }
       });
-      
+
       // Clear the grid
       onUpdateMapping({
         cells: {},
@@ -992,35 +962,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     }
   };
 
-  // Handle save project
-  const handleSaveProject = () => {
-    saveProject(projectState);
-  };
-
-  // Handle load project
-  const handleLoadProjectClick = () => {
-    if (loadProjectInputRef.current) {
-      loadProjectInputRef.current.click();
-    }
-  };
-
-  const handleLoadProject = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      event.target.value = '';
-      return;
-    }
-
-    try {
-      const loadedState = await loadProject(file);
-      onUpdateProjectState(loadedState);
-      event.target.value = '';
-    } catch (err) {
-      console.error('Failed to load project:', err);
-      alert(`Failed to load project: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      event.target.value = '';
-    }
-  };
+  // Note: Save/Load Project functionality moved to main Workbench header to avoid duplication
 
   // Handle export current layout
   const handleExportLayout = () => {
@@ -1062,18 +1004,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+S or Cmd+S to save project
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        saveProject(projectState);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectState]); // Include projectState in deps to ensure latest state is saved
+  // Note: Ctrl+S keyboard shortcut removed - Save Project is handled by main Workbench header
 
   // Handle auto-layout to quadrants
   const handleMapToQuadrants = () => {
@@ -1109,7 +1040,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       if (firstAssignment) {
         const [cellKey, sound] = firstAssignment;
         onAssignSound(cellKey, sound);
-        
+
         // Wait a moment for the mapping to be created, then update with all assignments
         setTimeout(() => {
           onUpdateMapping({
@@ -1125,7 +1056,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     // Replace all cells with the new quadrant layout (this clears old cells and applies new ones)
     onUpdateMapping({
       cells: assignments,
-      notes: activeMapping?.notes 
+      notes: activeMapping?.notes
         ? `${activeMapping.notes}\n\nAuto-laid out to 4x4 quadrants`
         : 'Auto-laid out to 4x4 quadrants',
     });
@@ -1188,22 +1119,22 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   }, [contextMenu]);
 
   // Derived lists: separate placed assets from staging assets
-  const placedAssets = activeMapping 
+  const placedAssets = activeMapping
     ? Object.values(activeMapping.cells)
     : [];
-  
+
   const placedAssetIds = new Set(placedAssets.map(s => s.id));
-  
+
   const stagingAssets = parkedSounds.filter(sound => !placedAssetIds.has(sound.id));
-  
+
   // Voice Visibility: Filter based on ignoredNoteNumbers
   const ignoredNoteNumbers = projectState.ignoredNoteNumbers || [];
-  
+
   // Handler to toggle voice visibility
   const handleToggleVoiceVisibility = (noteNumber: number) => {
     const currentIgnored = projectState.ignoredNoteNumbers || [];
     const isIgnored = currentIgnored.includes(noteNumber);
-    
+
     onUpdateProjectState({
       ...projectState,
       ignoredNoteNumbers: isIgnored
@@ -1211,21 +1142,21 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         : [...currentIgnored, noteNumber], // Add to ignored (hide)
     });
   };
-  
+
   // Handler for destructive delete: Permanently remove all events for a noteNumber
   const handleDestructiveDelete = (noteNumber: number) => {
     if (!activeLayout) {
       console.warn('No active layout to delete from');
       return;
     }
-    
+
     // Find the active layout
     const layoutIndex = projectState.layouts.findIndex(l => l.id === activeLayout.id);
     if (layoutIndex === -1) {
       console.warn('Active layout not found in project state');
       return;
     }
-    
+
     // Filter out all events matching this noteNumber
     const updatedLayouts = projectState.layouts.map((layout, idx) => {
       if (idx === layoutIndex) {
@@ -1239,11 +1170,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       }
       return layout;
     });
-    
+
     // Remove from ignoredNoteNumbers (cleanup)
     const currentIgnored = projectState.ignoredNoteNumbers || [];
     const updatedIgnored = currentIgnored.filter(n => n !== noteNumber);
-    
+
     // Update state
     onUpdateProjectState({
       ...projectState,
@@ -1290,7 +1221,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     // Map voices to pads (up to the minimum of available voices and empty pads)
     const assignments: Record<string, Voice> = {};
     const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
-    
+
     for (let i = 0; i < maxAssignments; i++) {
       assignments[shuffledPads[i].key] = shuffledVoices[i];
     }
@@ -1312,8 +1243,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const selectedSound = selectedCellKey && activeMapping
     ? activeMapping.cells[selectedCellKey] || null
     : selectedSoundId
-    ? stagingAssets.find(s => s.id === selectedSoundId) || null
-    : null;
+      ? stagingAssets.find(s => s.id === selectedSoundId) || null
+      : null;
 
   // Update reachability config when activeMapping changes (in case anchor cell was moved)
   useEffect(() => {
@@ -1328,8 +1259,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         const parsed = parseCellKey(reachabilityConfig.anchorCellKey);
         if (parsed) {
           // Position should match, but ensure it's in sync
-          if (parsed.row !== reachabilityConfig.anchorPos.row || 
-              parsed.col !== reachabilityConfig.anchorPos.col) {
+          if (parsed.row !== reachabilityConfig.anchorPos.row ||
+            parsed.col !== reachabilityConfig.anchorPos.col) {
             setReachabilityConfig({
               ...reachabilityConfig,
               anchorPos: { row: parsed.row, col: parsed.col },
@@ -1343,10 +1274,10 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Compute reachability map if active
   const reachabilityMap = reachabilityConfig
     ? getReachabilityMap(
-        reachabilityConfig.anchorPos,
-        reachabilityConfig.anchorFinger,
-        reachabilityConfig.targetFinger
-      )
+      reachabilityConfig.anchorPos,
+      reachabilityConfig.anchorFinger,
+      reachabilityConfig.targetFinger
+    )
     : null;
 
   // Get filtered performance using selector (excludes ignored notes)
@@ -1354,7 +1285,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   const filteredPerformance = useMemo(() => {
     return getActivePerformance(projectState);
   }, [projectState]);
-  
+
   // Also get raw performance for operations that need all events (like destructive delete)
   const rawPerformance = useMemo(() => {
     return getRawActivePerformance(projectState);
@@ -1362,34 +1293,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   // Engine execution moved to Workbench.tsx (reactive solver loop)
   // Engine result is now passed as a prop from Workbench
-
-  // Responsive timeline hiding: Hide if container height < 200px or window width < 768px
-  useEffect(() => {
-    const checkTimelineVisibility = () => {
-      if (!timelineContainerRef.current) return;
-
-      const container = timelineContainerRef.current;
-      const containerHeight = container.clientHeight;
-      const windowWidth = window.innerWidth;
-      
-      const shouldHide = (containerHeight < 200 || windowWidth < 768) && !timelineForceVisible;
-      setTimelineAutoHidden(shouldHide);
-    };
-
-    checkTimelineVisibility();
-    
-    const resizeObserver = new ResizeObserver(checkTimelineVisibility);
-    if (timelineContainerRef.current) {
-      resizeObserver.observe(timelineContainerRef.current);
-    }
-
-    window.addEventListener('resize', checkTimelineVisibility);
-    
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', checkTimelineVisibility);
-    };
-  }, [timelineForceVisible]);
 
   // Close auto-layout dropdown when clicking outside
   useEffect(() => {
@@ -1415,126 +1318,74 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       onDragCancel={handleDragCancel}
     >
       <div className="h-full w-full flex flex-col bg-gray-900 text-white overflow-hidden">
-        {/* Header with View Settings Toolbar */}
+        {/* Minimal Toolbar - Root Note and Auto-Layout only (Save/Load moved to main Workbench header) */}
         <div className="flex-none border-b border-gray-700 bg-slate-800 px-4 py-2">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-slate-200">Layout Designer</h1>
-            <div className="flex items-center gap-4">
-              {/* View Settings */}
-              <div className="flex items-center gap-4 border border-slate-700 rounded px-3 py-1.5">
-                <span className="text-xs text-slate-400 font-semibold">View Settings:</span>
-                
-                {/* Root Note */}
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-slate-400">Root Note:</label>
-                  <input
-                    type="number"
-                    value={instrumentConfig?.bottomLeftNote ?? 0}
-                    onChange={(e) => {
-                      if (onUpdateSection && projectState.sectionMaps[0]) {
-                        onUpdateSection(projectState.sectionMaps[0].id, { field: 'bottomLeftNote', value: parseInt(e.target.value) || 0 });
-                      }
+          <div className="flex items-center gap-4">
+
+
+            {/* Auto-Layout Dropdown */}
+            <div className="relative" ref={autoLayoutDropdownRef}>
+              <button
+                onClick={() => setAutoLayoutDropdownOpen(!autoLayoutDropdownOpen)}
+                className="px-3 py-1.5 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded border border-purple-600 transition-colors"
+                disabled={!instrumentConfig}
+                title={!instrumentConfig ? 'No instrument config available' : 'Auto-Layout Options'}
+              >
+                Auto-Layout ▼
+              </button>
+              {autoLayoutDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded-md shadow-xl z-50 min-w-[200px]">
+                  <button
+                    onClick={() => {
+                      handleMapToQuadrants();
+                      setAutoLayoutDropdownOpen(false);
                     }}
-                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                  />
+                    disabled={!instrumentConfig}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Organize by 4x4 Banks
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Placeholder for future "Suggest Ergonomic Layout" feature
+                      alert('Ergonomic Layout suggestion coming soon!');
+                      setAutoLayoutDropdownOpen(false);
+                    }}
+                    disabled
+                    className="w-full text-left px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
+                  >
+                    Suggest Ergonomic Layout (Coming Soon)
+                  </button>
                 </div>
-                
-                <div className="h-4 w-px bg-slate-700" />
-                
-                {/* View Settings are now controlled from Workbench header */}
-                <span className="text-xs text-slate-500 italic">View Settings controlled from main header</span>
-              </div>
-              
-              <div className="h-6 w-px bg-slate-700" />
-              
-              {/* Auto-Layout Dropdown */}
-              <div className="relative" ref={autoLayoutDropdownRef}>
-                <button
-                  onClick={() => setAutoLayoutDropdownOpen(!autoLayoutDropdownOpen)}
-                  className="px-3 py-1.5 text-xs bg-purple-700 hover:bg-purple-600 text-white rounded border border-purple-600 transition-colors"
-                  disabled={!instrumentConfig}
-                  title={!instrumentConfig ? 'No instrument config available' : 'Auto-Layout Options'}
-                >
-                  Auto-Layout ▼
-                </button>
-                {autoLayoutDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded-md shadow-xl z-50 min-w-[200px]">
-                    <button
-                      onClick={() => {
-                        handleMapToQuadrants();
-                        setAutoLayoutDropdownOpen(false);
-                      }}
-                      disabled={!instrumentConfig}
-                      className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Organize by 4x4 Banks
-                    </button>
-                    <button
-                      onClick={() => {
-                        // Placeholder for future "Suggest Ergonomic Layout" feature
-                        alert('Ergonomic Layout suggestion coming soon!');
-                        setAutoLayoutDropdownOpen(false);
-                      }}
-                      disabled
-                      className="w-full text-left px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
-                    >
-                      Suggest Ergonomic Layout (Coming Soon)
-                    </button>
-                  </div>
-                )}
-              </div>
-              
-              <div className="h-6 w-px bg-slate-700" />
-              
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1 border border-slate-700 rounded p-1">
-                  <button
-                    onClick={handleSaveProject}
-                    className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                    title="Save Project (Ctrl/Cmd+S)"
-                  >
-                    Save Project
-                  </button>
-                  <button
-                    onClick={handleLoadProjectClick}
-                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
-                    title="Load Project"
-                  >
-                    Load Project
-                  </button>
-                  <input
-                    ref={loadProjectInputRef}
-                    type="file"
-                    accept=".json"
-                    onChange={handleLoadProject}
-                    className="hidden"
-                  />
-                </div>
-                <div className="flex gap-1 border border-slate-700 rounded p-1">
-                  <button
-                    onClick={handleExportLayout}
-                    disabled={!activeMapping}
-                    className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded transition-colors"
-                    title={!activeMapping ? 'No active layout to export' : 'Export Current Layout'}
-                  >
-                    Export Layout
-                  </button>
-                  <button
-                    onClick={handleImportLayoutClick}
-                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
-                    title="Import Layout"
-                  >
-                    Import Layout
-                  </button>
-                  <input
-                    ref={importLayoutInputRef}
-                    type="file"
-                    accept=".json"
-                    onChange={handleImportLayout}
-                    className="hidden"
-                  />
-                </div>
-              </div>
+              )}
+            </div>
+
+            <div className="h-6 w-px bg-slate-700" />
+
+            {/* Export/Import Layout (layout-specific, not project-wide) */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportLayout}
+                disabled={!activeMapping}
+                className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded transition-colors"
+                title={!activeMapping ? 'No active layout to export' : 'Export Current Layout'}
+              >
+                Export Layout
+              </button>
+              <button
+                onClick={handleImportLayoutClick}
+                className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors"
+                title="Import Layout"
+              >
+                Import Layout
+              </button>
+              <input
+                ref={importLayoutInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportLayout}
+                className="hidden"
+              />
             </div>
           </div>
         </div>
@@ -1573,805 +1424,569 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                 </button>
               </div>
             </div>
-            
+
             {/* Tabs */}
             <div className="flex-none border-b border-slate-700">
               <div className="flex">
                 <button
                   onClick={() => setLeftPanelTab('library')}
-                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                    leftPanelTab === 'library'
-                      ? 'bg-slate-800 text-slate-200 border-b-2 border-blue-500'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
+                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${leftPanelTab === 'library'
+                    ? 'bg-slate-800 text-slate-200 border-b-2 border-blue-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    }`}
                 >
                   Library
                 </button>
-                <button
-                  onClick={() => setLeftPanelTab('sections')}
-                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                    leftPanelTab === 'sections'
-                      ? 'bg-slate-800 text-slate-200 border-b-2 border-blue-500'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                  }`}
-                >
-                  Sections
-                </button>
+
               </div>
             </div>
-            
+
             {/* Tab Content */}
             <div className="flex-1 overflow-y-auto">
-              {leftPanelTab === 'library' ? (
-                <div className="p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-slate-200">Library</h2>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleNewSound}
-                        className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded border border-green-500 transition-colors"
-                        title="Add New Sound"
-                      >
-                        + New
-                      </button>
-                      <button
-                        onClick={handleScanMidiClick}
-                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded border border-blue-500 transition-colors"
-                        disabled={!instrumentConfig}
-                        title={!instrumentConfig ? 'No instrument config available' : 'Import MIDI file'}
-                      >
-                        Import MIDI
-                      </button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".mid,.midi"
-                        onChange={handleMidiFileSelect}
-                        className="hidden"
-                        id="midi-file-input"
-                        name="midi-file-input"
-                      />
-                    </div>
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-slate-200">Library</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleNewSound}
+                      className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded border border-green-500 transition-colors"
+                      title="Add New Sound"
+                    >
+                      + New
+                    </button>
+                    <button
+                      onClick={handleScanMidiClick}
+                      className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded border border-blue-500 transition-colors"
+                      disabled={!instrumentConfig}
+                      title={!instrumentConfig ? 'No instrument config available' : 'Import MIDI file'}
+                    >
+                      Import MIDI
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".mid,.midi"
+                      onChange={handleMidiFileSelect}
+                      className="hidden"
+                      id="midi-file-input"
+                      name="midi-file-input"
+                    />
                   </div>
-            
-            <div className="space-y-4">
-              {/* Detected Voices Section - Derived from active Performance (for visibility/delete management) */}
-              <div>
-                <button
-                  onClick={() => setStagingAreaCollapsed(!stagingAreaCollapsed)}
-                  className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
-                >
-                  <span>Detected Voices</span>
-                  <span className="text-xs text-slate-500">
-                    {(() => {
-                      const rawPerformance = getRawActivePerformance(projectState);
-                      if (!rawPerformance) return '0 voices';
-                      const uniqueNotes = new Set(rawPerformance.events.map(e => e.noteNumber));
-                      return `${uniqueNotes.size} ${uniqueNotes.size === 1 ? 'voice' : 'voices'}`;
-                    })()}
-                  </span>
-                  <span className="text-slate-500">
-                    {stagingAreaCollapsed ? '▼' : '▲'}
-                  </span>
-                </button>
-                {!stagingAreaCollapsed && (
-                  <div className="mt-2">
-                    {(() => {
-                      const rawPerformance = getRawActivePerformance(projectState);
-                      if (!rawPerformance || rawPerformance.events.length === 0) {
-                        return (
-                          <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
-                            No Voices detected
-                            <br />
-                            <span className="text-xs">Import a MIDI file to detect voices</span>
-                          </div>
-                        );
-                      }
-                      
-                      // Extract unique noteNumbers from the raw Performance
-                      const uniqueNotes = Array.from(new Set(rawPerformance.events.map(e => e.noteNumber))).sort((a, b) => a - b);
-                      
-                      return (
-                        <div className="space-y-2">
-                          {uniqueNotes.map((noteNumber) => {
-                            const isVisible = !ignoredNoteNumbers.includes(noteNumber);
-                            const eventCount = rawPerformance.events.filter(e => e.noteNumber === noteNumber).length;
-                            
+                </div>
+
+                <div className="space-y-4">
+                  {/* Detected Voices Section - Derived from active Performance (for visibility/delete management) */}
+                  <div>
+                    <button
+                      onClick={() => setStagingAreaCollapsed(!stagingAreaCollapsed)}
+                      className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
+                    >
+                      <span>Detected Voices</span>
+                      <span className="text-xs text-slate-500">
+                        {(() => {
+                          const rawPerformance = getRawActivePerformance(projectState);
+                          if (!rawPerformance) return '0 voices';
+                          const uniqueNotes = new Set(rawPerformance.events.map(e => e.noteNumber));
+                          return `${uniqueNotes.size} ${uniqueNotes.size === 1 ? 'voice' : 'voices'}`;
+                        })()}
+                      </span>
+                      <span className="text-slate-500">
+                        {stagingAreaCollapsed ? '▼' : '▲'}
+                      </span>
+                    </button>
+                    {!stagingAreaCollapsed && (
+                      <div className="mt-2">
+                        {(() => {
+                          const rawPerformance = getRawActivePerformance(projectState);
+                          if (!rawPerformance || rawPerformance.events.length === 0) {
                             return (
-                              <div
-                                key={noteNumber}
-                                className="p-3 rounded-md border bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 transition-colors flex items-center justify-between gap-2"
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-slate-200 text-sm">
-                                    Note {noteNumber}
-                                  </div>
-                                  <div className="text-xs text-slate-400 mt-1">
-                                    {eventCount} {eventCount === 1 ? 'event' : 'events'}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  {/* Visibility Toggle */}
-                                  <button
-                                    onClick={() => handleToggleVoiceVisibility(noteNumber)}
-                                    className={`flex-shrink-0 p-1.5 rounded transition-colors ${
-                                      isVisible 
-                                        ? 'text-green-400 hover:bg-green-900/20' 
-                                        : 'text-slate-500 hover:bg-slate-700'
-                                    }`}
-                                    title={isVisible ? 'Hide Voice' : 'Show Voice'}
-                                  >
-                                    {isVisible ? '👁️' : '🚫'}
-                                  </button>
-                                  {/* Destructive Delete */}
-                                  <button
-                                    onClick={() => {
-                                      if (window.confirm(`Permanently delete all events for Note ${noteNumber}? This action cannot be undone.`)) {
-                                        handleDestructiveDelete(noteNumber);
-                                      }
-                                    }}
-                                    className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
-                                    title="Permanently delete all events for this note"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-4 w-4"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                      />
-                                    </svg>
-                                  </button>
-                                </div>
+                              <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
+                                No Voices detected
+                                <br />
+                                <span className="text-xs">Import a MIDI file to detect voices</span>
                               </div>
                             );
-                          })}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
+                          }
 
-              {/* Staging Area Section - Draggable Voices */}
-              <div>
-                <button
-                  onClick={() => setStagingAreaSectionCollapsed(!stagingAreaSectionCollapsed)}
-                  className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
-                >
-                  <span>Staging Area</span>
-                  <span className="text-xs text-slate-500">
-                    {stagingAssets.length} {stagingAssets.length === 1 ? 'voice' : 'voices'}
-                  </span>
-                  <span className="text-slate-500">
-                    {stagingAreaSectionCollapsed ? '▼' : '▲'}
-                  </span>
-                </button>
-                {!stagingAreaSectionCollapsed && (
-                  <DroppableStagingArea>
-                    {/* Assign Actions Toolbar */}
-                    {stagingAssets.length > 0 && (
-                      <div className="mb-3 p-2 bg-slate-800/50 rounded border border-slate-700">
-                        <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Assign Actions</div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleAutoAssignRandom}
-                            disabled={!activeMapping || !instrumentConfig || stagingAssets.length === 0}
-                            className="flex-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded border border-blue-500 disabled:border-slate-600 transition-colors"
-                            title={!activeMapping || !instrumentConfig ? 'No active mapping or instrument config' : 'Randomly assign unassigned Voices to empty Pads'}
-                          >
-                            Auto-Assign (Random)
-                          </button>
-                          <button
-                            disabled
-                            className="flex-1 px-3 py-1.5 text-xs bg-slate-700 text-slate-500 cursor-not-allowed rounded border border-slate-600 flex items-center justify-center gap-1"
-                            title="AI Optimization coming in v2"
-                          >
-                            Auto-Assign (Optimize) 🧠
-                          </button>
-                        </div>
+                          // Extract unique noteNumbers from the raw Performance
+                          const uniqueNotes = Array.from(new Set(rawPerformance.events.map(e => e.noteNumber))).sort((a, b) => a - b);
+
+                          return (
+                            <div className="space-y-2">
+                              {uniqueNotes.map((noteNumber) => {
+                                const isVisible = !ignoredNoteNumbers.includes(noteNumber);
+                                const eventCount = rawPerformance.events.filter(e => e.noteNumber === noteNumber).length;
+
+                                return (
+                                  <div
+                                    key={noteNumber}
+                                    className="p-3 rounded-md border bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-slate-600 transition-colors flex items-center justify-between gap-2"
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-slate-200 text-sm">
+                                        Note {noteNumber}
+                                      </div>
+                                      <div className="text-xs text-slate-400 mt-1">
+                                        {eventCount} {eventCount === 1 ? 'event' : 'events'}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      {/* Visibility Toggle */}
+                                      <button
+                                        onClick={() => handleToggleVoiceVisibility(noteNumber)}
+                                        className={`flex-shrink-0 p-1.5 rounded transition-colors ${isVisible
+                                          ? 'text-green-400 hover:bg-green-900/20'
+                                          : 'text-slate-500 hover:bg-slate-700'
+                                          }`}
+                                        title={isVisible ? 'Hide Voice' : 'Show Voice'}
+                                      >
+                                        {isVisible ? '👁️' : '🚫'}
+                                      </button>
+                                      {/* Destructive Delete */}
+                                      <button
+                                        onClick={() => {
+                                          if (window.confirm(`Permanently delete all events for Note ${noteNumber}? This action cannot be undone.`)) {
+                                            handleDestructiveDelete(noteNumber);
+                                          }
+                                        }}
+                                        className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                                        title="Permanently delete all events for this note"
+                                      >
+                                        <svg
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          className="h-4 w-4"
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                          stroke="currentColor"
+                                          strokeWidth={2}
+                                        >
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                          />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
-                    <div className="space-y-2 mt-2">
-                      {stagingAssets.length === 0 ? (
-                        <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
-                          No Voices in staging
-                          <br />
-                          <span className="text-xs">Drag Voices from grid here to unassign</span>
-                        </div>
-                      ) : (
-                        stagingAssets.map((sound) => {
-                          const isVisible = sound.originalMidiNote === null 
-                            ? true 
-                            : !ignoredNoteNumbers.includes(sound.originalMidiNote);
-                          
-                          return (
-                            <DraggableSound
-                              key={sound.id}
-                              sound={sound}
-                              isSelected={selectedSoundId === sound.id && !selectedCellKey}
-                              onSelect={() => {
-                                setSelectedSoundId(sound.id);
-                                setSelectedCellKey(null);
-                              }}
-                              onEdit={(updates) => onUpdateSound(sound.id, updates)}
-                              onDelete={() => onDeleteSound?.(sound.id)}
-                              isVisible={isVisible}
-                              onToggleVisibility={handleToggleVoiceVisibility}
-                            />
-                          );
-                        })
-                      )}
-                    </div>
-                  </DroppableStagingArea>
-                )}
-              </div>
+                  </div>
 
-              {/* Placed on Grid Section */}
-              {activeMapping && Object.keys(activeMapping.cells).length > 0 && (
-                <div>
-                  <button
-                    onClick={() => {
-                      const newState = !placedSoundsCollapsed;
-                      setPlacedSoundsCollapsed(newState);
-                    }}
-                    className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
-                  >
-                    <span>Placed on Grid</span>
-                    <span className="text-xs text-slate-500">
-                      {placedAssets.length} {placedAssets.length === 1 ? 'sound' : 'sounds'}
-                    </span>
-                    <span className="text-slate-500">
-                      {placedSoundsCollapsed ? '▼' : '▲'}
-                    </span>
-                  </button>
-                  {!placedSoundsCollapsed && (
-                    <div className="space-y-2 mt-2">
-                      {Object.entries(activeMapping.cells).map(([cellKey, sound]) => (
-                        <PlacedSoundItem
-                          key={`${cellKey}-${sound.id}`}
-                          sound={sound}
-                          cellKey={cellKey}
-                          isSelected={selectedCellKey === cellKey}
-                          onSelect={() => {
-                            setSelectedCellKey(cellKey);
-                            setSelectedSoundId(null);
-                          }}
-                        />
-                      ))}
+                  {/* Staging Area Section - Draggable Voices */}
+                  <div>
+                    <button
+                      onClick={() => setStagingAreaSectionCollapsed(!stagingAreaSectionCollapsed)}
+                      className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
+                    >
+                      <span>Staging Area</span>
+                      <span className="text-xs text-slate-500">
+                        {stagingAssets.length} {stagingAssets.length === 1 ? 'voice' : 'voices'}
+                      </span>
+                      <span className="text-slate-500">
+                        {stagingAreaSectionCollapsed ? '▼' : '▲'}
+                      </span>
+                    </button>
+                    {!stagingAreaSectionCollapsed && (
+                      <DroppableStagingArea>
+                        {/* Assign Actions Toolbar */}
+                        {stagingAssets.length > 0 && (
+                          <div className="mb-3 p-2 bg-slate-800/50 rounded border border-slate-700">
+                            <div className="text-xs font-semibold text-slate-400 uppercase mb-2">Assign Actions</div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={handleAutoAssignRandom}
+                                disabled={!activeMapping || !instrumentConfig || stagingAssets.length === 0}
+                                className="flex-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded border border-blue-500 disabled:border-slate-600 transition-colors"
+                                title={!activeMapping || !instrumentConfig ? 'No active mapping or instrument config' : 'Randomly assign unassigned Voices to empty Pads'}
+                              >
+                                Auto-Assign (Random)
+                              </button>
+                              <button
+                                disabled
+                                className="flex-1 px-3 py-1.5 text-xs bg-slate-700 text-slate-500 cursor-not-allowed rounded border border-slate-600 flex items-center justify-center gap-1"
+                                title="AI Optimization coming in v2"
+                              >
+                                Auto-Assign (Optimize) 🧠
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="space-y-2 mt-2">
+                          {stagingAssets.length === 0 ? (
+                            <div className="text-sm text-slate-500 text-center py-8 border-2 border-dashed border-slate-700 rounded">
+                              No Voices in staging
+                              <br />
+                              <span className="text-xs">Drag Voices from grid here to unassign</span>
+                            </div>
+                          ) : (
+                            stagingAssets.map((sound) => {
+                              const isVisible = sound.originalMidiNote === null
+                                ? true
+                                : !ignoredNoteNumbers.includes(sound.originalMidiNote);
+
+                              return (
+                                <DraggableSound
+                                  key={sound.id}
+                                  sound={sound}
+                                  isSelected={selectedSoundId === sound.id && !selectedCellKey}
+                                  onSelect={() => {
+                                    setSelectedSoundId(sound.id);
+                                    setSelectedCellKey(null);
+                                  }}
+                                  onEdit={(updates) => onUpdateSound(sound.id, updates)}
+                                  onDelete={() => onDeleteSound?.(sound.id)}
+                                  isVisible={isVisible}
+                                  onToggleVisibility={handleToggleVoiceVisibility}
+                                />
+                              );
+                            })
+                          )}
+                        </div>
+                      </DroppableStagingArea>
+                    )}
+                  </div>
+
+                  {/* Placed on Grid Section */}
+                  {activeMapping && Object.keys(activeMapping.cells).length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => {
+                          const newState = !placedSoundsCollapsed;
+                          setPlacedSoundsCollapsed(newState);
+                        }}
+                        className="w-full flex items-center justify-between p-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 rounded transition-colors"
+                      >
+                        <span>Placed on Grid</span>
+                        <span className="text-xs text-slate-500">
+                          {placedAssets.length} {placedAssets.length === 1 ? 'sound' : 'sounds'}
+                        </span>
+                        <span className="text-slate-500">
+                          {placedSoundsCollapsed ? '▼' : '▲'}
+                        </span>
+                      </button>
+                      {!placedSoundsCollapsed && (
+                        <div className="space-y-2 mt-2">
+                          {Object.entries(activeMapping.cells).map(([cellKey, sound]) => (
+                            <PlacedSoundItem
+                              key={`${cellKey}-${sound.id}`}
+                              sound={sound}
+                              cellKey={cellKey}
+                              isSelected={selectedCellKey === cellKey}
+                              onSelect={() => {
+                                setSelectedCellKey(cellKey);
+                                setSelectedSoundId(null);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-                </div>
-              ) : (
-                <div className="p-4">
-                  <h2 className="text-lg font-semibold text-slate-200 mb-4">Section Maps</h2>
-                  <SectionMapList
-                    sectionMaps={projectState.sectionMaps}
-                    instrumentConfigs={projectState.instrumentConfigs}
-                    onUpdateSection={onUpdateSection || (() => {})}
-                    onDeleteSection={onDeleteSection}
-                    onCreateInstrumentConfig={onCreateInstrumentConfig}
-                    onCreateSectionMap={onCreateSectionMap}
-                    onUpdateInstrumentConfig={onUpdateInstrumentConfig}
-                    onDeleteInstrumentConfig={onDeleteInstrumentConfig}
-                  />
-                </div>
-              )}
+              </div>
             </div>
           </div>
 
           {/* Center Panel (flex-1) - GridEditor (top) & Timeline (bottom) */}
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
             {/* Top: GridEditor (flex-1, centered) */}
-            <div className="flex-1 flex items-center justify-center overflow-auto p-8 bg-slate-950 min-h-0">
+            <div className="flex-1 flex items-center justify-center overflow-auto p-2 bg-slate-950 min-h-0">
               <div
                 className="grid grid-cols-8 gap-2 bg-slate-900 p-4 rounded-xl shadow-2xl border border-slate-800"
-                style={{ width: 'fit-content' }}
+                style={{
+                  width: 'min(100%, 100vh - 150px)',
+                  height: 'min(100%, 100vh - 150px)',
+                  aspectRatio: '1'
+                }}
               >
-            {rows.map((row) => (
-              <React.Fragment key={`row-${row}`}>
-                {cols.map((col) => {
-                  const key = cellKey(row, col);
-                  const assignedSound = getCellSound(row, col);
-                  const isOver = Boolean(activeId && overId === key);
-                  const templateSlot = getTemplateSlot(row, col);
+                {rows.map((row) => (
+                  <React.Fragment key={`row-${row}`}>
+                    {cols.map((col) => {
+                      const key = cellKey(row, col);
+                      const assignedSound = getCellSound(row, col);
+                      const isOver = Boolean(activeId && overId === key);
+                      const templateSlot = getTemplateSlot(row, col);
 
-                  const cellKeyStr = cellKey(row, col);
-                  const reachabilityLevel = reachabilityMap?.[cellKeyStr] || null;
+                      const cellKeyStr = cellKey(row, col);
+                      const reachabilityLevel = reachabilityMap?.[cellKeyStr] || null;
 
-                  // Get heatmap data from engineResult if heatmap overlay is enabled
-                  let heatmapDifficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable' | null = null;
-                  let heatmapFinger: FingerID | null = null;
-                  let heatmapHand: 'LH' | 'RH' | null = null;
-                  
-                  if (showHeatmap && engineResult && filteredPerformance && filteredPerformance.events.length > 0 && assignedSound) {
-                    // Find the debug event for this cell's note
-                    const noteNumber = assignedSound?.originalMidiNote ?? null;
-                    if (noteNumber !== null) {
-                      // Find the worst-case event for this note
-                      const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
-                      if (noteEvents.length > 0) {
-                        const worstEvent = noteEvents.reduce((worst, current) => {
-                          const worstRank = worst.difficulty === 'Unplayable' ? 3 : 
-                                           worst.difficulty === 'Hard' ? 2 :
-                                           worst.difficulty === 'Medium' ? 1 : 0;
-                          const currentRank = current.difficulty === 'Unplayable' ? 3 :
-                                             current.difficulty === 'Hard' ? 2 :
-                                             current.difficulty === 'Medium' ? 1 : 0;
-                          return currentRank > worstRank ? current : worst;
-                        }, noteEvents[0]);
-                        heatmapDifficulty = worstEvent.difficulty;
-                        // Type assertion: runtime data from runEngine uses FingerID (1-5), not FingerType
-                        heatmapFinger = worstEvent.finger as FingerID | null;
-                        // Type assertion: runtime data from runEngine uses 'LH'/'RH', but type says 'left'/'right'
-                        const hand = worstEvent.assignedHand as 'left' | 'right' | 'Unplayable' | 'LH' | 'RH';
-                        heatmapHand = hand === 'Unplayable' ? null : (hand === 'left' || hand === 'LH' ? 'LH' : 'RH');
+                      // Get heatmap data from engineResult if heatmap overlay is enabled
+                      let heatmapDifficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable' | null = null;
+                      let heatmapFinger: FingerID | null = null;
+                      let heatmapHand: 'LH' | 'RH' | null = null;
+
+                      if (showHeatmap && engineResult && filteredPerformance && filteredPerformance.events.length > 0 && assignedSound) {
+                        // Find the debug event for this cell's note
+                        const noteNumber = assignedSound?.originalMidiNote ?? null;
+                        if (noteNumber !== null) {
+                          // Find the worst-case event for this note
+                          const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
+                          if (noteEvents.length > 0) {
+                            const worstEvent = noteEvents.reduce((worst, current) => {
+                              const worstRank = worst.difficulty === 'Unplayable' ? 3 :
+                                worst.difficulty === 'Hard' ? 2 :
+                                  worst.difficulty === 'Medium' ? 1 : 0;
+                              const currentRank = current.difficulty === 'Unplayable' ? 3 :
+                                current.difficulty === 'Hard' ? 2 :
+                                  current.difficulty === 'Medium' ? 1 : 0;
+                              return currentRank > worstRank ? current : worst;
+                            }, noteEvents[0]);
+                            heatmapDifficulty = worstEvent.difficulty;
+                            // Type assertion: runtime data from runEngine uses FingerID (1-5), not FingerType
+                            heatmapFinger = worstEvent.finger as FingerID | null;
+                            // Type assertion: runtime data from runEngine uses 'LH'/'RH', but type says 'left'/'right'
+                            const hand = worstEvent.assignedHand as 'left' | 'right' | 'Unplayable' | 'LH' | 'RH';
+                            heatmapHand = hand === 'Unplayable' ? null : (hand === 'left' || hand === 'LH' ? 'LH' : 'RH');
+                          }
+                        }
                       }
-                    }
-                  }
 
-                  const isHighlighted = highlightedCell?.row === row && highlightedCell?.col === col;
-                  
-                  // Get finger constraint for this cell
-                  const fingerConstraint = activeMapping?.fingerConstraints[cellKeyStr] || null;
+                      const isHighlighted = false;
+                      // Get finger constraint for this cell
+                      const fingerConstraint = activeMapping?.fingerConstraints[cellKeyStr] || null;
 
-                  return (
-                    <DroppableCell
-                      key={key}
-                      row={row}
-                      col={col}
-                      assignedSound={assignedSound}
-                      isOver={isOver}
-                      isSelected={selectedCellKey === key}
-                      isHighlighted={isHighlighted}
-                      templateSlot={templateSlot}
-                      reachabilityLevel={reachabilityLevel}
-                      heatmapDifficulty={heatmapDifficulty}
-                      heatmapFinger={heatmapFinger}
-                      heatmapHand={heatmapHand}
-                      fingerConstraint={fingerConstraint}
-                      showNoteLabels={showNoteLabels}
-                      instrumentConfig={instrumentConfig}
-                      onClick={() => handleCellClick(row, col)}
-                      onDoubleClick={() => handleCellDoubleClick(row, col)}
-                      onContextMenu={(e) => handleCellContextMenu(e, row, col)}
-                    />
-                  );
-                })}
-              </React.Fragment>
-            ))}
+                      return (
+                        <DroppableCell
+                          key={key}
+                          row={row}
+                          col={col}
+                          assignedSound={assignedSound}
+                          isOver={isOver}
+                          isSelected={selectedCellKey === key}
+                          isHighlighted={isHighlighted}
+                          templateSlot={templateSlot}
+                          reachabilityLevel={reachabilityLevel}
+                          heatmapDifficulty={heatmapDifficulty}
+                          heatmapFinger={heatmapFinger}
+                          heatmapHand={heatmapHand}
+                          fingerConstraint={fingerConstraint}
+                          showNoteLabels={showNoteLabels}
+                          instrumentConfig={instrumentConfig}
+                          onClick={() => handleCellClick(row, col)}
+                          onDoubleClick={() => handleCellDoubleClick(row, col)}
+                          onContextMenu={(e) => handleCellContextMenu(e, row, col)}
+                        />
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
               </div>
             </div>
-            
+
             {/* Bottom: Performance Timeline - REMOVED: Now rendered in Workbench Dashboard section */}
             {/* Timeline is now displayed in the Dashboard section at the top of Workbench to avoid duplication */}
           </div>
 
-          {/* Right Panel (w-80) - Split: Metadata (Top 50%) and Ergonomic Score (Bottom 50%) */}
+          {/* Right Panel (w-80) - Sound Assignment Table Only */}
           <div className="w-80 flex-none border-l border-gray-700 bg-slate-900 flex flex-col overflow-hidden">
-            {/* Top Half (50%) - Layout Metadata */}
-            <div className="flex-1 overflow-y-auto min-h-0">
-              <div className="p-4">
-              <h2 className="text-lg font-semibold text-slate-200 mb-4">
-                Layout Metadata
-              </h2>
-
-            <div className="space-y-4">
-              {/* Template Dropdown */}
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Templates
-                </label>
-                <select
-                  value={selectedTemplate}
-                  onChange={(e) => setSelectedTemplate(e.target.value as TemplateId)}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="none">None</option>
-                  {LAYOUT_TEMPLATES.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-                {selectedTemplate !== 'none' && (
-                  <p className="mt-1 text-xs text-slate-400">
-                    Template guides will show on the grid. Sounds will snap to template slots when dropped nearby.
-                  </p>
-                )}
-              </div>
-
-              {/* Name Field */}
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={activeMapping?.name || ''}
-                  onChange={(e) => onUpdateMapping({ name: e.target.value })}
-                  placeholder="Layout name..."
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              {/* Notes Field */}
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={activeMapping?.notes || ''}
-                  onChange={(e) => onUpdateMapping({ notes: e.target.value })}
-                  placeholder="Add notes about this layout..."
-                  rows={6}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                />
-              </div>
-
-              {/* Selected Sound Properties */}
-              {selectedSound && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <h3 className="text-sm font-semibold text-slate-300 mb-3">
-                    {selectedCellKey ? 'Placed Sound' : 'Library Sound'}
-                  </h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">
-                        Name
-                      </label>
-                      <input
-                        ref={nameInputRef}
-                        type="text"
-                        value={selectedSound.name}
-                        onChange={(e) => {
-                          if (selectedCellKey) {
-                            onUpdateMappingSound(selectedCellKey, { name: e.target.value });
-                          } else {
-                            onUpdateSound(selectedSound.id, { name: e.target.value });
-                          }
-                        }}
-                        className="w-full px-2 py-1 text-sm bg-slate-800 border border-slate-700 rounded text-slate-200"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">
-                        Color
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={selectedSound.color || '#6366f1'}
-                          onChange={(e) => {
-                            if (selectedCellKey) {
-                              onUpdateMappingSound(selectedCellKey, { color: e.target.value });
-                            } else {
-                              onUpdateSound(selectedSound.id, { color: e.target.value });
-                            }
-                          }}
-                          className="w-12 h-8 rounded border border-slate-700 cursor-pointer"
-                        />
-                        <input
-                          type="text"
-                          value={selectedSound.color || '#6366f1'}
-                          onChange={(e) => {
-                            if (selectedCellKey) {
-                              onUpdateMappingSound(selectedCellKey, { color: e.target.value });
-                            } else {
-                              onUpdateSound(selectedSound.id, { color: e.target.value });
-                            }
-                          }}
-                          className="flex-1 px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono"
-                        />
-                      </div>
-                    </div>
-                    {/* Source Info (Read-only) */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">
-                        Source Info
-                      </label>
-                      <div className="px-2 py-1.5 text-xs bg-slate-800/50 border border-slate-700 rounded text-slate-400 space-y-1">
-                        <div>
-                          <span className="text-slate-500">Type:</span> {selectedSound.sourceType === 'midi_track' ? 'MIDI Track' : 'Audio Slice'}
-                        </div>
-                        {selectedSound.sourceFile && (
-                          <div>
-                            <span className="text-slate-500">File:</span> {selectedSound.sourceFile}
-                          </div>
-                        )}
-                        {selectedSound.originalMidiNote !== null && (
-                          <div>
-                            <span className="text-slate-500">Original Note:</span> {selectedSound.originalMidiNote}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {selectedCellKey && (
-                      <button
-                        onClick={() => {
-                          onRemoveSound(selectedCellKey);
-                          setSelectedCellKey(null);
-                        }}
-                        className="w-full px-3 py-1.5 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
-                      >
-                        Remove from Grid
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Reachability Info Badge */}
-              {reachabilityConfig && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <div className="text-sm font-semibold text-slate-200 mb-2">
-                    Reachability: {reachabilityConfig.hand}{reachabilityConfig.anchorFinger}
-                  </div>
-                  <div className="text-xs text-slate-400 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-green-600/60 border border-green-500"></div>
-                      <span>Easy (≤3.0)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-yellow-600/60 border border-yellow-500"></div>
-                      <span>Medium (3.0-5.0)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-gray-600/60 border border-gray-500"></div>
-                      <span>Unreachable (&gt;5.0)</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setReachabilityConfig(null)}
-                    className="mt-2 w-full px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded"
-                  >
-                    Clear
-                  </button>
-                </div>
-              )}
-
-              {/* Info Section */}
-              {activeMapping && (
-                <div className="mt-6 pt-4 border-t border-slate-700">
-                  <div className="text-xs text-slate-400 space-y-1">
-                    <div>
-                      <span className="text-slate-500">ID:</span>{' '}
-                      <span className="font-mono">{activeMapping.id}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Cells assigned:</span>{' '}
-                      {Object.keys(activeMapping.cells).length} / 64
-                    </div>
-                    {activeMapping.scoreCache !== null && (
-                      <div>
-                        <span className="text-slate-500">Score:</span>{' '}
-                        {activeMapping.scoreCache.toFixed(2)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              </div>
-            </div>
-
-            {/* Bottom Half (50%) - Ergonomic Score - REMOVED: Now rendered in Workbench Dashboard section */}
-            {/* EngineResultsPanel is now displayed in the Dashboard section at the top of Workbench to avoid duplication */}
-            <div className="flex-1 border-t border-slate-700 overflow-y-auto min-h-0 flex items-center justify-center">
-              <div className="text-center text-slate-500 text-sm">
-                <p>Ergonomic Analysis</p>
-                <p className="text-xs mt-1">View results in the Dashboard above</p>
-              </div>
-            </div>
+            <SoundAssignmentTable
+              activeMapping={activeMapping}
+              engineResult={engineResultProp}
+            />
           </div>
         </div>
-      </div>
 
-      {/* Context Menu */}
-      {contextMenu?.visible && (
-        <div
-          ref={contextMenuRef}
-          className="fixed bg-slate-800 border border-slate-700 rounded-md shadow-xl z-50 min-w-[180px]"
-          style={{
-            left: contextMenu.x,
-            top: contextMenu.y,
-          }}
-        >
-          <div className="py-1">
-            <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
-              Cell: {contextMenu.targetCell}
-            </div>
-            
-            <div className="px-2 py-1">
-              <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Reachability</div>
-              <button
-                onClick={() => {
-                  if (contextMenu) {
-                    const parsed = parseCellKey(contextMenu.targetCell);
-                    if (parsed) {
-                      setReachabilityConfig({
-                        anchorCellKey: contextMenu.targetCell,
-                        anchorPos: { row: parsed.row, col: parsed.col },
-                        anchorFinger: 1,
-                        targetFinger: 1,
-                        hand: 'L',
-                      });
-                    }
-                  }
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700 rounded"
-              >
-                Show Reach for L1
-              </button>
-              <button
-                onClick={() => {
-                  if (contextMenu) {
-                    const parsed = parseCellKey(contextMenu.targetCell);
-                    if (parsed) {
-                      setReachabilityConfig({
-                        anchorCellKey: contextMenu.targetCell,
-                        anchorPos: { row: parsed.row, col: parsed.col },
-                        anchorFinger: 1,
-                        targetFinger: 1,
-                        hand: 'R',
-                      });
-                    }
-                  }
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700 rounded"
-              >
-                Show Reach for R1
-              </button>
-            </div>
-
-            {/* Finger Assignment Section */}
-            {activeMapping && (
-              <>
-                <div className="border-t border-slate-700 my-1" />
-                <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
-                  Assign Finger Lock
-                </div>
-                
-                {/* Left Hand Fingers */}
-                <div className="px-2 py-1">
-                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
-                  {[1, 2, 3, 4, 5].map((finger) => {
-                    const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
-                    const constraintValue = `L${finger}`;
-                    const isActive = currentConstraint === constraintValue;
-                    const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
-                    return (
-                      <button
-                        key={`finger-L${finger}`}
-                        onClick={() => {
-                          if (activeMapping) {
-                            const newConstraints = { ...activeMapping.fingerConstraints };
-                            if (isActive) {
-                              delete newConstraints[contextMenu.targetCell];
-                            } else {
-                              newConstraints[contextMenu.targetCell] = constraintValue;
-                            }
-                            onUpdateMapping({ fingerConstraints: newConstraints });
-                          }
-                          setContextMenu(null);
-                        }}
-                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-200 hover:bg-slate-700'
-                        }`}
-                      >
-                        {isActive ? '✓ ' : ''}L{finger} ({fingerName})
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Right Hand Fingers */}
-                <div className="px-2 py-1">
-                  <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Right Hand</div>
-                  {[1, 2, 3, 4, 5].map((finger) => {
-                    const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
-                    const constraintValue = `R${finger}`;
-                    const isActive = currentConstraint === constraintValue;
-                    const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
-                    return (
-                      <button
-                        key={`finger-R${finger}`}
-                        onClick={() => {
-                          if (activeMapping) {
-                            const newConstraints = { ...activeMapping.fingerConstraints };
-                            if (isActive) {
-                              delete newConstraints[contextMenu.targetCell];
-                            } else {
-                              newConstraints[contextMenu.targetCell] = constraintValue;
-                            }
-                            onUpdateMapping({ fingerConstraints: newConstraints });
-                          }
-                          setContextMenu(null);
-                        }}
-                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-200 hover:bg-slate-700'
-                        }`}
-                      >
-                        {isActive ? '✓ ' : ''}R{finger} ({fingerName})
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Clear Finger Lock */}
-                {activeMapping.fingerConstraints[contextMenu.targetCell] && (
-                  <>
-                    <div className="border-t border-slate-700 my-1" />
-                    <button
-                      onClick={() => {
-                        if (activeMapping) {
-                          const newConstraints = { ...activeMapping.fingerConstraints };
-                          delete newConstraints[contextMenu.targetCell];
-                          onUpdateMapping({ fingerConstraints: newConstraints });
-                        }
-                        setContextMenu(null);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-slate-700 rounded"
-                    >
-                      Clear Finger Lock
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-
-            {activeMapping?.cells[contextMenu.targetCell] && (
-              <>
-                <div className="border-t border-slate-700 my-1" />
-                <button
-                  onClick={() => {
-                    onRemoveSound(contextMenu.targetCell);
-                    setContextMenu(null);
-                    setSelectedCellKey(null);
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-sm text-red-300 hover:bg-slate-700 rounded"
-                >
-                  Remove Sound
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Drag Overlay */}
-      <DragOverlay>
-        {draggedSound ? (
+        {/* Context Menu */}
+        {contextMenu?.visible && (
           <div
-            className="p-3 rounded-md border bg-blue-600 border-blue-400 shadow-lg"
+            ref={contextMenuRef}
+            className="fixed bg-slate-800 border border-slate-700 rounded-md shadow-xl z-50 min-w-[180px]"
             style={{
-              borderLeftWidth: '4px',
-              borderLeftColor: draggedSound.color || '#6366f1',
+              left: contextMenu.x,
+              top: contextMenu.y,
             }}
           >
-            <div className="font-medium text-white text-sm">
-              {draggedSound.name}
-            </div>
-            <div className="text-xs text-blue-200 mt-1">
-              {draggedSound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
+            <div className="py-1">
+              <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
+                Cell: {contextMenu.targetCell}
+              </div>
+
+              <div className="px-2 py-1">
+                <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Reachability</div>
+                <button
+                  onClick={() => {
+                    if (contextMenu) {
+                      const parsed = parseCellKey(contextMenu.targetCell);
+                      if (parsed) {
+                        setReachabilityConfig({
+                          anchorCellKey: contextMenu.targetCell,
+                          anchorPos: { row: parsed.row, col: parsed.col },
+                          anchorFinger: 1,
+                          targetFinger: 1,
+                          hand: 'L',
+                        });
+                      }
+                    }
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700 rounded"
+                >
+                  Show Reach for L1
+                </button>
+                <button
+                  onClick={() => {
+                    if (contextMenu) {
+                      const parsed = parseCellKey(contextMenu.targetCell);
+                      if (parsed) {
+                        setReachabilityConfig({
+                          anchorCellKey: contextMenu.targetCell,
+                          anchorPos: { row: parsed.row, col: parsed.col },
+                          anchorFinger: 1,
+                          targetFinger: 1,
+                          hand: 'R',
+                        });
+                      }
+                    }
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700 rounded"
+                >
+                  Show Reach for R1
+                </button>
+              </div>
+
+              {/* Finger Assignment Section */}
+              {activeMapping && (
+                <>
+                  <div className="border-t border-slate-700 my-1" />
+                  <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
+                    Assign Finger Lock
+                  </div>
+
+                  {/* Left Hand Fingers */}
+                  <div className="px-2 py-1">
+                    <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
+                    {[1, 2, 3, 4, 5].map((finger) => {
+                      const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
+                      const constraintValue = `L${finger}`;
+                      const isActive = currentConstraint === constraintValue;
+                      const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
+                      return (
+                        <button
+                          key={`finger-L${finger}`}
+                          onClick={() => {
+                            if (activeMapping) {
+                              const newConstraints = { ...activeMapping.fingerConstraints };
+                              if (isActive) {
+                                delete newConstraints[contextMenu.targetCell];
+                              } else {
+                                newConstraints[contextMenu.targetCell] = constraintValue;
+                              }
+                              onUpdateMapping({ fingerConstraints: newConstraints });
+                            }
+                            setContextMenu(null);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-sm rounded ${isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                            }`}
+                        >
+                          {isActive ? '✓ ' : ''}L{finger} ({fingerName})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Right Hand Fingers */}
+                  <div className="px-2 py-1">
+                    <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Right Hand</div>
+                    {[1, 2, 3, 4, 5].map((finger) => {
+                      const currentConstraint = activeMapping.fingerConstraints[contextMenu.targetCell];
+                      const constraintValue = `R${finger}`;
+                      const isActive = currentConstraint === constraintValue;
+                      const fingerName = finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky';
+                      return (
+                        <button
+                          key={`finger-R${finger}`}
+                          onClick={() => {
+                            if (activeMapping) {
+                              const newConstraints = { ...activeMapping.fingerConstraints };
+                              if (isActive) {
+                                delete newConstraints[contextMenu.targetCell];
+                              } else {
+                                newConstraints[contextMenu.targetCell] = constraintValue;
+                              }
+                              onUpdateMapping({ fingerConstraints: newConstraints });
+                            }
+                            setContextMenu(null);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-sm rounded ${isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-200 hover:bg-slate-700'
+                            }`}
+                        >
+                          {isActive ? '✓ ' : ''}R{finger} ({fingerName})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Clear Finger Lock */}
+                  {activeMapping.fingerConstraints[contextMenu.targetCell] && (
+                    <>
+                      <div className="border-t border-slate-700 my-1" />
+                      <button
+                        onClick={() => {
+                          if (activeMapping) {
+                            const newConstraints = { ...activeMapping.fingerConstraints };
+                            delete newConstraints[contextMenu.targetCell];
+                            onUpdateMapping({ fingerConstraints: newConstraints });
+                          }
+                          setContextMenu(null);
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-slate-700 rounded"
+                      >
+                        Clear Finger Lock
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {activeMapping?.cells[contextMenu.targetCell] && (
+                <>
+                  <div className="border-t border-slate-700 my-1" />
+                  <button
+                    onClick={() => {
+                      onRemoveSound(contextMenu.targetCell);
+                      setContextMenu(null);
+                      setSelectedCellKey(null);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-red-300 hover:bg-slate-700 rounded"
+                  >
+                    Remove Sound
+                  </button>
+                </>
+              )}
             </div>
           </div>
-        ) : null}
-      </DragOverlay>
+        )}
+
+        {/* Drag Overlay */}
+        <DragOverlay>
+          {draggedSound ? (
+            <div
+              className="p-3 rounded-md border bg-blue-600 border-blue-400 shadow-lg"
+              style={{
+                borderLeftWidth: '4px',
+                borderLeftColor: draggedSound.color || '#6366f1',
+              }}
+            >
+              <div className="font-medium text-white text-sm">
+                {draggedSound.name}
+              </div>
+              <div className="text-xs text-blue-200 mt-1">
+                {draggedSound.sourceType === 'midi_track' ? 'MIDI' : 'Audio'}
+              </div>
+            </div>
+          ) : null}
+        </DragOverlay>
       </div>
       {showImportWizard && (
         <ImportWizard

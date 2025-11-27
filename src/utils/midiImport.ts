@@ -1,5 +1,5 @@
 import { Midi } from '@tonejs/midi';
-import { Performance, NoteEvent, InstrumentConfig, SectionMap } from '../types/performance';
+import { Performance, NoteEvent, InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { Voice, GridMapping } from '../types/layout';
 import { generateId } from './performanceUtils';
@@ -31,8 +31,7 @@ export interface MidiProjectData {
   voices: Voice[];
   /** Instrument configuration with intelligent root note adjustment */
   instrumentConfig: InstrumentConfig;
-  /** Section map for the imported performance */
-  sectionMap: SectionMap;
+
   /** Initial grid mapping with voice assignments */
   gridMapping: GridMapping;
   /** Minimum note number found (for root note adjustment) */
@@ -87,12 +86,12 @@ export async function parseMidiProject(
   events.sort((a, b) => a.startTime - b.startTime);
 
   // Determine tempo
-  const tempo = midiData.header.tempos.length > 0 
-    ? Math.round(midiData.header.tempos[0].bpm) 
+  const tempo = midiData.header.tempos.length > 0
+    ? Math.round(midiData.header.tempos[0].bpm)
     : 120;
 
   // Find minimum note number for intelligent root note logic
-  const minNote = events.length > 0 
+  const minNote = events.length > 0
     ? Math.min(...events.map(e => e.noteNumber))
     : null;
 
@@ -127,7 +126,7 @@ export async function parseMidiProject(
     tempo,
     name: fileName ? fileName.replace(/\.[^/.]+$/, "") : 'Imported Performance'
   };
-  
+
   // DEBUG: Log performance creation
   console.log('[parseMidiProject] Created performance:', {
     name: performance.name,
@@ -178,14 +177,7 @@ export async function parseMidiProject(
   console.log('[parseMidiProject] Voices created:', voices.length);
   voices.forEach(v => console.log(`  - ${v.name} (MIDI ${v.originalMidiNote})`));
 
-  // Create section map
-  const sectionMap: SectionMap = {
-    id: generateId('section'),
-    name: 'Main Section',
-    startMeasure: 1,
-    lengthInMeasures: 4, // Default, can be calculated from performance duration
-    instrumentConfig: instrumentConfig,
-  };
+
 
   // Create initial grid mapping with voice assignments
   // IMPORTANT: Only map voices that don't conflict (first voice wins if multiple map to same cell)
@@ -194,7 +186,7 @@ export async function parseMidiProject(
   let mappedCount = 0;
   let unmappedCount = 0;
   let conflictCount = 0;
-  
+
   voices.forEach(voice => {
     if (voice.originalMidiNote !== null) {
       const position = GridMapService.noteToGrid(voice.originalMidiNote, instrumentConfig);
@@ -219,7 +211,7 @@ export async function parseMidiProject(
       }
     }
   });
-  
+
   // DEBUG: Log grid mapping results
   console.log(`[parseMidiProject] Grid mapping: ${mappedCount} voices mapped to grid, ${unmappedCount} voices unmapped, ${conflictCount} conflicts (will be in parkedSounds only)`);
   console.log(`[parseMidiProject] Total cells in mapping: ${Object.keys(cells).length}`);
@@ -246,7 +238,7 @@ export async function parseMidiProject(
     performance,
     voices, // This should contain ALL unique voices
     instrumentConfig,
-    sectionMap,
+
     gridMapping,
     minNoteNumber: minNote,
     unmappedNoteCount,

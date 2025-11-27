@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { GridArea } from './GridArea';
-import { TimelineArea } from './TimelineArea';
+
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { InstrumentConfig } from '../types/performance';
@@ -53,7 +53,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     });
     return patterns;
   });
-  
+
   const [currentStep, setCurrentStep] = useState(0);
   const [showDebugLabels, setShowDebugLabels] = useState(false);
   const [viewAllSteps, setViewAllSteps] = useState(false);
@@ -63,12 +63,12 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [highlightedCell, setHighlightedCell] = useState<{ row: number; col: number } | null>(null);
   const importLayoutInputRef = React.useRef<HTMLInputElement>(null);
 
-  const activeSection = useMemo(() => 
+  const activeSection = useMemo(() =>
     projectState.sectionMaps[0] || null, // Simplified: just take first section for now
     [projectState.sectionMaps]
   );
 
-  const activeGridPattern = useMemo(() => 
+  const activeGridPattern = useMemo(() =>
     (projectState.activeLayoutId && gridPatterns[projectState.activeLayoutId]) || createEmptyPattern(64),
     [gridPatterns, projectState.activeLayoutId]
   );
@@ -77,7 +77,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   // When Performance changes, update GridPattern using the active InstrumentConfig
   useEffect(() => {
     if (!activeLayout || !activeSection || !projectState.activeLayoutId) return;
-    
+
     // Convert Performance to GridPattern using the active InstrumentConfig
     const syncedPattern = performanceToGridPattern(
       activeLayout.performance,
@@ -85,7 +85,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       activeLayout.performance.tempo || projectState.projectTempo,
       64
     );
-    
+
     // Update GridPattern state (this will trigger re-render but won't cause loop since we're not reading gridPatterns in deps)
     setGridPatterns(prev => {
       const currentPattern = prev[projectState.activeLayoutId!];
@@ -125,7 +125,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         name: 'New Performance'
       }
     };
-    
+
     setGridPatterns(prev => ({
       ...prev,
       [newId]: createEmptyPattern(64)
@@ -144,13 +144,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     if (projectState.activeLayoutId === id) {
       newActiveId = newLayouts.length > 0 ? newLayouts[0].id : null;
     }
-    
+
     onUpdateProjectState({
       ...projectState,
       layouts: newLayouts,
       activeLayoutId: newActiveId
     });
-    
+
     setGridPatterns(prev => {
       const next = { ...prev };
       delete next[id];
@@ -167,7 +167,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       ...projectState,
       sectionMaps: projectState.sectionMaps.map(section => {
         if (section.id !== id) return section;
-        
+
         // Handle legacy format: { field, value }
         if ('field' in updates && 'value' in updates) {
           const { field, value } = updates;
@@ -185,7 +185,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             [field]: value
           };
         }
-        
+
         // Handle new format: Partial<SectionMap>
         if ('instrumentConfig' in updates) {
           return {
@@ -193,7 +193,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             instrumentConfig: updates.instrumentConfig!
           };
         }
-        
+
         return {
           ...section,
           ...updates
@@ -221,30 +221,30 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       try {
         const content = e.target?.result as string;
         const parsed = JSON.parse(content);
-        
+
         // Basic validation
         if (
-          parsed && 
-          Array.isArray(parsed.layouts) && 
+          parsed &&
+          Array.isArray(parsed.layouts) &&
           Array.isArray(parsed.sectionMaps) &&
           typeof parsed.projectTempo === 'number'
         ) {
-           // Ensure new fields are initialized if missing (for backward compatibility)
-           const loadedState: ProjectState = {
-             ...parsed,
-             parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-             mappings: Array.isArray(parsed.mappings) ? parsed.mappings : []
-           };
-           onUpdateProjectState(loadedState);
-           // Reset grid patterns on load (or we'd need to save them too)
-           // For now, just re-init empty patterns for loaded layouts
-           const newPatterns: Record<string, GridPattern> = {};
-           parsed.layouts.forEach((l: LayoutSnapshot) => {
-             newPatterns[l.id] = createEmptyPattern(64);
-           });
-           setGridPatterns(newPatterns);
+          // Ensure new fields are initialized if missing (for backward compatibility)
+          const loadedState: ProjectState = {
+            ...parsed,
+            parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
+            mappings: Array.isArray(parsed.mappings) ? parsed.mappings : []
+          };
+          onUpdateProjectState(loadedState);
+          // Reset grid patterns on load (or we'd need to save them too)
+          // For now, just re-init empty patterns for loaded layouts
+          const newPatterns: Record<string, GridPattern> = {};
+          parsed.layouts.forEach((l: LayoutSnapshot) => {
+            newPatterns[l.id] = createEmptyPattern(64);
+          });
+          setGridPatterns(newPatterns);
         } else {
-           alert("Invalid project file structure");
+          alert("Invalid project file structure");
         }
       } catch (err) {
         console.error(err);
@@ -264,7 +264,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       // W3: Get import result with unmapped note count
       const importResult = await parseMidiFile(file, activeSection.instrumentConfig);
       const performance = importResult.performance;
-      
+
       // Intelligent Root Note Logic: Auto-set bottomLeftNote to minimum note
       let updatedProjectState = { ...projectState };
       if (importResult.minNoteNumber !== null) {
@@ -299,7 +299,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           instrumentConfigs: updatedInstrumentConfigs
         };
       }
-      
+
       // W3: Show warning if there are unmapped notes (should be 0 after auto-adjustment)
       if (importResult.unmappedNoteCount > 0) {
         console.warn(
@@ -307,7 +307,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           `Root note auto-adjusted to ${importResult.minNoteNumber !== null ? importResult.minNoteNumber : activeSection.instrumentConfig.bottomLeftNote} to fit all notes.`
         );
       }
-      
+
       // Create a new layout for the imported MIDI
       const newId = `layout-${Date.now()}`;
       const newLayout: LayoutSnapshot = {
@@ -342,7 +342,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       console.error(err);
       alert("Failed to import MIDI file");
     }
-    
+
     event.target.value = '';
   };
 
@@ -412,7 +412,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           : GridMapService.getPositionForNote(event.noteNumber, activeSection.instrumentConfig);
         if (pos) {
           if (!newPattern.steps[stepIndex][pos.row][pos.col]) {
-             newPattern.steps[stepIndex][pos.row][pos.col] = true;
+            newPattern.steps[stepIndex][pos.row][pos.col] = true;
           }
         }
       }
@@ -437,7 +437,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   const handleResetPattern = () => {
     if (!projectState.activeLayoutId) return;
-    
+
     setGridPatterns(prev => ({
       ...prev,
       [projectState.activeLayoutId!]: createEmptyPattern(64)
@@ -494,7 +494,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     <div className="flex-1 flex flex-row overflow-hidden">
       {/* Left Panel (Sidebar) */}
       <div className="w-64 flex-none border-r border-gray-700 overflow-y-auto">
-        <Sidebar 
+        <Sidebar
           layouts={projectState.layouts}
           activeLayoutId={projectState.activeLayoutId}
           sectionMaps={projectState.sectionMaps}
@@ -543,63 +543,63 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
           <div className="flex items-center gap-4">
             <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={showHeatmap} 
+              <input
+                type="checkbox"
+                checked={showHeatmap}
                 onChange={(e) => setShowHeatmap(e.target.checked)}
                 className="rounded border-slate-700 bg-slate-800"
               />
               Show Heatmap
             </label>
             <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={showNoteLabels} 
+              <input
+                type="checkbox"
+                checked={showNoteLabels}
                 onChange={(e) => setShowNoteLabels(e.target.checked)}
                 className="rounded border-slate-700 bg-slate-800"
               />
               Show Note Labels
             </label>
             <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={viewAllSteps} 
+              <input
+                type="checkbox"
+                checked={viewAllSteps}
                 onChange={(e) => setViewAllSteps(e.target.checked)}
                 className="rounded border-slate-700 bg-slate-800"
               />
               View All Steps
             </label>
           </div>
-          
+
           <div className="h-6 w-px bg-slate-800" />
-          
+
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">Load Pattern:</span>
-            <button 
+            <button
               onClick={() => loadDebugPattern('snake')}
               className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
             >
               Snake
             </button>
-            <button 
+            <button
               onClick={() => loadDebugPattern('corners')}
               className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
             >
               Corners
             </button>
-            <button 
+            <button
               onClick={() => loadDebugPattern('arp')}
               className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
             >
               Arp
             </button>
-            <button 
+            <button
               onClick={() => loadDebugPattern('drum')}
               className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
             >
               Drum
             </button>
-            <button 
+            <button
               onClick={handleResetPattern}
               className="px-2 py-1 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded border border-red-900/50"
             >
@@ -611,8 +611,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-500">Grid Root Note:</label>
-            <input 
-              type="number" 
+            <input
+              type="number"
               value={activeSection?.instrumentConfig.bottomLeftNote ?? 0}
               onChange={(e) => {
                 if (activeSection) {
@@ -680,21 +680,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             />
           )}
         </div>
-        
-        {/* Timeline Area */}
-        <div className="h-48 flex-none border-t border-gray-700 overflow-x-auto bg-slate-900">
-          <TimelineArea 
-            steps={activeGridPattern.length}
-            currentStep={currentStep}
-            onStepSelect={setCurrentStep}
-            sectionMaps={projectState.sectionMaps}
-          />
-        </div>
+
+
       </div>
 
       {/* Right Panel (Analysis) */}
       <div className="w-80 flex-none border-l border-gray-700 overflow-y-auto bg-gray-800">
-        <EngineResultsPanel 
+        <EngineResultsPanel
           result={engineResult}
           activeMapping={activeMapping}
           onHighlightCell={(row, col) => {

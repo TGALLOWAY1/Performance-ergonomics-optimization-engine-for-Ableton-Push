@@ -3,7 +3,7 @@ import { ProjectState } from '../types/projectState';
 
 interface UseProjectHistoryReturn {
   projectState: ProjectState;
-  setProjectState: (state: ProjectState, skipHistory?: boolean) => void;
+  setProjectState: (state: ProjectState | ((prev: ProjectState) => ProjectState), skipHistory?: boolean) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -26,15 +26,18 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
   const isUndoingRef = useRef(false);
   const isRedoingRef = useRef(false);
 
-  const setProjectState = useCallback((newState: ProjectState, skipHistory = false) => {
+  const setProjectState = useCallback((newStateOrFn: ProjectState | ((prev: ProjectState) => ProjectState), skipHistory = false) => {
     if (skipHistory || isUndoingRef.current || isRedoingRef.current) {
-      setPresent(newState);
+      setPresent(prev => {
+        const newState = typeof newStateOrFn === 'function' ? (newStateOrFn as (prev: ProjectState) => ProjectState)(prev) : newStateOrFn;
+        return newState;
+      });
       return;
     }
 
     // Add current state to past
-    setPast(prev => {
-      const newPast = [...prev, present];
+    setPast(prevPast => {
+      const newPast = [...prevPast, present];
       // Limit history size
       if (newPast.length > MAX_HISTORY_SIZE) {
         return newPast.slice(-MAX_HISTORY_SIZE);
@@ -44,7 +47,10 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
 
     // Clear future when making a new change
     setFuture([]);
-    setPresent(newState);
+    setPresent(prev => {
+      const newState = typeof newStateOrFn === 'function' ? (newStateOrFn as (prev: ProjectState) => ProjectState)(prev) : newStateOrFn;
+      return newState;
+    });
   }, [present]);
 
   const undo = useCallback(() => {
@@ -57,7 +63,7 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
     setPast(newPast);
     setFuture(prev => [present, ...prev]);
     setPresent(previous);
-    
+
     // Reset flag after state update
     setTimeout(() => {
       isUndoingRef.current = false;
@@ -74,7 +80,7 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
     setPast(prev => [...prev, present]);
     setFuture(newFuture);
     setPresent(next);
-    
+
     // Reset flag after state update
     setTimeout(() => {
       isRedoingRef.current = false;
