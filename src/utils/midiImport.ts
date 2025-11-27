@@ -1,5 +1,5 @@
 import { Midi } from '@tonejs/midi';
-import { Performance, NoteEvent, InstrumentConfig, SectionMap } from '../types/performance';
+import { Performance, NoteEvent, InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { Voice, GridMapping } from '../types/layout';
 import { generateId } from './performanceUtils';
@@ -31,8 +31,7 @@ export interface MidiProjectData {
   voices: Voice[];
   /** Instrument configuration with intelligent root note adjustment */
   instrumentConfig: InstrumentConfig;
-  /** Section map for the imported performance */
-  sectionMap: SectionMap;
+
   /** Initial grid mapping with voice assignments */
   gridMapping: GridMapping;
   /** Minimum note number found (for root note adjustment) */
@@ -59,8 +58,15 @@ export async function parseMidiProject(
   const events: NoteEvent[] = [];
   let unmappedNoteCount = 0;
 
+  // DEBUG: Log MIDI file structure
+  console.log('[parseMidiProject] MIDI file loaded:', {
+    tracks: midiData.tracks.length,
+    fileName: fileName || 'unknown',
+  });
+
   // Extract all note events
-  midiData.tracks.forEach((track) => {
+  midiData.tracks.forEach((track, trackIndex) => {
+    console.log(`[parseMidiProject] Track ${trackIndex}: ${track.notes.length} notes`);
     track.notes.forEach((note) => {
       const noteNumber = note.midi;
       events.push({
@@ -73,16 +79,19 @@ export async function parseMidiProject(
     });
   });
 
+  // DEBUG: Log total events extracted
+  console.log('[parseMidiProject] Total events extracted:', events.length);
+
   // Sort events by start time
   events.sort((a, b) => a.startTime - b.startTime);
 
   // Determine tempo
-  const tempo = midiData.header.tempos.length > 0 
-    ? Math.round(midiData.header.tempos[0].bpm) 
+  const tempo = midiData.header.tempos.length > 0
+    ? Math.round(midiData.header.tempos[0].bpm)
     : 120;
 
   // Find minimum note number for intelligent root note logic
-  const minNote = events.length > 0 
+  const minNote = events.length > 0
     ? Math.min(...events.map(e => e.noteNumber))
     : null;
 
@@ -118,11 +127,22 @@ export async function parseMidiProject(
     name: fileName ? fileName.replace(/\.[^/.]+$/, "") : 'Imported Performance'
   };
 
+  // DEBUG: Log performance creation
+  console.log('[parseMidiProject] Created performance:', {
+    name: performance.name,
+    eventsCount: performance.events.length,
+    tempo: performance.tempo,
+  });
+
   // Extract unique voices
   const uniqueNotes = new Set<number>();
   events.forEach(event => {
     uniqueNotes.add(event.noteNumber);
   });
+
+  // DEBUG: Log unique notes found
+  console.log('[parseMidiProject] Total events:', events.length);
+  console.log('[parseMidiProject] Unique note numbers found:', Array.from(uniqueNotes).sort((a, b) => a - b));
 
   // Generate note names
   const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -139,8 +159,9 @@ export async function parseMidiProject(
     '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
   ];
 
-  // Create voices
-  const voices: Voice[] = Array.from(uniqueNotes).map((noteNumber, index) => {
+  // Create voices - sort by note number for consistent ordering
+  const sortedUniqueNotes = Array.from(uniqueNotes).sort((a, b) => a - b);
+  const voices: Voice[] = sortedUniqueNotes.map((noteNumber, index) => {
     const noteName = getNoteName(noteNumber);
     return {
       id: generateId('sound'),
@@ -152,26 +173,49 @@ export async function parseMidiProject(
     };
   });
 
-  // Create section map
-  const sectionMap: SectionMap = {
-    id: generateId('section'),
-    name: 'Main Section',
-    startMeasure: 1,
-    lengthInMeasures: 4, // Default, can be calculated from performance duration
-    instrumentConfig: instrumentConfig,
-  };
+  // DEBUG: Log voices created
+  console.log('[parseMidiProject] Voices created:', voices.length);
+  voices.forEach(v => console.log(`  - ${v.name} (MIDI ${v.originalMidiNote})`));
+
+
 
   // Create initial grid mapping with voice assignments
+  // IMPORTANT: Only map voices that don't conflict (first voice wins if multiple map to same cell)
   const cells: Record<string, Voice> = {};
+  const usedCells = new Set<string>();
+  let mappedCount = 0;
+  let unmappedCount = 0;
+  let conflictCount = 0;
+
   voices.forEach(voice => {
     if (voice.originalMidiNote !== null) {
       const position = GridMapService.noteToGrid(voice.originalMidiNote, instrumentConfig);
       if (position) {
-        const cellKeyStr = cellKey(position.row, position.col);
-        cells[cellKeyStr] = voice;
+        // position is [row, col] tuple, not an object
+        const [row, col] = position;
+        const cellKeyStr = cellKey(row, col);
+        // Check if this cell is already occupied
+        if (usedCells.has(cellKeyStr)) {
+          console.warn(`[parseMidiProject] Cell ${cellKeyStr} (row ${row}, col ${col}) already occupied! Skipping ${voice.name} (MIDI ${voice.originalMidiNote}) - will be in parkedSounds only`);
+          conflictCount++;
+          // Don't overwrite - voice will remain in parkedSounds but not on grid
+        } else {
+          cells[cellKeyStr] = voice;
+          usedCells.add(cellKeyStr);
+          mappedCount++;
+          console.log(`[parseMidiProject] Mapped ${voice.name} (MIDI ${voice.originalMidiNote}) to cell ${cellKeyStr} (row ${row}, col ${col})`);
+        }
+      } else {
+        console.warn(`[parseMidiProject] Voice ${voice.name} (MIDI ${voice.originalMidiNote}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
+        unmappedCount++;
       }
     }
   });
+
+  // DEBUG: Log grid mapping results
+  console.log(`[parseMidiProject] Grid mapping: ${mappedCount} voices mapped to grid, ${unmappedCount} voices unmapped, ${conflictCount} conflicts (will be in parkedSounds only)`);
+  console.log(`[parseMidiProject] Total cells in mapping: ${Object.keys(cells).length}`);
+  console.log(`[parseMidiProject] Total voices (all will be in parkedSounds): ${voices.length}`);
 
   const gridMapping: GridMapping = {
     id: generateId('mapping'),
@@ -182,11 +226,19 @@ export async function parseMidiProject(
     notes: `Auto-generated from ${fileName || 'MIDI import'}`,
   };
 
+  // DEBUG: Final verification before return
+  console.log('[parseMidiProject] Returning MidiProjectData:', {
+    performanceEvents: performance.events.length,
+    voicesCount: voices.length,
+    voices: voices.map(v => `${v.name} (${v.originalMidiNote})`),
+    gridMappingCells: Object.keys(gridMapping.cells).length,
+  });
+
   return {
     performance,
-    voices,
+    voices, // This should contain ALL unique voices
     instrumentConfig,
-    sectionMap,
+
     gridMapping,
     minNoteNumber: minNote,
     unmappedNoteCount,

@@ -3,16 +3,67 @@
 @tailwind utilities;
 
 :root {
-  --background: #0f172a;
-  --foreground: #e2e8f0;
-  --border: #1e293b;
+  /* Base Colors - Premium Dark Theme */
+  --background: #0f172a; /* Slate 900 */
+  --foreground: #f8fafc; /* Slate 50 */
+  
+  /* Surface Colors */
+  --surface-1: #1e293b; /* Slate 800 */
+  --surface-2: #334155; /* Slate 700 */
+  --surface-3: #475569; /* Slate 600 */
+  
+  /* Accent Colors */
+  --accent-primary: #3b82f6; /* Blue 500 */
+  --accent-secondary: #8b5cf6; /* Violet 500 */
+  --accent-success: #10b981; /* Emerald 500 */
+  --accent-warning: #f59e0b; /* Amber 500 */
+  --accent-error: #ef4444; /* Red 500 */
+
+  /* Borders */
+  --border-subtle: rgba(148, 163, 184, 0.1);
+  --border-strong: rgba(148, 163, 184, 0.2);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   min-height: 100vh;
+  overflow: hidden; /* Prevent body scroll */
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+}
+
+.glass-panel-strong {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-strong);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-3);
 }
 

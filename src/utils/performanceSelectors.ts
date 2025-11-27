@@ -43,9 +43,33 @@ export function getActivePerformance(state: ProjectState): Performance | null {
 export function getRawActivePerformance(state: ProjectState): Performance | null {
   const activeLayout = state.layouts.find(l => l.id === state.activeLayoutId);
   
-  if (!activeLayout || !activeLayout.performance) {
+  // DEBUG: Log selector state
+  if (!activeLayout) {
+    console.warn('[getRawActivePerformance] No active layout found:', {
+      activeLayoutId: state.activeLayoutId,
+      availableLayoutIds: state.layouts.map(l => l.id),
+    });
     return null;
   }
+  
+  if (!activeLayout.performance) {
+    console.warn('[getRawActivePerformance] Active layout has no performance:', {
+      layoutId: activeLayout.id,
+      layoutName: activeLayout.name,
+    });
+    return null;
+  }
+
+  // DEBUG: Log performance events count
+  const eventsCount = activeLayout.performance.events?.length || 0;
+  console.log('[getRawActivePerformance] Found performance:', {
+    layoutId: activeLayout.id,
+    layoutName: activeLayout.name,
+    eventsCount: eventsCount,
+    hasEvents: eventsCount > 0,
+    performanceId: activeLayout.performance.id,
+    performanceName: activeLayout.performance.name,
+  });
 
   return activeLayout.performance;
 }
