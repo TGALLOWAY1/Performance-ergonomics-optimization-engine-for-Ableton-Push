@@ -36,14 +36,14 @@ export function calculateMovementCost(
   finger: FingerType,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): number {
-  // If finger is not placed, assume zero movement cost (free entry)
+  // If finger is not placed, apply activation cost
   if (from === null) {
-    return 0;
+    return constants.activationCost;
   }
 
   const distance = calculateDistance(from, to);
   const fingerWeight = constants.fingerStrengthWeights[finger];
-  
+
   return distance * fingerWeight;
 }
 
@@ -56,7 +56,7 @@ export function calculateMovementCost(
  */
 function calculateCenterOfGravity(handState: HandState): GridPosition | null {
   const placedFingers: GridPosition[] = [];
-  
+
   for (const fingerType of ['thumb', 'index', 'middle', 'ring', 'pinky'] as FingerType[]) {
     const pos = handState.fingers[fingerType].currentGridPos;
     if (pos !== null) {
@@ -71,7 +71,7 @@ function calculateCenterOfGravity(handState: HandState): GridPosition | null {
   // Calculate average position
   const sumRow = placedFingers.reduce((sum, pos) => sum + pos.row, 0);
   const sumCol = placedFingers.reduce((sum, pos) => sum + pos.col, 0);
-  
+
   return {
     row: sumRow / placedFingers.length,
     col: sumCol / placedFingers.length
@@ -134,14 +134,14 @@ export function calculateStretchPenalty(
   // Non-linear penalty: exponential increase as span exceeds comfort zone
   const excessSpan = newSpan - constants.idealReach;
   const maxExcess = constants.maxSpan - constants.idealReach;
-  
+
   // Normalize excess (0 to 1)
   const normalizedExcess = Math.min(excessSpan / maxExcess, 1.0);
-  
+
   // Exponential penalty: penalty = excess^2 * 10
   // This makes larger spans exponentially more expensive
   const penalty = Math.pow(normalizedExcess, 2) * 10;
-  
+
   return penalty;
 }
 
@@ -161,7 +161,7 @@ export function calculateDriftPenalty(
 ): number {
   // Calculate current center of gravity
   const cog = calculateCenterOfGravity(handState);
-  
+
   // If no fingers are placed, no drift penalty
   if (cog === null) {
     return 0;
@@ -230,7 +230,7 @@ export function getFingerBouncePenalty(
   recencyWindow: number = 5.0
 ): number {
   const history = noteHistory[noteNumber];
-  
+
   // No history for this note, no penalty
   if (!history) {
     return 0;
@@ -243,7 +243,7 @@ export function getFingerBouncePenalty(
 
   // Different finger - check if it was recent
   const timeSinceLastPlay = currentTime - history.timestamp;
-  
+
   // If outside recency window, no penalty (old history doesn't matter)
   if (timeSinceLastPlay > recencyWindow) {
     return 0;
@@ -254,6 +254,102 @@ export function getFingerBouncePenalty(
   const recencyFactor = 1.0 - (timeSinceLastPlay / recencyWindow); // 1.0 = very recent, 0.0 = at window edge
   const basePenalty = 2.0; // Base penalty for switching fingers
   const penalty = basePenalty * recencyFactor;
+
+  return penalty;
+}
+
+/**
+ * Calculates penalty for geometric crossovers (e.g. index crossing over pinky).
+ * Instead of hard rejection, we apply a penalty to discourage but allow it.
+ * 
+ * @param handState - Current hand state
+ * @param newPos - New position being considered (object-based)
+ * @param finger - The finger type being assigned to newPos
+ * @param handSide - Which hand (left or right)
+ * @param constants - Engine constants
+ * @returns The crossover penalty (0 if no crossover)
+ */
+export function calculateCrossoverCost(
+  handState: HandState,
+  newPos: GridPosition,
+  finger: FingerType,
+  handSide: 'left' | 'right',
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+): number {
+  let penalty = 0;
+
+  // Create a temporary hand state with the new assignment
+  const tempFingers = {
+    ...handState.fingers,
+    [finger]: {
+      currentGridPos: newPos,
+      fatigueLevel: handState.fingers[finger].fatigueLevel
+    }
+  };
+
+  const thumbPos = tempFingers.thumb.currentGridPos;
+  const indexPos = tempFingers.index.currentGridPos;
+  const middlePos = tempFingers.middle.currentGridPos;
+  const pinkyPos = tempFingers.pinky.currentGridPos;
+
+  // Rule 1: Thumb and Pinky ordering
+  if (thumbPos && pinkyPos) {
+    if (handSide === 'right') {
+      if (thumbPos.col >= pinkyPos.col && thumbPos.row >= pinkyPos.row) {
+        penalty += constants.crossoverPenaltyWeight * 2; // Strong penalty for extreme crossover
+      }
+    } else {
+      // left hand
+      if (thumbPos.col <= pinkyPos.col && thumbPos.row >= pinkyPos.row) {
+        penalty += constants.crossoverPenaltyWeight * 2;
+      }
+    }
+  }
+
+  // Rule 2: Index should not cross over pinky
+  if (indexPos && pinkyPos) {
+    if (handSide === 'right') {
+      if (indexPos.col < pinkyPos.col) {
+        penalty += constants.crossoverPenaltyWeight;
+      }
+    } else {
+      // left hand
+      if (indexPos.col > pinkyPos.col) {
+        penalty += constants.crossoverPenaltyWeight;
+      }
+    }
+  }
+
+  // Rule 3: Thumb should not cross above middle finger
+  if (thumbPos && middlePos) {
+    if (thumbPos.row > middlePos.row) {
+      penalty += constants.crossoverPenaltyWeight;
+    }
+  }
+
+  // Rule 4: Finger sequence ordering
+  const fingerSequence: FingerType[] = handSide === 'right'
+    ? ['index', 'middle', 'ring', 'pinky']
+    : ['pinky', 'ring', 'middle', 'index'];
+
+  for (let i = 0; i < fingerSequence.length - 1; i++) {
+    const finger1 = fingerSequence[i];
+    const finger2 = fingerSequence[i + 1];
+    const pos1 = tempFingers[finger1].currentGridPos;
+    const pos2 = tempFingers[finger2].currentGridPos;
+
+    if (pos1 && pos2) {
+      if (handSide === 'right') {
+        if (pos1.col >= pos2.col) {
+          penalty += constants.crossoverPenaltyWeight;
+        }
+      } else {
+        if (pos1.col <= pos2.col) {
+          penalty += constants.crossoverPenaltyWeight;
+        }
+      }
+    }
+  }
 
   return penalty;
 }

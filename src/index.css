@@ -1,23 +1,35 @@
+@import './styles/theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   /* Base Colors - Premium Dark Theme */
-  --background: #0f172a; /* Slate 900 */
-  --foreground: #f8fafc; /* Slate 50 */
-  
+  --background: #0f172a;
+  /* Slate 900 */
+  --foreground: #f8fafc;
+  /* Slate 50 */
+
   /* Surface Colors */
-  --surface-1: #1e293b; /* Slate 800 */
-  --surface-2: #334155; /* Slate 700 */
-  --surface-3: #475569; /* Slate 600 */
-  
+  --surface-1: #1e293b;
+  /* Slate 800 */
+  --surface-2: #334155;
+  /* Slate 700 */
+  --surface-3: #475569;
+  /* Slate 600 */
+
   /* Accent Colors */
-  --accent-primary: #3b82f6; /* Blue 500 */
-  --accent-secondary: #8b5cf6; /* Violet 500 */
-  --accent-success: #10b981; /* Emerald 500 */
-  --accent-warning: #f59e0b; /* Amber 500 */
-  --accent-error: #ef4444; /* Red 500 */
+  --accent-primary: #3b82f6;
+  /* Blue 500 */
+  --accent-secondary: #8b5cf6;
+  /* Violet 500 */
+  --accent-success: #10b981;
+  /* Emerald 500 */
+  --accent-warning: #f59e0b;
+  /* Amber 500 */
+  --accent-error: #ef4444;
+  /* Red 500 */
 
   /* Borders */
   --border-subtle: rgba(148, 163, 184, 0.1);
@@ -30,7 +42,8 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   min-height: 100vh;
-  overflow: hidden; /* Prevent body scroll */
+  overflow: hidden;
+  /* Prevent body scroll */
 }
 
 /* Glassmorphism Utilities */
@@ -66,4 +79,3 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--surface-3);
 }
-

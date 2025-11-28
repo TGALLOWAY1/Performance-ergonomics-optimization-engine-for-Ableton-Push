@@ -7,11 +7,13 @@ import { Performance, NoteEvent } from '../types/performance';
 import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from './gridMapService';
 import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
+import { GridMapping } from '../types/layout';
 import { isReachPossible, isValidFingerOrder } from './feasibility';
 import {
   calculateMovementCost,
   calculateStretchPenalty,
   calculateDriftPenalty,
+  calculateCrossoverCost,
   getFingerBouncePenalty,
   recordNoteAssignment,
   clearNoteHistory,
@@ -27,6 +29,7 @@ export interface EngineDebugEvent {
   assignedHand: 'left' | 'right' | 'Unplayable';
   finger: FingerType | null;
   cost: number;
+  costBreakdown?: CostBreakdown;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
   row?: number;
   col?: number;
@@ -49,6 +52,19 @@ export interface FatigueMap {
 }
 
 /**
+ * Detailed breakdown of cost components.
+ */
+export interface CostBreakdown {
+  movement: number;
+  stretch: number;
+  drift: number;
+  bounce: number;
+  fatigue: number;
+  crossover: number;
+  total: number;
+}
+
+/**
  * Engine result containing score and debug events.
  */
 export interface EngineResult {
@@ -62,6 +78,8 @@ export interface EngineResult {
   fatigueMap: FatigueMap;
   /** Average drift distance from home positions */
   averageDrift: number;
+  /** Average cost metrics across the performance */
+  averageMetrics: CostBreakdown;
 }
 
 /**
@@ -72,25 +90,12 @@ interface FingerCandidate {
   finger: FingerType;
   handState: HandState;
   cost: number;
+  costBreakdown?: CostBreakdown;
 }
 
 /**
  * Helper to convert GridPosition to tuple format for compatibility.
  * @deprecated Use GridPosition directly instead of tuples
- */
-function gridPosToTuple(pos: GridPosition): [number, number] {
-  return [pos.row, pos.col];
-}
-
-/**
- * Helper to convert tuple to GridPosition.
- * @deprecated Use GridPosition directly instead of tuples
- */
-function tupleToGridPos(pos: [number, number]): GridPosition {
-  return { row: pos[0], col: pos[1] };
-}
-
-/**
  * Calculates the center of gravity for a hand state.
  * Returns GridPosition (object-based) instead of tuple.
  */
@@ -170,7 +175,7 @@ function createInitialHandState(): HandState {
  * @param hand - Which hand ('left' or 'right')
  * @returns Home position (object-based) for the hand
  */
-function getHomePosition(instrumentConfig: InstrumentConfig, hand: 'left' | 'right'): GridPosition {
+function getHomePosition(hand: 'left' | 'right'): GridPosition {
   // Base home position: bottom-left corner (row 0, col 0) = bottomLeftNote
   // Left hand: stays near bottom-left (row 0-1, col 0-2)
   // Right hand: offset to the right (row 0-1, col 4-6)
@@ -189,15 +194,22 @@ function getHomePosition(instrumentConfig: InstrumentConfig, hand: 'left' | 'rig
 /**
  * BiomechanicalSolver - Main solver class.
  */
+
 export class BiomechanicalSolver {
   private leftHandState: HandState;
   private rightHandState: HandState;
   private instrumentConfig: InstrumentConfig;
+  private gridMapping: GridMapping | null;
   private constants: EngineConstants;
   private lastEventTime: number;
 
-  constructor(instrumentConfig: InstrumentConfig, constants: EngineConstants = DEFAULT_ENGINE_CONSTANTS) {
+  constructor(
+    instrumentConfig: InstrumentConfig,
+    gridMapping: GridMapping | null = null,
+    constants: EngineConstants = DEFAULT_ENGINE_CONSTANTS
+  ) {
     this.instrumentConfig = instrumentConfig;
+    this.gridMapping = gridMapping;
     this.constants = constants;
     this.leftHandState = createInitialHandState();
     this.rightHandState = createInitialHandState();
@@ -205,6 +217,37 @@ export class BiomechanicalSolver {
 
     // Clear note history on initialization
     clearNoteHistory();
+  }
+
+  /**
+   * Gets the grid position for a MIDI note.
+   * Prioritizes the custom GridMapping if available.
+   * Falls back to algorithmic GridMapService if not found or no mapping provided.
+   */
+  private getNotePosition(noteNumber: number): GridPosition | null {
+    // 1. Try custom mapping first
+    if (this.gridMapping) {
+      // Search all cells for this note number
+      // This is O(64) but acceptable for this scale
+      for (const [key, voice] of Object.entries(this.gridMapping.cells)) {
+        if (voice.originalMidiNote === noteNumber) {
+          // key is "row,col"
+          const [rowStr, colStr] = key.split(',');
+          return {
+            row: parseInt(rowStr, 10),
+            col: parseInt(colStr, 10)
+          };
+        }
+      }
+    }
+
+    // 2. Fallback to algorithmic mapping
+    const tuple = GridMapService.noteToGrid(noteNumber, this.instrumentConfig);
+    if (tuple) {
+      return { row: tuple[0], col: tuple[1] };
+    }
+
+    return null;
   }
 
   /**
@@ -236,8 +279,7 @@ export class BiomechanicalSolver {
    */
   private generateCandidateFingers(
     handState: HandState,
-    targetPos: GridPosition,
-    hand: 'left' | 'right'
+    targetPos: GridPosition
   ): FingerType[] {
     const candidates: FingerType[] = [];
     const allFingers: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
@@ -264,14 +306,14 @@ export class BiomechanicalSolver {
    * @param targetPos - Target position (object-based)
    * @param currentTime - Current time in seconds
    * @param noteNumber - MIDI note number
-   * @returns Total cost for this candidate
+   * @returns Cost breakdown for this candidate
    */
   private calculateTotalCost(
     candidate: FingerCandidate,
     targetPos: GridPosition,
     currentTime: number,
     noteNumber: number
-  ): number {
+  ): CostBreakdown {
     const { hand, finger, handState } = candidate;
     const currentPos = handState.fingers[finger].currentGridPos;
 
@@ -281,8 +323,8 @@ export class BiomechanicalSolver {
     // 2. Stretch penalty
     const stretchPenalty = calculateStretchPenalty(handState, targetPos, finger, this.constants);
 
-    // 3. Drift penalty (distance from home)
-    const homePos = getHomePosition(this.instrumentConfig, hand);
+    // 3. Drift penalty (distance from home position)
+    const homePos = getHomePosition(hand);
     const driftPenalty = calculateDriftPenalty(handState, homePos, this.constants);
 
     // 4. Finger bounce penalty (stickiness heuristic)
@@ -291,8 +333,21 @@ export class BiomechanicalSolver {
     // 5. Fatigue penalty (add fatigue level as cost)
     const fatiguePenalty = handState.fingers[finger].fatigueLevel;
 
+    // 6. Crossover penalty (soft constraint for geometric violations)
+    const crossoverPenalty = calculateCrossoverCost(handState, targetPos, finger, hand, this.constants);
+
     // Total cost
-    return movementCost + stretchPenalty + driftPenalty + bouncePenalty + fatiguePenalty;
+    const total = movementCost + stretchPenalty + driftPenalty + bouncePenalty + fatiguePenalty + crossoverPenalty;
+
+    return {
+      movement: movementCost,
+      stretch: stretchPenalty,
+      drift: driftPenalty,
+      bounce: bouncePenalty,
+      fatigue: fatiguePenalty,
+      crossover: crossoverPenalty,
+      total
+    };
   }
 
   /**
@@ -308,19 +363,17 @@ export class BiomechanicalSolver {
   private calculateFutureCost(
     currentCandidate: FingerCandidate,
     currentTargetPos: GridPosition,
-    nextNote: NoteEvent | null,
-    currentTime: number
+    nextNote: NoteEvent | null
   ): number {
     if (!nextNote) {
       return 0; // No next note, no future cost
     }
 
     // Get target position for next note
-    const nextTargetTuple = GridMapService.noteToGrid(nextNote.noteNumber, this.instrumentConfig);
-    if (!nextTargetTuple) {
+    const nextTargetPos = this.getNotePosition(nextNote.noteNumber);
+    if (!nextTargetPos) {
       return 0; // Next note is unmapped, no penalty
     }
-    const nextTargetPos: GridPosition = { row: nextTargetTuple[0], col: nextTargetTuple[1] };
 
     // Create temporary hand state with current assignment applied
     const tempHandState: HandState = {
@@ -338,8 +391,7 @@ export class BiomechanicalSolver {
     // Check if next note would be reachable/feasible with this hand state
     const nextCandidates = this.generateCandidateFingers(
       tempHandState,
-      nextTargetPos,
-      currentCandidate.hand
+      nextTargetPos
     );
 
     // If no fingers can reach next note, add penalty
@@ -373,13 +425,13 @@ export class BiomechanicalSolver {
         handState: tempHandState,
         cost: 0
       };
-      const nextCost = this.calculateTotalCost(
+      const nextCostBreakdown = this.calculateTotalCost(
         nextCandidate,
         nextTargetPos,
         nextNote.startTime,
         nextNote.noteNumber
       );
-      minNextCost = Math.min(minNextCost, nextCost);
+      minNextCost = Math.min(minNextCost, nextCostBreakdown.total);
     }
 
     // If next note would be expensive or impossible, add penalty
@@ -443,20 +495,57 @@ export class BiomechanicalSolver {
   }
 
   /**
+   * Updates fatigue levels for all fingers based on time passed.
+   * Fatigue decays over time (recovery).
+   * 
+   * @param timeDelta - Time passed since last event in seconds
+   */
+  private updateFatigue(timeDelta: number): void {
+    const recoveryRate = this.constants.fatigueRecoveryRate || 0.5; // Default recovery rate
+
+    // Update left hand
+    Object.values(this.leftHandState.fingers).forEach(fingerState => {
+      fingerState.fatigueLevel = Math.max(0, fingerState.fatigueLevel - (timeDelta * recoveryRate));
+    });
+
+    // Update right hand
+    Object.values(this.rightHandState.fingers).forEach(fingerState => {
+      fingerState.fatigueLevel = Math.max(0, fingerState.fatigueLevel - (timeDelta * recoveryRate));
+    });
+  }
+
+  /**
    * Solves the performance and assigns fingers to notes.
    * 
-   * @param performance - The performance to solve
-   * @returns Engine result with assignments and scores
+   * @param performance - The performance data to analyze
+   * @param manualAssignments - Optional map of event index to forced finger assignment
+   * @returns EngineResult with score and debug events
    */
-  solve(performance: Performance): EngineResult {
+  public solve(
+    performance: Performance,
+    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+  ): EngineResult {
     const sortedEvents = [...performance.events].sort((a, b) => a.startTime - b.startTime);
-    const debugEvents: EngineDebugEvent[] = [];
+
     let unplayableCount = 0;
     let hardCount = 0;
+    const debugEvents: EngineDebugEvent[] = [];
+
+    // Reset hand states
+    this.leftHandState = createInitialHandState();
+    this.rightHandState = createInitialHandState();
+    this.lastEventTime = -1;
+
+    // Track usage stats
+    // const fingerUsageStats: FingerUsageStats = {}; // REMOVED: Redeclared
+
+    // Track drift
+    // let totalDrift = 0; // REMOVED: Redeclared
+    // let driftCount = 0; // REMOVED: Redeclared
 
     // Initialize home positions
-    const leftHome = getHomePosition(this.instrumentConfig, 'left');
-    const rightHome = getHomePosition(this.instrumentConfig, 'right');
+    const leftHome = getHomePosition('left');
+    const rightHome = getHomePosition('right');
     // Set initial center of gravity to home positions
     this.leftHandState.centerOfGravity = leftHome;
     this.rightHandState.centerOfGravity = rightHome;
@@ -467,8 +556,8 @@ export class BiomechanicalSolver {
       const nextNote = i < sortedEvents.length - 1 ? sortedEvents[i + 1] : null;
 
       // Get target position for this note
-      const targetTuple = GridMapService.noteToGrid(note.noteNumber, this.instrumentConfig);
-      if (!targetTuple) {
+      const targetPos = this.getNotePosition(note.noteNumber);
+      if (!targetPos) {
         // Note is outside grid, mark as unplayable
         unplayableCount++;
         debugEvents.push({
@@ -481,62 +570,100 @@ export class BiomechanicalSolver {
         });
         continue;
       }
-      const targetPos: GridPosition = { row: targetTuple[0], col: targetTuple[1] };
 
       // Calculate time delta
       const timeDelta = this.lastEventTime >= 0 ? note.startTime - this.lastEventTime : 0;
 
-      // Identify candidate hands
-      const candidateHands = this.identifyCandidateHands(targetPos);
+      // Update fatigue based on time passed
+      this.updateFatigue(timeDelta);
 
-      // Generate and evaluate candidates
-      const candidates: FingerCandidate[] = [];
+      // Check for manual assignment
+      let candidates: FingerCandidate[] = [];
+      const manualOverride = manualAssignments ? manualAssignments[i] : undefined;
 
-      for (const hand of candidateHands) {
-        const handState = hand === 'left' ? this.leftHandState : this.rightHandState;
+      if (manualOverride) {
+        // FORCE the assigned finger
+        const handState = manualOverride.hand === 'left' ? this.leftHandState : this.rightHandState;
 
-        // Generate candidate fingers
-        const candidateFingers = this.generateCandidateFingers(handState, targetPos, hand);
+        // Create a temporary candidate for cost calculation
+        const tempCandidate: FingerCandidate = {
+          hand: manualOverride.hand,
+          finger: manualOverride.finger,
+          handState: handState,
+          cost: 0 // Will be calculated
+        };
 
-        for (const finger of candidateFingers) {
-          // Filter by feasibility: check finger ordering
-          const tempHandState: HandState = {
-            ...handState,
-            fingers: {
-              ...handState.fingers,
-              [finger]: {
-                currentGridPos: targetPos,
-                fatigueLevel: handState.fingers[finger].fatigueLevel
+        // Calculate cost for this forced assignment
+        // We still want to know the cost even if it's forced
+        const baseCostBreakdown = this.calculateTotalCost(
+          tempCandidate,
+          targetPos,
+          note.startTime,
+          note.noteNumber
+        );
+
+        // Add future cost penalty (lookahead)
+        const futureCost = this.calculateFutureCost(tempCandidate, targetPos, nextNote);
+
+        candidates = [{
+          hand: manualOverride.hand,
+          finger: manualOverride.finger,
+          handState: handState, // Note: This is current state, not updated state yet
+          cost: baseCostBreakdown.total + futureCost,
+          costBreakdown: baseCostBreakdown
+        }];
+      } else {
+        // Generate candidates normally
+        // Identify candidate hands
+        const candidateHands = this.identifyCandidateHands(targetPos);
+
+        for (const hand of candidateHands) {
+          const handState = hand === 'left' ? this.leftHandState : this.rightHandState;
+
+          // Generate candidate fingers
+          const candidateFingers = this.generateCandidateFingers(handState, targetPos);
+
+          for (const finger of candidateFingers) {
+            // Filter by feasibility: check finger ordering
+            const tempHandState: HandState = {
+              ...handState,
+              fingers: {
+                ...handState.fingers,
+                [finger]: {
+                  currentGridPos: targetPos,
+                  fatigueLevel: handState.fingers[finger].fatigueLevel
+                }
               }
+            };
+            updateHandStateMetrics(tempHandState);
+
+            // Check if finger order is valid
+            if (!isValidFingerOrder(tempHandState, { finger, pos: targetPos }, hand)) {
+              continue; // Skip invalid assignments
             }
-          };
-          updateHandStateMetrics(tempHandState);
 
-          // Check if finger order is valid
-          if (!isValidFingerOrder(tempHandState, { finger, pos: targetPos }, hand)) {
-            continue; // Skip invalid assignments
+            // Calculate costs
+            const candidate: FingerCandidate = {
+              hand,
+              finger,
+              handState,
+              cost: 0
+            };
+
+            const baseCostBreakdown = this.calculateTotalCost(
+              candidate,
+              targetPos,
+              note.startTime,
+              note.noteNumber
+            );
+
+            // Add future cost penalty (lookahead)
+            const futureCost = this.calculateFutureCost(candidate, targetPos, nextNote);
+
+            candidate.cost = baseCostBreakdown.total + futureCost;
+            candidate.costBreakdown = baseCostBreakdown;
+            candidates.push(candidate);
           }
-
-          // Calculate costs
-          const candidate: FingerCandidate = {
-            hand,
-            finger,
-            handState,
-            cost: 0
-          };
-
-          const baseCost = this.calculateTotalCost(
-            candidate,
-            targetPos,
-            note.startTime,
-            note.noteNumber
-          );
-
-          // Add future cost penalty (lookahead)
-          const futureCost = this.calculateFutureCost(candidate, targetPos, nextNote, note.startTime);
-
-          candidate.cost = baseCost + futureCost;
-          candidates.push(candidate);
         }
       }
 
@@ -581,6 +708,7 @@ export class BiomechanicalSolver {
         assignedHand: winner.hand,
         finger: winner.finger,
         cost: winner.cost,
+        costBreakdown: winner.costBreakdown,
         difficulty,
         row: targetPos.row,
         col: targetPos.col,
@@ -634,6 +762,49 @@ export class BiomechanicalSolver {
 
     const averageDrift = driftCount > 0 ? totalDrift / driftCount : 0;
 
+    // Calculate average metrics
+    const totalMetrics: CostBreakdown = {
+      movement: 0,
+      stretch: 0,
+      drift: 0,
+      bounce: 0,
+      fatigue: 0,
+      crossover: 0,
+      total: 0
+    };
+    let metricsCount = 0;
+
+    debugEvents.forEach(event => {
+      if (event.costBreakdown) {
+        totalMetrics.movement += event.costBreakdown.movement;
+        totalMetrics.stretch += event.costBreakdown.stretch;
+        totalMetrics.drift += event.costBreakdown.drift;
+        totalMetrics.bounce += event.costBreakdown.bounce;
+        totalMetrics.fatigue += event.costBreakdown.fatigue;
+        totalMetrics.crossover += event.costBreakdown.crossover;
+        totalMetrics.total += event.costBreakdown.total;
+        metricsCount++;
+      }
+    });
+
+    const averageMetrics: CostBreakdown = metricsCount > 0 ? {
+      movement: totalMetrics.movement / metricsCount,
+      stretch: totalMetrics.stretch / metricsCount,
+      drift: totalMetrics.drift / metricsCount,
+      bounce: totalMetrics.bounce / metricsCount,
+      fatigue: totalMetrics.fatigue / metricsCount,
+      crossover: totalMetrics.crossover / metricsCount,
+      total: totalMetrics.total / metricsCount
+    } : {
+      movement: 0,
+      stretch: 0,
+      drift: 0,
+      bounce: 0,
+      fatigue: 0,
+      crossover: 0,
+      total: 0
+    };
+
     return {
       score,
       unplayableCount,
@@ -642,6 +813,7 @@ export class BiomechanicalSolver {
       fingerUsageStats,
       fatigueMap,
       averageDrift,
+      averageMetrics,
     };
   }
 }

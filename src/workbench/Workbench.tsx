@@ -4,13 +4,14 @@ import { useProject } from '../context/ProjectContext';
 import { LayoutDesigner } from './LayoutDesigner';
 import { GridMapping, Voice } from '../types/layout';
 import { InstrumentConfig } from '../types/performance';
-import { useProjectHistory } from '../hooks/useProjectHistory';
+import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
-import { BiomechanicalSolver, EngineResult } from '../engine/core';
+import { BiomechanicalSolver } from '../engine/core';
+import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
 import { AnalysisPanel } from './AnalysisPanel';
-
+import { ThemeToggle } from '../components/ThemeToggle';
 
 
 export const Workbench: React.FC = () => {
@@ -63,7 +64,6 @@ export const Workbench: React.FC = () => {
 
   // View Settings state
   const [showNoteLabels, setShowNoteLabels] = useState(false);
-  const [viewAllSteps, setViewAllSteps] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
 
   // Engine state
@@ -186,7 +186,7 @@ export const Workbench: React.FC = () => {
       console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
 
       // Verify engine works with the new data
-      const solver = new BiomechanicalSolver(projectData.instrumentConfig);
+      const solver = new BiomechanicalSolver(projectData.instrumentConfig, projectData.gridMapping);
       const engineResult = solver.solve(projectData.performance);
       console.log('[Workbench] Engine verification result:', {
         score: engineResult.score,
@@ -239,10 +239,25 @@ export const Workbench: React.FC = () => {
     // Debounce engine execution (300ms) to avoid crashing browser during rapid drag operations
     const timer = setTimeout(() => {
       try {
-        // Run solver with project instrument config
+        // Run solver with project instrument config and active mapping
         if (!filteredPerformance) return;
-        const solver = new BiomechanicalSolver(projectState.instrumentConfig);
-        const result = solver.solve(filteredPerformance);
+
+        // Get manual assignments for current layout
+        const currentLayoutId = projectState.activeLayoutId;
+        const manualAssignments = currentLayoutId && projectState.manualAssignments
+          ? projectState.manualAssignments[currentLayoutId]
+          : undefined;
+
+        // Convert string keys to numbers for the engine
+        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
+        if (manualAssignments) {
+          Object.entries(manualAssignments).forEach(([key, value]) => {
+            parsedAssignments[parseInt(key, 10)] = value;
+          });
+        }
+
+        const solver = new BiomechanicalSolver(projectState.instrumentConfig, activeMapping);
+        const result = solver.solve(filteredPerformance, parsedAssignments);
 
         // DEBUG: Log engine result to verify finger assignments
         console.log('[Workbench] Engine result generated:', {
@@ -466,23 +481,27 @@ export const Workbench: React.FC = () => {
     setActiveMappingId(newMapping.id);
   };
 
-  const handleScanMidi = () => {
-    // Stub for now - will be implemented later
-    console.log('Scan MIDI clicked');
-    // For testing, add a dummy sound
-    const dummySound: Voice = {
-      id: `sound-${Date.now()}`,
-      name: `Sound ${projectState.parkedSounds.length + 1}`,
-      sourceType: 'midi_track',
-      sourceFile: '',
-      originalMidiNote: 36 + projectState.parkedSounds.length,
-      color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
-    };
-    setProjectState(prev => ({
-      ...prev,
-      parkedSounds: [...prev.parkedSounds, dummySound],
-    }));
+  const handleAssignmentChange = (index: number, hand: 'left' | 'right', finger: FingerType) => {
+    if (!projectState.activeLayoutId) return;
+
+    setProjectState(prevState => {
+      const layoutId = prevState.activeLayoutId!;
+      const currentLayoutAssignments = prevState.manualAssignments?.[layoutId] || {};
+
+      return {
+        ...prevState,
+        manualAssignments: {
+          ...prevState.manualAssignments,
+          [layoutId]: {
+            ...currentLayoutAssignments,
+            [index]: { hand, finger }
+          }
+        }
+      };
+    });
   };
+
+
 
   const handleAddSound = (sound: Voice) => {
     setProjectState({
@@ -630,23 +649,23 @@ export const Workbench: React.FC = () => {
   const loadProjectInputRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-900 text-white overflow-hidden font-sans selection:bg-blue-500/30">
+    <div className="h-screen w-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] overflow-hidden font-[family-name:var(--font-ui)] selection:bg-blue-500/30">
       {/* Header (Top) - Premium Glassmorphism Look */}
-      <div className="flex-none h-16 glass-panel-strong border-b border-slate-700/50 flex items-center justify-between px-6 z-50 relative">
+      <div className="flex-none h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] backdrop-blur-md flex items-center justify-between px-6 z-50 relative shadow-sm">
         {/* Left: App Title & Branding */}
         <div className="flex items-center gap-4">
           <div className="flex flex-col">
-            <h1 className="text-xl font-bold text-slate-100 tracking-tight">Performability Engine</h1>
-            <span className="text-[10px] text-slate-400 font-medium tracking-wider uppercase">Section Layout Optimizer</span>
+            <h1 className="text-xl font-bold tracking-tight">Performability Engine</h1>
+            <span className="text-[10px] text-[var(--text-secondary)] font-medium tracking-wider uppercase">Section Layout Optimizer</span>
           </div>
 
           {/* Divider */}
-          <div className="h-8 w-px bg-slate-700/50 mx-2" />
+          <div className="h-8 w-px bg-[var(--border-subtle)] mx-2" />
 
           {/* Song Section Selector (Mockup Style) */}
-          <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg p-1 border border-slate-700/50">
-            <span className="text-xs text-slate-400 pl-2">Song Section:</span>
-            <select className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1 pr-2">
+          <div className="flex items-center gap-2 bg-[var(--bg-input)] rounded-[var(--radius-sm)] p-1 border border-[var(--border-subtle)]">
+            <span className="text-xs text-[var(--text-secondary)] pl-2">Song Section:</span>
+            <select className="bg-transparent text-sm font-semibold text-[var(--text-primary)] focus:outline-none cursor-pointer py-1 pr-2">
               <option>DROP A</option>
               <option>DROP B</option>
               <option>VERSE 1</option>
@@ -655,8 +674,18 @@ export const Workbench: React.FC = () => {
           </div>
 
           <Link
+            to="/"
+            className="ml-4 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            Dashboard
+          </Link>
+
+          <Link
             to="/timeline"
-            className="ml-4 px-3 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg border border-slate-600 transition-all"
+            className="ml-2 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
           >
             Timeline View
           </Link>
@@ -665,36 +694,39 @@ export const Workbench: React.FC = () => {
         {/* Right: Global Settings & Actions */}
         <div className="flex items-center gap-6">
           {/* Status Indicators */}
-          <div className="flex items-center gap-4 text-xs font-medium text-slate-500">
+          <div className="flex items-center gap-4 text-xs font-medium text-[var(--text-secondary)]">
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
               <span>Auto-Map Enabled</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
               <span>Ergonomic Scoring: ON</span>
             </div>
           </div>
 
           {/* Divider */}
-          <div className="h-6 w-px bg-slate-700/50" />
+          <div className="h-6 w-px bg-[var(--border-subtle)]" />
+
+          {/* Theme Toggle */}
+          <ThemeToggle />
 
           {/* Undo/Redo & Save/Load */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center bg-slate-800/50 rounded-lg border border-slate-700/50 p-0.5">
+            <div className="flex items-center bg-[var(--bg-input)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] p-0.5">
               <button
                 onClick={undo}
                 disabled={!canUndo}
-                className="p-2 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Undo"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
               </button>
-              <div className="w-px h-4 bg-slate-700/50"></div>
+              <div className="w-px h-4 bg-[var(--border-subtle)]"></div>
               <button
                 onClick={redo}
                 disabled={!canRedo}
-                className="p-2 text-slate-400 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Redo"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
@@ -703,13 +735,13 @@ export const Workbench: React.FC = () => {
 
             <button
               onClick={handleSaveProject}
-              className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-900/20 transition-all"
+              className="px-4 py-2 text-xs font-semibold bg-[var(--finger-L1)] hover:brightness-110 text-white rounded-[var(--radius-sm)] shadow-lg transition-all"
             >
               Save Project
             </button>
             <button
               onClick={() => loadProjectInputRef.current?.click()}
-              className="px-4 py-2 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg border border-slate-600 transition-all"
+              className="px-4 py-2 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
             >
               Load
             </button>
@@ -757,7 +789,14 @@ export const Workbench: React.FC = () => {
           </div>
 
           {/* Grid Container */}
-          <div className="flex-1 overflow-hidden flex items-center justify-center bg-slate-900/50">
+          <div className="flex-1 overflow-hidden flex items-center justify-center bg-[var(--bg-app)] relative">
+            {/* Grid Background Pattern */}
+            <div className="absolute inset-0 opacity-10 pointer-events-none"
+              style={{
+                backgroundImage: `radial-gradient(circle at 1px 1px, var(--text-secondary) 1px, transparent 0)`,
+                backgroundSize: '24px 24px'
+              }}
+            />
             <div className="w-full h-full flex flex-col">
               <LayoutDesigner
                 parkedSounds={projectState.parkedSounds}
@@ -778,7 +817,6 @@ export const Workbench: React.FC = () => {
                 onSetActiveMappingId={setActiveMappingId}
                 activeLayout={activeLayout}
                 showNoteLabels={showNoteLabels}
-                viewAllSteps={viewAllSteps}
                 showHeatmap={showHeatmap}
                 engineResult={engineResult}
               />
@@ -811,6 +849,7 @@ export const Workbench: React.FC = () => {
             engineResult={engineResult}
             activeMapping={activeMapping}
             performance={filteredPerformance}
+            onAssignmentChange={handleAssignmentChange}
           />
         </div>
       </div>

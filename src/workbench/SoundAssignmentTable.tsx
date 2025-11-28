@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { GridMapping, parseCellKey } from '../types/layout';
+import { GridMapping, parseCellKey, Voice } from '../types/layout';
 import { EngineResult } from '../engine/core';
 import { FingerType } from '../engine/models';
 
 interface SoundAssignmentTableProps {
     activeMapping: GridMapping | null;
     engineResult: EngineResult | null;
+    onUpdateSound?: (cellKey: string, updates: Partial<Voice>) => void;
 }
 
 /**
@@ -27,12 +28,96 @@ function formatHandFinger(hand: 'left' | 'right' | 'Unplayable', finger: FingerT
 }
 
 /**
+ * Editable Cell Component for Sound Name
+ */
+const EditableSoundName: React.FC<{
+    name: string;
+    color: string;
+    onSave: (newName: string) => void;
+}> = ({ name, color, onSave }) => {
+    const [isEditing, setIsEditing] = React.useState(false);
+    const [editName, setEditName] = React.useState(name);
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    React.useEffect(() => {
+        setEditName(name);
+    }, [name]);
+
+    React.useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            inputRef.current.select();
+        }
+    }, [isEditing]);
+
+    const handleSave = () => {
+        if (editName.trim() !== '' && editName !== name) {
+            onSave(editName);
+        } else {
+            setEditName(name); // Revert if empty or unchanged
+        }
+        setIsEditing(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSave();
+        } else if (e.key === 'Escape') {
+            setEditName(name);
+            setIsEditing(false);
+        }
+        e.stopPropagation();
+    };
+
+    if (isEditing) {
+        return (
+            <div className="flex items-center gap-2">
+                <div
+                    className="w-3 h-3 rounded-sm flex-shrink-0 border border-slate-600"
+                    style={{ backgroundColor: color }}
+                />
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onBlur={handleSave}
+                    onKeyDown={handleKeyDown}
+                    className="w-full px-1 py-0.5 bg-slate-900 border border-blue-500 rounded text-slate-200 text-xs focus:outline-none"
+                    onClick={(e) => e.stopPropagation()}
+                />
+            </div>
+        );
+    }
+
+    return (
+        <div
+            className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/50 rounded px-1 -ml-1 py-0.5"
+            onDoubleClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+            }}
+            title="Double-click to rename"
+        >
+            <div
+                className="w-3 h-3 rounded-sm flex-shrink-0 border border-slate-600"
+                style={{ backgroundColor: color }}
+            />
+            <span className="text-slate-200 truncate">
+                {name}
+            </span>
+        </div>
+    );
+};
+
+/**
  * SoundAssignmentTable: Displays a table showing which sounds are assigned to which pads
  * and which fingers are assigned to play them (based on engine analysis).
  */
 export const SoundAssignmentTable: React.FC<SoundAssignmentTableProps> = ({
     activeMapping,
     engineResult,
+    onUpdateSound,
 }) => {
     // Build the assignment data by combining mapping and engine result
     const assignmentData = useMemo(() => {
@@ -96,6 +181,7 @@ export const SoundAssignmentTable: React.FC<SoundAssignmentTableProps> = ({
             }
 
             return {
+                cellKey, // Keep key for updates
                 soundName: sound.name,
                 soundColor: sound.color,
                 padLocation: `[${parsed.row},${parsed.col}]`,
@@ -167,16 +253,15 @@ export const SoundAssignmentTable: React.FC<SoundAssignmentTableProps> = ({
                             >
                                 {/* Sound Name with color indicator */}
                                 <td className="px-3 py-2">
-                                    <div className="flex items-center gap-2">
-                                        <div
-                                            className="w-3 h-3 rounded-sm flex-shrink-0 border border-slate-600"
-                                            style={{ backgroundColor: row.soundColor }}
-                                            title={row.soundColor}
-                                        />
-                                        <span className="text-slate-200 truncate" title={row.soundName}>
-                                            {row.soundName}
-                                        </span>
-                                    </div>
+                                    <EditableSoundName
+                                        name={row.soundName}
+                                        color={row.soundColor || '#6366f1'}
+                                        onSave={(newName) => {
+                                            if (onUpdateSound) {
+                                                onUpdateSound(row.cellKey, { name: newName });
+                                            }
+                                        }}
+                                    />
                                 </td>
 
                                 {/* Pad Location */}

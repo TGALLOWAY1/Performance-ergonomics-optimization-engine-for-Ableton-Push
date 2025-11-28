@@ -1,7 +1,7 @@
-
 import { Performance } from './performance';
 import { Voice, GridMapping } from './layout';
 import { InstrumentConfig } from '../types/performance';
+import { FingerType } from '../engine/models';
 
 export interface LayoutSnapshot {
   id: string;
@@ -30,4 +30,32 @@ export interface ProjectState {
   mappings: GridMapping[];
   /** Voice Manager: Array of note numbers (Cells) that should be ignored/hidden in analysis and grid view. Defaults to empty array. */
   ignoredNoteNumbers?: number[];
+
+  /** 
+   * Manual finger assignment overrides.
+   * Key 1: layoutId
+   * Key 2: eventIndex (stringified number)
+   * Value: { hand: 'left' | 'right', finger: FingerType }
+   */
+  manualAssignments?: Record<string, Record<string, { hand: 'left' | 'right', finger: FingerType }>>;
 }
+
+export const createInitialProjectState = (): ProjectState => ({
+  layouts: [],
+  instrumentConfigs: [],
+  sectionMaps: [],
+  instrumentConfig: {
+    id: 'default-config',
+    name: 'Default 64-Pad Layout',
+    rows: 8,
+    cols: 8,
+    bottomLeftNote: 36,
+    layoutMode: 'drum_64',
+  },
+  activeLayoutId: null,
+  projectTempo: 120,
+  parkedSounds: [],
+  mappings: [],
+  ignoredNoteNumbers: [],
+  manualAssignments: {},
+});
