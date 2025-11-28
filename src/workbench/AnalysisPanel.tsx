@@ -3,17 +3,21 @@ import { EngineResult } from '../engine/core';
 import { GridMapping } from '../types/layout';
 import { SoundAssignmentTable } from './SoundAssignmentTable';
 import { Performance } from '../types/performance';
+import { EventLogTable } from './EventLogTable';
+import { FingerType } from '../engine/models';
 
 interface AnalysisPanelProps {
     engineResult: EngineResult | null;
     activeMapping: GridMapping | null;
     performance: Performance | null;
+    onAssignmentChange: (index: number, hand: 'left' | 'right', finger: FingerType) => void;
 }
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     engineResult,
     activeMapping,
     performance,
+    onAssignmentChange,
 }) => {
     // Calculate summary stats
     const stats = useMemo(() => {
@@ -43,71 +47,115 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     }, [engineResult, performance]);
 
     return (
-        <div className="h-full flex flex-col bg-slate-900/50 backdrop-blur-md border-l border-white/10">
+        <div className="h-full flex flex-col bg-[var(--bg-panel)] border-l border-[var(--border-subtle)] backdrop-blur-md">
             {/* Header */}
-            <div className="flex-none h-12 border-b border-white/10 flex items-center px-4 bg-white/5">
-                <h2 className="text-sm font-semibold text-white/90 tracking-wide uppercase">Analysis & Insights</h2>
+            <div className="flex-none h-12 border-b border-[var(--border-subtle)] flex items-center px-4 bg-[var(--bg-card)]">
+                <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-wide uppercase">Analysis & Insights</h2>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6 flex flex-col">
 
                 {/* Performance Summary Card */}
-                <div className="glass-panel p-4 rounded-xl space-y-4">
-                    <h3 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-2">Performance Summary</h3>
+                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] space-y-4 flex-none border border-[var(--border-subtle)] shadow-sm">
+                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Performance Summary</h3>
 
                     {stats ? (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-slate-800/50 rounded-lg p-3 border border-white/5">
-                                <div className="text-[10px] text-slate-400 uppercase">Ergonomic Score</div>
-                                <div className="text-2xl font-light text-white mt-1">{stats.score}</div>
-                            </div>
-                            <div className="bg-slate-800/50 rounded-lg p-3 border border-white/5">
-                                <div className="text-[10px] text-slate-400 uppercase">Total Events</div>
-                                <div className="text-2xl font-light text-white mt-1">{stats.eventCount}</div>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Ergonomic Score</div>
+                                    <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.score}</div>
+                                </div>
+                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Total Events</div>
+                                    <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.eventCount}</div>
+                                </div>
+
+                                {/* Hand Balance Visualization */}
+                                <div className="col-span-2 bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                    <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] uppercase mb-2">
+                                        <span>Left Hand</span>
+                                        <span>Hand Balance</span>
+                                        <span>Right Hand</span>
+                                    </div>
+                                    <div className="h-2 bg-[var(--bg-app)] rounded-full overflow-hidden flex">
+                                        <div
+                                            className="h-full bg-[var(--finger-L2)] transition-all duration-500"
+                                            style={{ width: `${stats.handBalance.left}%` }}
+                                        />
+                                        <div
+                                            className="h-full bg-[var(--finger-R2)] transition-all duration-500"
+                                            style={{ width: `${stats.handBalance.right}%` }}
+                                        />
+                                    </div>
+                                    <div className="flex justify-between text-xs text-[var(--text-primary)] mt-1 font-mono">
+                                        <span>{stats.handBalance.left}%</span>
+                                        <span>{stats.handBalance.right}%</span>
+                                    </div>
+                                </div>
                             </div>
 
-                            {/* Hand Balance Visualization */}
-                            <div className="col-span-2 bg-slate-800/50 rounded-lg p-3 border border-white/5">
-                                <div className="flex justify-between text-[10px] text-slate-400 uppercase mb-2">
-                                    <span>Left Hand</span>
-                                    <span>Hand Balance</span>
-                                    <span>Right Hand</span>
+                            {/* Cost Metrics Breakdown */}
+                            {engineResult && engineResult.averageMetrics && (
+                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase mb-3">Average Cost Metrics</div>
+                                    <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Movement</span>
+                                            <span className="text-xs font-mono text-[var(--finger-L3)]">{engineResult.averageMetrics.movement.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Stretch</span>
+                                            <span className="text-xs font-mono text-[var(--finger-L5)]">{engineResult.averageMetrics.stretch.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Drift</span>
+                                            <span className="text-xs font-mono text-[var(--finger-R3)]">{engineResult.averageMetrics.drift.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Bounce</span>
+                                            <span className="text-xs font-mono text-[var(--text-warning)]">{engineResult.averageMetrics.bounce.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Fatigue</span>
+                                            <span className="text-xs font-mono text-[var(--finger-R4)]">{engineResult.averageMetrics.fatigue.toFixed(1)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-[var(--text-secondary)]">Crossover</span>
+                                            <span className="text-xs font-mono text-[var(--finger-L4)]">{engineResult.averageMetrics.crossover.toFixed(1)}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="h-2 bg-slate-700 rounded-full overflow-hidden flex">
-                                    <div
-                                        className="h-full bg-blue-500 transition-all duration-500"
-                                        style={{ width: `${stats.handBalance.left}%` }}
-                                    />
-                                    <div
-                                        className="h-full bg-rose-500 transition-all duration-500"
-                                        style={{ width: `${stats.handBalance.right}%` }}
-                                    />
-                                </div>
-                                <div className="flex justify-between text-xs text-white mt-1 font-mono">
-                                    <span>{stats.handBalance.left}%</span>
-                                    <span>{stats.handBalance.right}%</span>
-                                </div>
-                            </div>
+                            )}
                         </div>
                     ) : (
-                        <div className="text-center py-4 text-slate-500 text-sm italic">
+                        <div className="text-center py-4 text-[var(--text-tertiary)] text-sm italic">
                             No analysis data available.
                         </div>
                     )}
                 </div>
 
-                {/* Event Transition View (Placeholder for now, can be expanded) */}
-                <div className="glass-panel p-4 rounded-xl">
-                    <h3 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Event Transitions</h3>
-                    <div className="h-32 bg-slate-800/50 rounded-lg border border-white/5 flex items-center justify-center text-slate-500 text-xs">
-                        Transition Graph Visualization Coming Soon
+                {/* Event Log & Manual Assignments */}
+                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex-none h-[300px] flex flex-col border border-[var(--border-subtle)] shadow-sm">
+                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Event Log</h3>
+                    <div className="flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-input)]">
+                        {engineResult ? (
+                            <EventLogTable
+                                events={engineResult.debugEvents}
+                                onAssignmentChange={onAssignmentChange}
+                            />
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs italic">
+                                No events to display
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* Sound Assignments */}
-                <div className="glass-panel p-4 rounded-xl flex flex-col h-[400px]">
-                    <h3 className="text-xs font-bold text-white/60 uppercase tracking-wider mb-3">Finger Assignments</h3>
-                    <div className="flex-1 overflow-hidden rounded-lg border border-white/5 bg-slate-800/30">
+                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex flex-col flex-1 min-h-[300px] border border-[var(--border-subtle)] shadow-sm">
+                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Finger Assignments</h3>
+                    <div className="flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-input)]">
                         <SoundAssignmentTable
                             activeMapping={activeMapping}
                             engineResult={engineResult}

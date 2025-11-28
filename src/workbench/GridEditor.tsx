@@ -18,6 +18,8 @@ import { SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { GridPattern } from '../types/gridPattern';
 import { EngineResult, EngineDebugEvent } from '../engine/core';
+import { Pad } from '../components/Pad';
+import { FingerType } from '../engine/models';
 
 type DifficultyLabel = 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
 import { formatFinger, normalizeHand } from '../utils/formatUtils';
@@ -118,16 +120,16 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   // Compute reachability map if active
   const reachabilityMap = reachabilityConfig
     ? getReachabilityMap(
-        reachabilityConfig.anchorPos,
-        reachabilityConfig.anchorFinger,
-        reachabilityConfig.targetFinger
-      )
+      reachabilityConfig.anchorPos,
+      reachabilityConfig.anchorFinger,
+      reachabilityConfig.targetFinger
+    )
     : null;
 
   // W4: Calculate per-Pad Cell (MIDI note) count from activeLayout.performance
   const padNoteCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    
+
     if (!activeLayout || !activeLayout.performance || !activeSection) {
       return counts;
     }
@@ -136,7 +138,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       // Use activeMapping if available, otherwise use InstrumentConfig
       let row: number | null = null;
       let col: number | null = null;
-      
+
       if (activeMapping) {
         const pos = getPositionForMidi(event.noteNumber, activeMapping);
         if (pos) {
@@ -150,7 +152,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           col = pos[1];
         }
       }
-      
+
       if (row !== null && col !== null) {
         const key = `${row},${col}`;
         counts[key] = (counts[key] || 0) + 1;
@@ -188,7 +190,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   // Handle selecting a finger for reachability visualization
   const handleShowReach = (hand: 'L' | 'R', finger: FingerID) => {
     if (!contextMenu) return;
-    
+
     const anchorPos: GridPosition = {
       row: contextMenu.row,
       col: contextMenu.col,
@@ -241,12 +243,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     } else {
       noteNumber = activeSection ? GridMapService.getNoteForPosition(row, col, activeSection.instrumentConfig) : null;
     }
-    
+
     if (noteNumber === null) return null;
-    
+
     // Filter events for this specific note
     const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
-    
+
     if (noteEvents.length === 0) return null;
 
     if (viewAllSteps) {
@@ -263,16 +265,16 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       const tempo = activeLayout.performance.tempo || 120; // Default to 120 BPM
       const beatDuration = 60 / tempo; // seconds per beat
       const stepDuration = beatDuration / 4; // 16th note duration
-      
+
       // Calculate time window for current step
       const stepStartTime = currentStep * stepDuration;
       const stepEndTime = (currentStep + 1) * stepDuration;
-      
+
       // Find events that fall within this time window
-      const eventsInStep = noteEvents.filter(e => 
+      const eventsInStep = noteEvents.filter(e =>
         e.startTime >= stepStartTime && e.startTime < stepEndTime
       );
-      
+
       if (eventsInStep.length > 0) {
         // Return the first event in this step (or worst case if multiple)
         return eventsInStep.reduce((worst, current) => {
@@ -282,7 +284,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           return worst;
         }, eventsInStep[0]);
       }
-      
+
       // Fallback: If no event in this exact step, return the worst case for this note
       // (This handles quantization mismatches)
       return noteEvents.reduce((worst, current) => {
@@ -304,19 +306,18 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 
   return (
     <div className="flex items-center justify-center p-8 relative" ref={gridContainerRef}>
-      <div 
-        className="grid grid-cols-8 gap-2 bg-slate-900 p-4 rounded-xl shadow-2xl border border-slate-800 relative"
+      <div
+        className="grid grid-cols-8 gap-[var(--spacing-grid)] bg-[var(--bg-panel)] p-4 rounded-[var(--radius-lg)] shadow-2xl border border-[var(--border-subtle)] relative"
         style={{ width: 'fit-content' }}
       >
         {rows.map((row) => (
           <React.Fragment key={`row-${row}`}>
             {cols.map((col) => {
               // Get Voice from activeMapping if available
-              // Inline cellKey to avoid potential circular dependency issues
               const cellKeyStr = `${row},${col}`;
               const soundAsset = activeMapping?.cells[cellKeyStr] || null;
-              
-              // Determine note number - use Voice's originalMidiNote if available, otherwise use position
+
+              // Determine note number
               const noteNumber = soundAsset && soundAsset.originalMidiNote !== null
                 ? soundAsset.originalMidiNote
                 : GridMapService.getNoteForPosition(row, col, activeSection?.instrumentConfig);
@@ -325,13 +326,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               let isActive = gridPattern?.steps[currentStep]?.[row]?.[col] ?? false;
               let padOrderIndex: number | null = null;
 
-              // When viewAllSteps is enabled, a pad is active if ANY event in the
-              // performance maps to this pad (time is ignored). We also capture the
-              // earliest event index for gradient shading.
+              // View All Steps Logic
               if (viewAllSteps && totalEvents > 0) {
                 for (let i = 0; i < totalEvents; i += 1) {
                   const event = performanceEvents[i];
-                  // Use activeMapping if available, otherwise fall back to InstrumentConfig
                   const pos = activeMapping
                     ? getPositionForMidi(event.noteNumber, activeMapping)
                     : activeSection
@@ -345,207 +343,62 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 isActive = padOrderIndex !== null;
               }
 
-              // Display name: use Voice name if available, otherwise note name
-              const displayName = soundAsset
-                ? soundAsset.name
-                : getNoteName(noteNumber);
+              // Display name
+              const displayName = soundAsset ? soundAsset.name : getNoteName(noteNumber);
               const debugEvent = isActive ? getDebugEventForPad(row, col) : null;
 
-              // Get reachability level for this cell
-              const cellKey = `${row},${col}`;
-              const reachabilityLevel: ReachabilityLevel | null = reachabilityMap?.[cellKey] || null;
-              
-              // Check if this cell is highlighted
+              // Highlight check
               const isHighlighted = highlightedCell?.row === row && highlightedCell?.col === col;
 
-              // Compute styling based on difficulty and hand assignment
-              let difficultyStyle = '';
-              let dynamicStyle: React.CSSProperties | undefined;
-              let handBorderColor: string | undefined; // For finger visualization border
-              
-              if (isActive) {
-                // Determine hand-based border color for finger visualization
-                if (debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
-                  const hand = debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left' ? 'left' : 'right';
-                  handBorderColor = hand === 'left' ? '#3b82f6' : '#f97316'; // Blue for Left, Orange for Right
-                }
-                
-                if (debugEvent) {
-                  switch (debugEvent.difficulty) {
-                    case 'Unplayable':
-                      difficultyStyle = 'bg-red-900/80 border-red-500 border-4 text-white shadow-[0_0_15px_rgba(239,68,68,0.6)]';
-                      break;
-                    case 'Hard':
-                      difficultyStyle = 'bg-orange-900/80 border-orange-500 border-4 text-white shadow-[0_0_15px_rgba(249,115,22,0.6)]';
-                      break;
-                    case 'Medium':
-                      difficultyStyle = 'bg-yellow-900/60 border-yellow-500 border-2 text-white shadow-[0_0_10px_rgba(234,179,8,0.4)]';
-                      break;
-                    case 'Easy':
-                    default:
-                      // Use hand-based border color if available, otherwise default blue
-                      if (handBorderColor) {
-                        difficultyStyle = `bg-blue-500 border-4 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]`;
-                      } else {
-                        difficultyStyle = 'bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]';
-                      }
-                      break;
-                  }
-                } else {
-                  // Default active style if no debug info (e.g. newly added note not yet processed)
-                  difficultyStyle = 'bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.6)]';
-                }
-              } else {
-                // Base inactive style
-                difficultyStyle = 'bg-slate-800 border-slate-700 text-slate-500 hover:bg-slate-700 hover:border-slate-600 hover:text-slate-300';
-                
-                // Apply reachability overlay if active
-                if (reachabilityLevel) {
-                  switch (reachabilityLevel) {
-                    case 'green':
-                      dynamicStyle = {
-                        backgroundColor: 'rgba(34, 197, 94, 0.25)',
-                        borderColor: 'rgba(34, 197, 94, 0.5)',
-                      };
-                      break;
-                    case 'yellow':
-                      dynamicStyle = {
-                        backgroundColor: 'rgba(234, 179, 8, 0.25)',
-                        borderColor: 'rgba(234, 179, 8, 0.5)',
-                      };
-                      break;
-                    case 'gray':
-                      difficultyStyle = 'bg-slate-800 border-slate-700 text-slate-500 hover:bg-slate-700 hover:border-slate-600 hover:text-slate-300 opacity-50';
-                      dynamicStyle = {
-                        backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                        borderColor: 'rgba(107, 114, 128, 0.4)',
-                      };
-                      break;
-                  }
-                }
+              // Determine Finger/Hand for styling
+              let finger: FingerID | undefined;
+              let hand: 'left' | 'right' | undefined;
+
+              if (debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
+                finger = debugEvent.finger;
+                hand = (debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left') ? 'left' : 'right';
               }
 
-              // Override with gradient if viewAllSteps is on AND it's not a high difficulty note
-              // We want to preserve the red/orange warnings even in viewAllSteps mode
-              if (viewAllSteps && padOrderIndex !== null && totalEvents > 1 && (!debugEvent || debugEvent.difficulty === 'Easy')) {
-                const t = padOrderIndex / (totalEvents - 1); // 0..1
-                const hue = 210 - t * 80; // blue-ish to green-ish
-                const lightness = 45 + t * 10; // slightly brighter over time
-                dynamicStyle = {
-                  backgroundColor: `hsl(${hue}, 80%, ${lightness}%)`,
-                };
-              }
-
-              // Tooltip content
+              // Tooltip
               const noteName = getNoteName(noteNumber);
               let tooltip = `Note: ${noteNumber} (${noteName}) | Row: ${row}, Col: ${col}`;
               if (debugEvent && debugEvent.difficulty !== 'Easy') {
                 tooltip += `\nDifficulty: ${debugEvent.difficulty}`;
                 tooltip += `\nCost: ${debugEvent.cost.toFixed(2)}`;
-                tooltip += `\nHand: ${debugEvent.assignedHand}`;
-                if (debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
-                  const hand = normalizeHand(debugEvent.assignedHand);
-                  tooltip += `\nFinger: ${formatFinger(hand, debugEvent.finger)}`;
-                }
               }
 
-              // Handle cell click - only allow in non-readOnly mode
+              // Handle Click
               const handleCellClick = () => {
-                if (readOnly) return; // Disable clicks in readOnly mode
-                // Call the standard toggle handler
+                if (readOnly) return;
                 onTogglePad(currentStep, row, col);
-                // Also call the optional cell click handler for selection
-                if (onCellClick) {
-                  onCellClick(row, col);
-                }
+                if (onCellClick) onCellClick(row, col);
               };
 
-              // Apply Voice color if available
-              const cellColor = soundAsset
-                ? soundAsset.color
-                : undefined;
+              // Convert numeric FingerID to string type for Pad component
+              const fingerTypeMap: Record<number, FingerType> = {
+                1: 'thumb', 2: 'index', 3: 'middle', 4: 'ring', 5: 'pinky'
+              };
+              const fingerType = finger ? fingerTypeMap[finger] : undefined;
 
               return (
-                <div
-                  key={`pad-${row}-${col}`}
-                  className={`
-                    w-16 h-16 flex flex-col items-center justify-center rounded-md transition-all duration-100 relative border
-                    ${readOnly ? 'cursor-default' : 'cursor-pointer'}
-                    ${difficultyStyle}
-                    ${isActive ? 'scale-95' : ''}
-                    ${isHighlighted ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-slate-900 z-20' : ''}
-                  `}
-                  style={{
-                    ...dynamicStyle,
-                    borderLeftWidth: soundAsset ? '4px' : undefined,
-                    borderLeftColor: cellColor || undefined,
-                    // Apply hand-based border color for finger visualization (overrides difficulty border for Easy)
-                    ...(isActive && handBorderColor && (!debugEvent || debugEvent.difficulty === 'Easy') 
-                      ? { borderColor: handBorderColor, borderWidth: '4px' }
-                      : {}),
-                  }}
-                  onClick={handleCellClick}
-                  onContextMenu={readOnly ? undefined : (e) => handleContextMenu(e, row, col)}
-                  title={tooltip}
-                >
-                  <span className={`text-sm font-semibold ${isActive ? 'text-white' : 'text-slate-400'}`}>
-                    {displayName}
-                  </span>
-                  
-                  {/* W4: Per-Pad Note Count */}
-                  {padNoteCounts[cellKeyStr] !== undefined && padNoteCounts[cellKeyStr] > 0 && (
-                    <div className="absolute bottom-1 left-1 bg-slate-900/80 text-slate-300 text-[10px] font-mono px-1 py-0.5 rounded border border-slate-700">
-                      {padNoteCounts[cellKeyStr]}
-                    </div>
-                  )}
-                  
-                  {/* Finger Visualization Badge - Show finger assignment for active pads */}
-                  {isActive && (
-                    debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable' ? (
-                      <div className={`
-                        absolute top-1 right-1 px-1.5 py-0.5 rounded flex items-center justify-center text-[9px] font-bold shadow-sm z-10 border-2
-                        ${debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left' 
-                          ? 'bg-blue-500/90 text-white border-blue-300' 
-                          : 'bg-orange-500/90 text-white border-orange-300'}
-                      `}>
-                        {normalizeHand(debugEvent.assignedHand as 'LH' | 'RH')}-{getFingerAbbreviation(debugEvent.finger)}
-                      </div>
-                    ) : (
-                      // Show '?' if pad is active but no analysis data available
-                      <div className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-600/80 text-slate-200 border-2 border-slate-500 shadow-sm z-10">
-                        ?
-                      </div>
-                    )
-                  )}
-
-                  {showDebugLabels && (
-                    <div className="absolute bottom-1 left-0 right-0 flex flex-col items-center text-[9px] opacity-60 leading-tight pointer-events-none font-mono">
-                      <span>{noteNumber}</span>
-                      <span>[{row},{col}]</span>
-                      {debugEvent && (
-                        <span className={
-                          debugEvent.difficulty === 'Unplayable' ? 'text-red-200 font-bold' :
-                          debugEvent.difficulty === 'Hard' ? 'text-orange-200 font-bold' : ''
-                        }>
-                          {debugEvent.assignedHand}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                <div key={`pad-wrapper-${row}-${col}`} onContextMenu={readOnly ? undefined : (e) => handleContextMenu(e, row, col)}>
+                  <Pad
+                    row={row}
+                    col={col}
+                    isActive={isActive}
+                    label={displayName}
+                    finger={fingerType}
+                    hand={hand}
+                    onClick={handleCellClick}
+                    className={`w-16 h-16 ${isHighlighted ? 'ring-4 ring-yellow-400 z-20' : ''}`}
+                  />
                 </div>
               );
             })}
-            {/* Bank divider after rows 1, 3, and 5 */}
+            {/* Bank divider */}
             {showBankGuides && (row === 1 || row === 3 || row === 5) && (
-              <div
-                key={`divider-${row}`}
-                className="col-span-8 flex items-center gap-2 my-1"
-              >
-                <div className="flex-1 h-px bg-slate-600/50"></div>
-                <span className="text-xs font-medium text-slate-500 px-2">
-                  Bank {getBankNumber(row + 1)}
-                </span>
-                <div className="flex-1 h-px bg-slate-600/50"></div>
+              <div key={`divider-${row}`} className="col-span-8 flex items-center gap-2 my-1 opacity-30">
+                <div className="flex-1 h-px bg-[var(--text-tertiary)]"></div>
               </div>
             )}
           </React.Fragment>
@@ -566,7 +419,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
               Show Reach from [{contextMenu.row},{contextMenu.col}]
             </div>
-            
+
             {/* Left Hand Options */}
             <div className="px-2 py-1">
               <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
@@ -615,7 +468,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
                   Assign Finger Constraint
                 </div>
-                
+
                 {/* Left Hand Finger Constraints */}
                 <div className="px-2 py-1">
                   <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase">Left Hand</div>
@@ -631,11 +484,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                           onUpdateFingerConstraint(cellKey, isActive ? null : constraintValue);
                           setContextMenu(null);
                         }}
-                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-200 hover:bg-slate-700'
-                        }`}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-200 hover:bg-slate-700'
+                          }`}
                       >
                         {isActive ? '✓ ' : ''}L{finger} - {finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky'}
                       </button>
@@ -658,11 +510,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                           onUpdateFingerConstraint(cellKey, isActive ? null : constraintValue);
                           setContextMenu(null);
                         }}
-                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'text-slate-200 hover:bg-slate-700'
-                        }`}
+                        className={`w-full text-left px-3 py-1.5 text-sm rounded ${isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-200 hover:bg-slate-700'
+                          }`}
                       >
                         {isActive ? '✓ ' : ''}R{finger} - {finger === 1 ? 'Thumb' : finger === 2 ? 'Index' : finger === 3 ? 'Middle' : finger === 4 ? 'Ring' : 'Pinky'}
                       </button>

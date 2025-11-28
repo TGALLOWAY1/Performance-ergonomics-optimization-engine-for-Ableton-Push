@@ -159,10 +159,38 @@ export const TimelinePage: React.FC = () => {
 
                 {/* Controls */}
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700">
+                    {/* Practice Mode Toggle */}
+                    <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
+                        <span className="text-xs text-slate-400 font-medium">Practice Mode</span>
+                        <button
+                            className="w-8 h-4 bg-slate-700 rounded-full relative transition-colors hover:bg-slate-600"
+                            title="Toggle Practice Mode (Visual only for MVP)"
+                        >
+                            <div className="absolute top-0.5 left-0.5 w-3 h-3 bg-slate-400 rounded-full shadow-sm" />
+                        </button>
+                    </div>
+
+                    {/* Scroll Speed */}
+                    <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
+                        <span className="text-xs text-slate-400 font-medium">Scroll Speed</span>
+                        <select
+                            className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
+                            defaultValue="1x"
+                        >
+                            <option value="0.5x">0.5×</option>
+                            <option value="1x">1×</option>
+                            <option value="1.5x">1.5×</option>
+                            <option value="2x">2×</option>
+                        </select>
+                    </div>
+
+                    <div className="h-6 w-px bg-slate-700/50 mx-2" />
+
+                    {/* Playback Controls */}
+                    <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 shadow-sm">
                         <button
                             onClick={togglePlay}
-                            className={`p-2 rounded transition-colors ${isPlaying ? 'text-yellow-400' : 'text-slate-300 hover:text-white'}`}
+                            className={`p-2 rounded transition-all ${isPlaying ? 'bg-yellow-500/10 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'text-slate-300 hover:text-white hover:bg-slate-700'}`}
                         >
                             {isPlaying ? (
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
@@ -172,15 +200,15 @@ export const TimelinePage: React.FC = () => {
                         </button>
                         <button
                             onClick={handleStop}
-                            className="p-2 text-slate-300 hover:text-white transition-colors"
+                            className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
                         >
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" /></svg>
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700">
-                        <span className="text-xs text-slate-400 font-mono">TIME</span>
-                        <span className="text-sm font-mono text-blue-400 w-16 text-right">{currentTime.toFixed(2)}s</span>
+                    <div className="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 shadow-inner">
+                        <span className="text-xs text-slate-500 font-mono">TIME</span>
+                        <span className="text-sm font-mono text-cyan-400 w-16 text-right">{currentTime.toFixed(2)}s</span>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -191,7 +219,7 @@ export const TimelinePage: React.FC = () => {
                             max="500"
                             value={zoom}
                             onChange={(e) => setZoom(Number(e.target.value))}
-                            className="w-24 accent-blue-500"
+                            className="w-24 accent-cyan-500 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                         />
                     </div>
                 </div>

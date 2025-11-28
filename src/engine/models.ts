@@ -73,6 +73,12 @@ export interface EngineConstants {
     pinky: number;     // 2.5 (weakest)
     thumb: number;     // 2.0 (less agile than index)
   };
+  /** Cost to activate a new finger (encourages reuse of placed fingers) */
+  activationCost: number;
+  /** Penalty for crossing fingers (e.g. index right of middle) */
+  crossoverPenaltyWeight: number;
+  /** Rate at which fatigue recovers per second (default: 0.5) */
+  fatigueRecoveryRate?: number;
 }
 
 /**
@@ -91,5 +97,7 @@ export const DEFAULT_ENGINE_CONSTANTS: EngineConstants = {
     pinky: 2.5,      // Pinky: weakest (2.5x cost)
     thumb: 2.0,      // Thumb: less agile (2.0x cost)
   },
+  activationCost: 5.0, // Significant cost to bring in a new finger
+  crossoverPenaltyWeight: 20.0, // Moderate penalty for crossovers (allowed but discouraged)
+  fatigueRecoveryRate: 0.5,
 };
-

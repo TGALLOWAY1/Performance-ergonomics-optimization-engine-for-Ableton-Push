@@ -1,0 +1,116 @@
+:root {
+    /* 
+   * THEME: THERMAL NEON (Dark Mode Default)
+   * Aesthetic: Cyber-Minimalism, High Contrast, Data-Centric
+   */
+
+    /* --- Color Palette: Base Backgrounds --- */
+    --bg-app: #0A0A0A;
+    /* Deep Void */
+    --bg-panel: #121212;
+    /* Matte Charcoal */
+    --bg-card: #1A1A1A;
+    /* Elevated Surface */
+    --bg-input: #050505;
+    /* Inset Depth */
+
+    /* --- Color Palette: Text Hierarchy --- */
+    --text-primary: #FFFFFF;
+    /* High Clarity */
+    --text-secondary: #888888;
+    /* Muted Data */
+    --text-tertiary: #444444;
+    /* Subtle Labels */
+    --text-warning: #FF3333;
+    /* Conflict/Error */
+
+    /* --- Color Palette: The "Thermal" Hand System --- */
+    /* Left Hand (Cool) */
+    --finger-L1: #0044FF;
+    /* Deep Blue (Thumb) */
+    --finger-L2: #0088FF;
+    /* Azure (Index) */
+    --finger-L3: #00FFFF;
+    /* Cyan (Middle) */
+    --finger-L4: #8800FF;
+    /* Indigo (Ring) */
+    --finger-L5: #CC00FF;
+    /* Violet (Pinky) */
+
+    /* Right Hand (Warm) */
+    --finger-R1: #FF0000;
+    /* Deep Red (Thumb) */
+    --finger-R2: #FF4400;
+    /* Orange-Red (Index) */
+    --finger-R3: #FF8800;
+    /* Amber (Middle) */
+    --finger-R4: #FFCC00;
+    /* Gold (Ring) */
+    --finger-R5: #FFFF00;
+    /* Yellow (Pinky) */
+
+    /* --- Accents & States --- */
+    --accent-glow: 0 0 10px var(--current-finger-color);
+    --border-subtle: #333333;
+    --border-active: #FFFFFF;
+
+    /* --- Geometry & Spacing --- */
+    --radius-sm: 4px;
+    /* Tags/Chips */
+    --radius-md: 8px;
+    /* Grid Pads */
+    --radius-lg: 16px;
+    /* Panels/Modals */
+    --spacing-grid: 4px;
+    /* Tight gap for 8x8 grids */
+
+    /* --- Typography --- */
+    --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-data: 'JetBrains Mono', monospace;
+}
+
+/* 
+ * THEME: CLINICAL LIGHT (Alternative Mode)
+ * Aesthetic: Clean, Laboratory, Solid Pastels
+ */
+.theme-light {
+    /* --- Color Palette: Base Backgrounds --- */
+    --bg-app: #F0F2F5;
+    /* Off-white */
+    --bg-panel: #FFFFFF;
+    /* Clean White */
+    --bg-card: #FFFFFF;
+    /* With Drop Shadow */
+    --bg-input: #E2E8F0;
+    /* Light Gray Input */
+
+    /* --- Color Palette: Text Hierarchy --- */
+    --text-primary: #1A1A1A;
+    /* Ink Black */
+    --text-secondary: #64748B;
+    /* Slate Gray */
+    --text-tertiary: #94A3B8;
+    /* Light Slate */
+    --text-warning: #EF4444;
+    /* Red 500 */
+
+    /* --- Color Palette: The "Thermal" Hand System (Adapted for Light Mode) --- */
+    /* Darker shades for contrast against white */
+    --finger-L1: #0033CC;
+    --finger-L2: #0066CC;
+    --finger-L3: #009999;
+    /* Darker Teal */
+    --finger-L4: #6600CC;
+    --finger-L5: #9900CC;
+
+    --finger-R1: #CC0000;
+    --finger-R2: #CC3300;
+    --finger-R3: #CC6600;
+    --finger-R4: #CC9900;
+    --finger-R5: #CCCC00;
+    /* Darker Yellow/Olive */
+
+    /* --- Accents & States --- */
+    --border-subtle: #E2E8F0;
+    --border-active: #000000;
+}
