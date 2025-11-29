@@ -5,6 +5,8 @@ import { SoundAssignmentTable } from './SoundAssignmentTable';
 import { Performance } from '../types/performance';
 import { EventLogTable } from './EventLogTable';
 import { FingerType } from '../engine/models';
+import { GridVisContainer } from '../components/grid-v3/GridVisContainer';
+import { engineResultToPadActivations } from '../components/grid-v3/adapters';
 
 interface AnalysisPanelProps {
     engineResult: EngineResult | null;
@@ -133,6 +135,31 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             No analysis data available.
                         </div>
                     )}
+                </div>
+
+                {/* Grid Visualization (New v3 Component) */}
+                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex-none border border-[var(--border-subtle)] shadow-sm">
+                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Event Visualization (Snapshot)</h3>
+                    <div className="w-full max-w-[400px] mx-auto aspect-square bg-[var(--bg-app)] rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-subtle)]">
+                        {engineResult ? (
+                            <GridVisContainer
+                                mode="snapshot"
+                                rows={8}
+                                cols={8}
+                                pads={engineResultToPadActivations(engineResult)}
+                                theme={{
+                                    backgroundColor: 'var(--bg-app)',
+                                    gridLineColor: 'var(--border-subtle)',
+                                    padIdleColor: 'var(--bg-panel)',
+                                    padActiveColor: 'var(--bg-card)',
+                                }}
+                            />
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs italic">
+                                No visualization data
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Event Log & Manual Assignments */}
