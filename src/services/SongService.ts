@@ -87,9 +87,19 @@ class SongService {
 
     /**
      * Creates a ProjectState from parsed MIDI data.
+     * 
+     * EXPLICIT LAYOUT MODEL: The grid starts empty.
+     * All voices go to parkedSounds (staging area).
+     * Users must explicitly assign sounds via drag & drop or layout control buttons.
      */
     private createProjectStateFromMidi(projectData: MidiProjectData): ProjectState {
         const layoutId = generateId('layout');
+        
+        // Ensure the gridMapping has layoutMode set to 'none' (explicit empty grid)
+        const gridMappingWithMode = {
+            ...projectData.gridMapping,
+            layoutMode: 'none' as const,
+        };
         
         const state: ProjectState = {
             layouts: [{
@@ -103,8 +113,8 @@ class SongService {
             instrumentConfig: projectData.instrumentConfig,
             activeLayoutId: layoutId,
             projectTempo: projectData.performance.tempo || 120,
-            parkedSounds: projectData.voices,
-            mappings: [projectData.gridMapping],
+            parkedSounds: projectData.voices, // All voices in staging area
+            mappings: [gridMappingWithMode], // Empty grid with layoutMode: 'none'
             ignoredNoteNumbers: [],
             manualAssignments: {},
         };

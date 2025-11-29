@@ -25,7 +25,13 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
   // Track if we're currently undoing/redoing to avoid adding to history
   const isUndoingRef = useRef(false);
   const isRedoingRef = useRef(false);
+  
+  // Use a ref to access current `present` value without adding it as a dependency
+  // This prevents setProjectState from being recreated on every state change
+  const presentRef = useRef(present);
+  presentRef.current = present;
 
+  // STABLE callback: no dependencies that change frequently
   const setProjectState = useCallback((newStateOrFn: ProjectState | ((prev: ProjectState) => ProjectState), skipHistory = false) => {
     if (skipHistory || isUndoingRef.current || isRedoingRef.current) {
       setPresent(prev => {
@@ -35,9 +41,10 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
       return;
     }
 
-    // Add current state to past
+    // Add current state to past (use ref to get current value)
+    const currentPresent = presentRef.current;
     setPast(prevPast => {
-      const newPast = [...prevPast, present];
+      const newPast = [...prevPast, currentPresent];
       // Limit history size
       if (newPast.length > MAX_HISTORY_SIZE) {
         return newPast.slice(-MAX_HISTORY_SIZE);
@@ -51,41 +58,51 @@ export function useProjectHistory(initialState: ProjectState): UseProjectHistory
       const newState = typeof newStateOrFn === 'function' ? (newStateOrFn as (prev: ProjectState) => ProjectState)(prev) : newStateOrFn;
       return newState;
     });
-  }, [present]);
+  }, []); // Empty dependency array - callback is now stable
 
   const undo = useCallback(() => {
-    if (past.length === 0) return;
-
-    isUndoingRef.current = true;
-    const previous = past[past.length - 1];
-    const newPast = past.slice(0, -1);
-
-    setPast(newPast);
-    setFuture(prev => [present, ...prev]);
-    setPresent(previous);
-
-    // Reset flag after state update
-    setTimeout(() => {
-      isUndoingRef.current = false;
-    }, 0);
-  }, [past, present]);
+    setPast(prevPast => {
+      if (prevPast.length === 0) return prevPast;
+      
+      isUndoingRef.current = true;
+      const previous = prevPast[prevPast.length - 1];
+      const newPast = prevPast.slice(0, -1);
+      
+      // Use the ref to get current present value
+      const currentPresent = presentRef.current;
+      setFuture(prevFuture => [currentPresent, ...prevFuture]);
+      setPresent(previous);
+      
+      // Reset flag after state update
+      setTimeout(() => {
+        isUndoingRef.current = false;
+      }, 0);
+      
+      return newPast;
+    });
+  }, []); // Stable callback
 
   const redo = useCallback(() => {
-    if (future.length === 0) return;
-
-    isRedoingRef.current = true;
-    const next = future[0];
-    const newFuture = future.slice(1);
-
-    setPast(prev => [...prev, present]);
-    setFuture(newFuture);
-    setPresent(next);
-
-    // Reset flag after state update
-    setTimeout(() => {
-      isRedoingRef.current = false;
-    }, 0);
-  }, [future, present]);
+    setFuture(prevFuture => {
+      if (prevFuture.length === 0) return prevFuture;
+      
+      isRedoingRef.current = true;
+      const next = prevFuture[0];
+      const newFuture = prevFuture.slice(1);
+      
+      // Use the ref to get current present value
+      const currentPresent = presentRef.current;
+      setPast(prevPast => [...prevPast, currentPresent]);
+      setPresent(next);
+      
+      // Reset flag after state update
+      setTimeout(() => {
+        isRedoingRef.current = false;
+      }, 0);
+      
+      return newFuture;
+    });
+  }, []); // Stable callback
 
   const clearHistory = useCallback(() => {
     setPast([]);

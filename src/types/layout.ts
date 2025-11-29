@@ -36,6 +36,12 @@ export interface Voice {
 // export type SoundAsset = Voice; // REMOVED: Use Voice directly
 
 /**
+ * Layout origin mode - tracks how the layout was created/modified.
+ * Used for UI display and to understand the layout's history.
+ */
+export type LayoutMode = 'manual' | 'optimized' | 'random' | 'none';
+
+/**
  * GridMapping: Represents a grid mapping configuration.
  * 
  * Assignment: Maps Pads (x/y coordinates on the 8x8 grid) to Voices and finger constraints.
@@ -54,6 +60,18 @@ export interface GridMapping {
   scoreCache: number | null;
   /** Notes or description for this mapping */
   notes: string;
+  /** 
+   * Layout origin mode - tracks how the layout was created/modified.
+   * - 'none': Empty grid, no assignments
+   * - 'manual': User manually dragged sounds to pads
+   * - 'random': "Assign Manually" button was used for random placement
+   * - 'optimized': "Optimize Layout" button was used for biomechanical optimization
+   */
+  layoutMode?: LayoutMode;
+  /** Version number for this layout (incremented on "Save Layout") */
+  version?: number;
+  /** Timestamp when this layout version was saved */
+  savedAt?: string;
 }
 
 /**

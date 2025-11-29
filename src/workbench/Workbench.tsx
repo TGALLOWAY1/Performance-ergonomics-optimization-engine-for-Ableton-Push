@@ -28,6 +28,7 @@ export const Workbench: React.FC = () => {
     runSolver,
     setActiveSolverId,
     getSolverResult,
+    optimizeLayout,
   } = useProject();
 
   const [searchParams] = useSearchParams();
@@ -246,6 +247,9 @@ export const Workbench: React.FC = () => {
   const [selectedSolver, setSelectedSolver] = useState<SolverType>('beam');
   const [isRunningSolver, setIsRunningSolver] = useState(false);
   const [solverProgress, setSolverProgress] = useState(0);
+  
+  // Layout optimization state
+  const [isOptimizingLayout, setIsOptimizingLayout] = useState(false);
 
   // Engine state
 
@@ -876,13 +880,13 @@ export const Workbench: React.FC = () => {
   };
 
   // ============================================================================
-  // EXPLICIT LAYOUT CONTROL: Optimize Layout
+  // EXPLICIT LAYOUT CONTROL: Optimize Layout (Simulated Annealing)
   // ============================================================================
-  // Runs the biomechanical solver to find an optimal layout.
+  // Runs the Simulated Annealing solver to find an optimal layout.
   // IMPORTANT: This OVERWRITES the current layout with the optimized result.
-  // Only runs when explicitly triggered by user clicking "Optimize Layout" button.
+  // Only runs when explicitly triggered by user clicking "Auto-Arrange Grid" button.
   // ============================================================================
-  const handleOptimizeLayout = useCallback(() => {
+  const handleOptimizeLayout = useCallback(async () => {
     if (!activeMapping) {
       alert('No active mapping to optimize. Please assign some sounds first.');
       return;
@@ -901,75 +905,24 @@ export const Workbench: React.FC = () => {
       return;
     }
 
-    console.log('[Workbench] Starting layout optimization...');
+    console.log('[Workbench] Starting layout optimization with Simulated Annealing...');
+    setIsOptimizingLayout(true);
 
     try {
-      // Run the biomechanical solver with current configuration
-      const solver = new BiomechanicalSolver(
-        projectState.instrumentConfig,
-        activeMapping,
-        undefined,
-        projectState.engineConfiguration
-      );
+      // Call the optimizeLayout method from context
+      await optimizeLayout(activeMapping);
 
-      // Get manual assignments for current layout
-      const currentLayoutId = projectState.activeLayoutId;
-      const manualAssignments = currentLayoutId && projectState.manualAssignments
-        ? projectState.manualAssignments[currentLayoutId]
-        : undefined;
-
-      // Convert string keys to numbers for the engine
-      const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-      if (manualAssignments) {
-        Object.entries(manualAssignments).forEach(([key, value]) => {
-          parsedAssignments[parseInt(key, 10)] = value;
-        });
-      }
-
-      const result = solver.solve(performance, parsedAssignments);
-
-      console.log('[Workbench] Optimization complete:', {
-        score: result.score,
-        hardCount: result.hardCount,
-        unplayableCount: result.unplayableCount,
-      });
-
-      // For now, we don't actually rearrange the pads - we just mark the layout as "optimized"
-      // A full optimization would require implementing a layout search algorithm
-      // that tries different pad arrangements and scores them.
-      //
-      // TODO: Implement full layout optimization that:
-      // 1. Generates candidate layouts (permutations of pad assignments)
-      // 2. Scores each with the biomechanical solver
-      // 3. Picks the best one
-      //
-      // For now, we mark as "optimized" to indicate the user has run the optimization,
-      // even though the actual optimization algorithm is not yet implemented.
-
-      // Update mapping with layoutMode: 'optimized'
-      setProjectState(prevState => ({
-        ...prevState,
-        mappings: prevState.mappings.map(m =>
-          activeMapping && m.id === activeMapping.id
-            ? { 
-                ...m, 
-                layoutMode: 'optimized' as LayoutMode,
-                scoreCache: result.score,
-              }
-            : m
-        ),
-      }));
-
-      // Update engine result
-      setEngineResult(result);
-
-      alert(`Layout optimization complete!\n\nScore: ${(result.score * 100).toFixed(1)}%\nHard transitions: ${result.hardCount}\nUnplayable: ${result.unplayableCount}\n\n(Note: Full layout rearrangement is not yet implemented. Layout marked as "optimized".)`);
-
+      console.log('[Workbench] Layout optimization complete!');
+      
+      // The context method already updates the project state and engine result
+      // No need to do anything else here
     } catch (err) {
       console.error('[Workbench] Optimization failed:', err);
-      alert('Layout optimization failed. See console for details.');
+      alert(`Layout optimization failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsOptimizingLayout(false);
     }
-  }, [activeMapping, projectState, setProjectState, setEngineResult]);
+  }, [activeMapping, projectState, optimizeLayout]);
 
   // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Save Layout Version
@@ -1180,6 +1133,33 @@ export const Workbench: React.FC = () => {
 
             {/* Solver Controls */}
             <div className="flex items-center gap-3">
+              {/* Auto-Arrange Grid Button (Simulated Annealing) */}
+              <button
+                onClick={handleOptimizeLayout}
+                disabled={isOptimizingLayout || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
+                className="px-4 py-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
+                title="Optimize pad layout using Simulated Annealing (rearranges sounds for better ergonomics)"
+              >
+                {isOptimizingLayout ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Optimizing Layout (Annealing)...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Auto-Arrange Grid
+                  </>
+                )}
+              </button>
+
+              <div className="h-6 w-px bg-slate-700/50" />
+
               <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
                 <label className="text-xs text-slate-400 font-medium">Optimization Model:</label>
                 <select
@@ -1234,7 +1214,10 @@ export const Workbench: React.FC = () => {
                     >
                       {Object.keys(projectState.solverResults).map(solverId => (
                         <option key={solverId} value={solverId}>
-                          {solverId === 'beam' ? 'Beam Search' : solverId === 'genetic' ? 'Genetic Algorithm' : solverId}
+                          {solverId === 'beam' ? 'Beam Search' : 
+                           solverId === 'genetic' ? 'Genetic Algorithm' : 
+                           solverId === 'annealing' ? 'Simulated Annealing' : 
+                           solverId}
                         </option>
                       ))}
                     </select>

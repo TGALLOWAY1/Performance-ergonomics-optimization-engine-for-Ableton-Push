@@ -3,16 +3,70 @@
  * This is the main entry point for the performability engine.
  */
 
-export { SectionAwareSolver } from './core';
-export type { EngineResult, EngineDebugEvent, FingerUsageStats, FatigueMap } from './core';
-export { GridPosition, calculateGridDistance } from './gridMath';
+// Core solver facade and factory functions
+export { 
+  BiomechanicalSolver,
+  resolveSolver,
+  getDefaultSolverType,
+  getAvailableSolverTypes,
+  createBiomechanicalSolver,
+  createBiomechanicalSolverWithStrategy,
+} from './core';
+
+// Re-export types from core (which re-exports from solvers/types)
+export type { 
+  EngineResult, 
+  EngineDebugEvent, 
+  FingerUsageStats, 
+  FatigueMap, 
+  CostBreakdown,
+  SolverStrategy,
+  SolverType,
+  SolverConfig,
+} from './core';
+
+// Re-export evolution log type for GA visualization
+export type { EvolutionLogEntry } from './solvers/types';
+
+// Solver implementations (for direct access if needed)
+export { BeamSolver, createBeamSolver } from './solvers/BeamSolver';
+export { GeneticSolver, createGeneticSolver, DEFAULT_GENETIC_CONFIG } from './solvers/GeneticSolver';
+export type { GeneticConfig } from './solvers/GeneticSolver';
+
+// Grid math utilities
+export { calculateGridDistance } from './gridMath';
+export type { GridPosition } from './gridMath';
+
+// Engine models and constants
 export type { FingerType, HandState, EngineConstants } from './models';
 export { DEFAULT_ENGINE_CONSTANTS } from './models';
-export { isReachPossible, isValidFingerOrder, checkChordFeasibility } from './feasibility';
+
+// Feasibility checking
+export { 
+  isReachPossible, 
+  isValidFingerOrder, 
+  checkChordFeasibility,
+  generateValidGrips,
+  generateValidGripsFromPositions,
+  generateValidGripsWithTier,
+} from './feasibility';
+export type { Pad, GripResult, ConstraintTier } from './feasibility';
+
+// Cost functions
 export {
+  // Legacy HandState-based costs
   calculateMovementCost,
   calculateStretchPenalty,
   calculateDriftPenalty,
   getFingerBouncePenalty,
+  // New HandPose-based costs (Beam Search solver)
+  calculateAttractorCost,
+  calculateTransitionCost,
+  calculateGripStretchCost,
+  calculateTotalGripCost,
+  handStateToHandPose,
+  // Constants
+  MAX_HAND_SPEED,
+  SPEED_COST_WEIGHT,
+  FALLBACK_GRIP_PENALTY,
 } from './costFunction';
-

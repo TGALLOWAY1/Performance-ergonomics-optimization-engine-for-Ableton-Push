@@ -2,10 +2,44 @@
  * Weighted cost calculators for the Performability Engine.
  * These functions calculate various cost components used in evaluating
  * candidate finger assignments for notes.
+ * 
+ * Includes:
+ * - Legacy HandState-based costs (movement, stretch, drift, crossover)
+ * - New HandPose-based costs (attractor, transition) for Beam Search solver
  */
 
-import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS, EngineConstants } from './models';
+import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS } from './models';
 import { GridPosition, calculateGridDistance } from './gridMath';
+import { FingerCoordinate, HandPose } from '../types/performance';
+
+// ============================================================================
+// Constants for Beam Search Solver (Attractor Model)
+// ============================================================================
+
+/**
+ * Maximum physiological hand movement speed in grid units per second.
+ * Based on Fitts's Law research - typical peak hand speed ~30-50 cm/s.
+ * Mapped to grid: ~8-12 grid units/second for rapid movements.
+ */
+export const MAX_HAND_SPEED = 12.0;
+
+/**
+ * Weight factor for speed component in transition cost.
+ * Higher values penalize fast movements more heavily.
+ */
+export const SPEED_COST_WEIGHT = 0.5;
+
+/**
+ * Minimum time delta to prevent division by zero.
+ * Very small time deltas indicate simultaneous notes (chords).
+ */
+const MIN_TIME_DELTA = 0.001;
+
+/**
+ * Penalty applied to fallback grips that ignore biomechanical constraints.
+ * This massive penalty ensures fallback grips are only used as a last resort.
+ */
+export const FALLBACK_GRIP_PENALTY = 1000;
 
 /**
  * Calculates the Euclidean distance between two grid positions.
@@ -352,5 +386,253 @@ export function calculateCrossoverCost(
   }
 
   return penalty;
+}
+
+// ============================================================================
+// HandPose-Based Cost Functions (Beam Search Solver)
+// ============================================================================
+
+/**
+ * Calculates the Euclidean distance between two FingerCoordinates.
+ * 
+ * @param a - First coordinate
+ * @param b - Second coordinate
+ * @returns Euclidean distance
+ */
+function fingerCoordinateDistance(a: FingerCoordinate, b: FingerCoordinate): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Calculates the "attractor" cost for a hand pose.
+ * 
+ * The attractor model represents the natural tendency of hands to return
+ * to a resting position. The further a hand moves from its resting pose,
+ * the more "energy" is required to maintain that position.
+ * 
+ * This implements a spring-like force: Cost = distance * stiffness
+ * 
+ * @param current - Current hand pose (centroid and finger positions)
+ * @param resting - Resting/home hand pose (the "attractor" position)
+ * @param stiffness - Spring stiffness coefficient (alpha). Range 0-1.
+ *                    Higher values = stronger pull back to resting position.
+ * @returns The attractor cost (0 if at resting position, increases with distance)
+ * 
+ * @example
+ * // Hand at resting position - zero cost
+ * const cost = calculateAttractorCost(restingPose, restingPose, 0.3);
+ * // cost === 0
+ * 
+ * @example
+ * // Hand 4 units away from resting with stiffness 0.3
+ * // cost = 4 * 0.3 = 1.2
+ */
+export function calculateAttractorCost(
+  current: HandPose,
+  resting: HandPose,
+  stiffness: number
+): number {
+  // Calculate distance between current and resting centroids
+  const distance = fingerCoordinateDistance(current.centroid, resting.centroid);
+  
+  // Attractor force: linear spring model
+  // Cost increases linearly with distance from resting position
+  return distance * stiffness;
+}
+
+/**
+ * Calculates the transition cost for moving from one hand pose to another.
+ * 
+ * Implements Fitts's Law principles:
+ * - Movement time (and thus cost) increases with distance
+ * - Faster movements are more difficult and error-prone
+ * - Movements exceeding physiological speed limits are impossible
+ * 
+ * The cost function is: distance + (speed * weight)
+ * If the required speed exceeds MAX_HAND_SPEED, returns Infinity.
+ * 
+ * @param prev - Previous hand pose
+ * @param curr - Current (target) hand pose
+ * @param timeDelta - Time available for the transition in seconds
+ * @returns The transition cost, or Infinity if movement is physically impossible
+ * 
+ * @example
+ * // Slow movement (plenty of time)
+ * const cost = calculateTransitionCost(prevPose, currPose, 0.5);
+ * // Returns distance + modest speed penalty
+ * 
+ * @example
+ * // Impossible movement (too fast)
+ * const cost = calculateTransitionCost(farPose, currPose, 0.01);
+ * // Returns Infinity if speed > MAX_HAND_SPEED
+ */
+export function calculateTransitionCost(
+  prev: HandPose,
+  curr: HandPose,
+  timeDelta: number
+): number {
+  // SAFETY GUARD: For simultaneous notes (chords), treat as zero-cost transition
+  // This prevents issues when timeDelta is 0 or near-zero
+  if (timeDelta <= MIN_TIME_DELTA) {
+    return 0;
+  }
+  
+  // Calculate the distance the centroid moved
+  const distance = fingerCoordinateDistance(prev.centroid, curr.centroid);
+  
+  // Handle edge case: no movement
+  if (distance === 0) {
+    return 0;
+  }
+  
+  // Calculate required speed
+  const speed = distance / timeDelta;
+  
+  // Physiological constraint: if speed exceeds maximum, movement is impossible
+  if (speed > MAX_HAND_SPEED) {
+    return Infinity;
+  }
+  
+  // Fitts's Law-inspired cost: base distance + speed penalty
+  // This makes fast movements proportionally more expensive
+  const speedPenalty = speed * SPEED_COST_WEIGHT;
+  
+  return distance + speedPenalty;
+}
+
+/**
+ * Calculates the static grip cost for a HandPose based on finger spread.
+ * 
+ * Evaluates the ergonomic difficulty of maintaining a hand shape by
+ * measuring how far fingers are spread apart. Large spreads are uncomfortable.
+ * 
+ * @param pose - The hand pose to evaluate
+ * @param idealSpan - The ideal/comfortable span distance (default: 2.0 grid units)
+ * @param maxSpan - The maximum possible span (default: 5.5 grid units)
+ * @returns The grip difficulty cost (0 for comfortable, higher for stretched)
+ */
+export function calculateGripStretchCost(
+  pose: HandPose,
+  idealSpan: number = 2.0,
+  maxSpan: number = 5.5
+): number {
+  const fingerEntries = Object.entries(pose.fingers) as [FingerType, FingerCoordinate][];
+  
+  // Need at least 2 fingers to calculate span
+  if (fingerEntries.length < 2) {
+    return 0;
+  }
+  
+  // Find maximum distance between any two fingers
+  let maxDistance = 0;
+  for (let i = 0; i < fingerEntries.length; i++) {
+    for (let j = i + 1; j < fingerEntries.length; j++) {
+      const [, posA] = fingerEntries[i];
+      const [, posB] = fingerEntries[j];
+      const dist = fingerCoordinateDistance(posA, posB);
+      maxDistance = Math.max(maxDistance, dist);
+    }
+  }
+  
+  // If within ideal span, no penalty
+  if (maxDistance <= idealSpan) {
+    return 0;
+  }
+  
+  // Non-linear penalty for excessive spread
+  const excessSpan = maxDistance - idealSpan;
+  const maxExcess = maxSpan - idealSpan;
+  
+  // Normalize and apply quadratic penalty
+  const normalizedExcess = Math.min(excessSpan / maxExcess, 1.0);
+  const penalty = Math.pow(normalizedExcess, 2) * 10;
+  
+  return penalty;
+}
+
+/**
+ * Calculates the total biomechanical cost for a grip transition.
+ * 
+ * Combines multiple cost components:
+ * 1. Transition cost (movement + speed)
+ * 2. Attractor cost (distance from resting position)
+ * 3. Grip stretch cost (finger spread difficulty)
+ * 
+ * @param prev - Previous hand pose
+ * @param curr - Current hand pose
+ * @param resting - Resting/home hand pose
+ * @param timeDelta - Time available for transition in seconds
+ * @param stiffness - Attractor stiffness coefficient
+ * @returns Total cost, or Infinity if transition is impossible
+ */
+export function calculateTotalGripCost(
+  prev: HandPose,
+  curr: HandPose,
+  resting: HandPose,
+  timeDelta: number,
+  stiffness: number
+): number {
+  // Calculate individual cost components
+  const transitionCost = calculateTransitionCost(prev, curr, timeDelta);
+  
+  // If transition is impossible, return immediately
+  if (transitionCost === Infinity) {
+    return Infinity;
+  }
+  
+  const attractorCost = calculateAttractorCost(curr, resting, stiffness);
+  const stretchCost = calculateGripStretchCost(curr);
+  
+  // Combine costs with equal weighting
+  // Could be extended with configurable weights
+  return transitionCost + attractorCost + stretchCost;
+}
+
+/**
+ * Converts a legacy HandState to a HandPose for compatibility.
+ * 
+ * @param handState - Legacy HandState object
+ * @returns Equivalent HandPose object
+ */
+export function handStateToHandPose(handState: HandState): HandPose {
+  const fingers: Partial<Record<FingerType, FingerCoordinate>> = {};
+  
+  // Convert each placed finger
+  const fingerTypes: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  for (const fingerType of fingerTypes) {
+    const gridPos = handState.fingers[fingerType].currentGridPos;
+    if (gridPos !== null) {
+      fingers[fingerType] = {
+        x: gridPos.col,
+        y: gridPos.row,
+      };
+    }
+  }
+  
+  // Calculate centroid from placed fingers
+  const placedPositions = Object.values(fingers);
+  let centroid: FingerCoordinate;
+  
+  if (placedPositions.length > 0) {
+    const sumX = placedPositions.reduce((sum, pos) => sum + pos.x, 0);
+    const sumY = placedPositions.reduce((sum, pos) => sum + pos.y, 0);
+    centroid = {
+      x: sumX / placedPositions.length,
+      y: sumY / placedPositions.length,
+    };
+  } else if (handState.centerOfGravity) {
+    // Use existing CoG if available
+    centroid = {
+      x: handState.centerOfGravity.col,
+      y: handState.centerOfGravity.row,
+    };
+  } else {
+    // Default to grid center
+    centroid = { x: 3.5, y: 3.5 };
+  }
+  
+  return { centroid, fingers };
 }
 

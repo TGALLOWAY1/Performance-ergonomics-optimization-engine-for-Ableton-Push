@@ -11,7 +11,7 @@ import { gridPatternToPerformance, performanceToGridPattern } from '../utils/gri
 import { parseMidiFile } from '../utils/midiImport';
 import { GridMapService } from '../engine/gridMapService';
 import { getSnakePattern, getCornersPattern, getRangeTestPattern, getKillaArp, getDrumBeat } from '../utils/debugPatterns';
-import { SectionAwareSolver, EngineResult } from '../engine/core';
+import { BiomechanicalSolver, EngineResult } from '../engine/core';
 import { GridMapping } from '../types/layout';
 import { getPositionForMidi } from '../utils/layoutUtils';
 import { exportLayout, importLayout } from '../utils/projectPersistence';
@@ -102,16 +102,22 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   // Engine Integration Effect
   useEffect(() => {
-    if (!activeLayout || !projectState.sectionMaps.length) return;
+    if (!activeLayout) return;
 
     const timer = setTimeout(() => {
-      const solver = new SectionAwareSolver(projectState.sectionMaps);
+      // Create solver with instrument config, optional grid mapping, and engine config
+      const solver = new BiomechanicalSolver(
+        projectState.instrumentConfig,
+        activeMapping || null,
+        undefined, // Use default engine constants
+        projectState.engineConfiguration
+      );
       const result = solver.solve(activeLayout.performance);
       setEngineResult(result);
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timer);
-  }, [activeLayout, projectState.sectionMaps]);
+  }, [activeLayout, projectState.instrumentConfig, activeMapping, projectState.engineConfiguration]);
 
   const handleCreateLayout = () => {
     const newId = `layout-${Date.now()}`;

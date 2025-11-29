@@ -1,12 +1,79 @@
 /**
  * Geometric feasibility checks for the biomechanical hand model.
  * Implements hard physical constraints that must be satisfied.
+ * 
+ * Includes Constraint Logic Programming (CLP) based grip generation
+ * for the Beam Search solver.
  */
 
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { FingerID } from '../types/engine';
 import { Hand, MAX_HAND_SPAN, MAX_REACH_GRID_UNITS } from './ergonomics';
-import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS } from './models';
+import { FingerType, FingerState, HandState, DEFAULT_ENGINE_CONSTANTS } from './models';
+import { FingerCoordinate, HandPose } from '../types/performance';
+
+// ============================================================================
+// Pad Type Definition
+// ============================================================================
+
+/**
+ * Pad: Represents a physical pad coordinate on the 8x8 Push grid.
+ * Row 0 is bottom, Row 7 is top. Col 0 is left, Col 7 is right.
+ */
+export interface Pad {
+  row: number;
+  col: number;
+}
+
+// ============================================================================
+// Constraint Constants for Valid Grip Generation
+// ============================================================================
+
+/**
+ * Tier 1 (Strict): Maximum Euclidean distance between any two active fingers.
+ * Based on biomechanical hand span limits (~5.5 grid units).
+ */
+const MAX_FINGER_SPAN_STRICT = 5.5;
+
+/**
+ * Tier 2 (Relaxed): Extended maximum span for difficult chords.
+ * Allows slightly wider reach for complex chord shapes.
+ */
+const MAX_FINGER_SPAN_RELAXED = 7.5;
+
+/**
+ * Delta tolerance for thumb position relative to index finger.
+ * Allows thumb to be slightly beyond index in X direction.
+ */
+const THUMB_DELTA = 1.0;
+
+/**
+ * Relaxed delta for Tier 2 constraints.
+ */
+const THUMB_DELTA_RELAXED = 2.0;
+
+/**
+ * Ordered list of fingers for constraint checking.
+ * Order: pinky (0) -> ring (1) -> middle (2) -> index (3) -> thumb (4)
+ */
+const FINGER_ORDER: FingerType[] = ['pinky', 'ring', 'middle', 'index', 'thumb'];
+
+/**
+ * Constraint tier for grip generation.
+ */
+export type ConstraintTier = 'strict' | 'relaxed' | 'fallback';
+
+/**
+ * Extended HandPose that includes metadata about constraint tier used.
+ */
+export interface GripResult {
+  /** The hand pose/grip */
+  pose: HandPose;
+  /** Which constraint tier was used to generate this grip */
+  tier: ConstraintTier;
+  /** True if this is a fallback grip that ignores constraints */
+  isFallback: boolean;
+}
 
 /**
  * Checks if the distance from wrist to target position is within the maximum hand span.
@@ -427,5 +494,471 @@ function isChordAssignmentValid(
   }
 
   return true; // All checks passed
+}
+
+// ============================================================================
+// Valid Grip Generator (Constraint Logic Programming Approach)
+// ============================================================================
+
+/**
+ * Converts a Pad coordinate to a FingerCoordinate.
+ * Pad uses {row, col}, FingerCoordinate uses {x, y} where x=col, y=row.
+ */
+function padToFingerCoordinate(pad: Pad): FingerCoordinate {
+  return { x: pad.col, y: pad.row };
+}
+
+/**
+ * Calculates Euclidean distance between two FingerCoordinates.
+ */
+function fingerDistance(a: FingerCoordinate, b: FingerCoordinate): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Checks if the span constraint is satisfied.
+ * Constraint: The Euclidean distance between any two active fingers
+ * must not exceed the specified max span.
+ * 
+ * @param fingerPositions - Map of finger types to their coordinates
+ * @param maxSpan - Maximum allowed span (default: strict limit)
+ * @returns true if all pairwise distances are within the span limit
+ */
+function satisfiesSpanConstraint(
+  fingerPositions: Partial<Record<FingerType, FingerCoordinate>>,
+  maxSpan: number = MAX_FINGER_SPAN_STRICT
+): boolean {
+  const entries = Object.entries(fingerPositions) as [FingerType, FingerCoordinate][];
+  
+  // Check all pairs of fingers
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [, posA] = entries[i];
+      const [, posB] = entries[j];
+      
+      const distance = fingerDistance(posA, posB);
+      if (distance > maxSpan) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Checks if the topological constraint is satisfied for the LEFT hand.
+ * Left hand ordering (left-to-right on grid): pinky <= ring <= middle <= index <= thumb + delta
+ * 
+ * This enforces natural finger ordering where fingers don't cross over each other.
+ * 
+ * @param fingerPositions - Map of finger types to their coordinates
+ * @param thumbDelta - Tolerance for thumb position (default: strict)
+ * @param allowOverlap - If true, allows fingers at the same X position
+ * @returns true if the left-to-right ordering is valid for a left hand
+ */
+function satisfiesLeftHandTopology(
+  fingerPositions: Partial<Record<FingerType, FingerCoordinate>>,
+  thumbDelta: number = THUMB_DELTA,
+  allowOverlap: boolean = false
+): boolean {
+  // Get X positions for each finger that is assigned
+  const xPositions: { finger: FingerType; x: number }[] = [];
+  
+  for (const finger of FINGER_ORDER) {
+    const pos = fingerPositions[finger];
+    if (pos !== undefined) {
+      xPositions.push({ finger, x: pos.x });
+    }
+  }
+  
+  // Check ordering: for left hand, fingers should be ordered left-to-right
+  // in the sequence: pinky, ring, middle, index, thumb
+  for (let i = 0; i < xPositions.length - 1; i++) {
+    const current = xPositions[i];
+    const next = xPositions[i + 1];
+    
+    // Get the expected order indices
+    const currentOrderIndex = FINGER_ORDER.indexOf(current.finger);
+    const nextOrderIndex = FINGER_ORDER.indexOf(next.finger);
+    
+    // If current finger should be "before" next in the ordering
+    if (currentOrderIndex < nextOrderIndex) {
+      // For left hand: earlier fingers (pinky side) should have x <= later fingers (thumb side)
+      // Allow thumb to be slightly beyond index with delta tolerance
+      const delta = next.finger === 'thumb' ? thumbDelta : (allowOverlap ? 0.5 : 0);
+      if (current.x > next.x + delta) {
+        return false; // Ordering violated
+      }
+    } else {
+      // currentOrderIndex > nextOrderIndex (shouldn't happen with sorted input, but handle it)
+      const delta = current.finger === 'thumb' ? thumbDelta : (allowOverlap ? 0.5 : 0);
+      if (next.x > current.x + delta) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Checks if the topological constraint is satisfied for the RIGHT hand.
+ * Right hand ordering (left-to-right on grid): thumb - delta <= index <= middle <= ring <= pinky
+ * 
+ * This is the inverse of the left hand ordering.
+ * 
+ * @param fingerPositions - Map of finger types to their coordinates
+ * @param thumbDelta - Tolerance for thumb position (default: strict)
+ * @param allowOverlap - If true, allows fingers at the same X position
+ * @returns true if the left-to-right ordering is valid for a right hand
+ */
+function satisfiesRightHandTopology(
+  fingerPositions: Partial<Record<FingerType, FingerCoordinate>>,
+  thumbDelta: number = THUMB_DELTA,
+  allowOverlap: boolean = false
+): boolean {
+  // Get X positions for each finger that is assigned
+  const xPositions: { finger: FingerType; x: number }[] = [];
+  
+  for (const finger of FINGER_ORDER) {
+    const pos = fingerPositions[finger];
+    if (pos !== undefined) {
+      xPositions.push({ finger, x: pos.x });
+    }
+  }
+  
+  // Check ordering: for right hand, fingers should be ordered right-to-left
+  // in the sequence: pinky, ring, middle, index, thumb
+  // i.e., pinky has highest x, thumb has lowest x
+  for (let i = 0; i < xPositions.length - 1; i++) {
+    const current = xPositions[i];
+    const next = xPositions[i + 1];
+    
+    // Get the expected order indices
+    const currentOrderIndex = FINGER_ORDER.indexOf(current.finger);
+    const nextOrderIndex = FINGER_ORDER.indexOf(next.finger);
+    
+    // For right hand: earlier fingers (pinky side) should have x >= later fingers (thumb side)
+    if (currentOrderIndex < nextOrderIndex) {
+      // Current is "before" next in ordering (pinky side)
+      // For right hand: pinky should be to the right (higher x) of thumb
+      const delta = next.finger === 'thumb' ? thumbDelta : (allowOverlap ? 0.5 : 0);
+      if (current.x < next.x - delta) {
+        return false; // Ordering violated
+      }
+    } else {
+      const delta = current.finger === 'thumb' ? thumbDelta : (allowOverlap ? 0.5 : 0);
+      if (next.x < current.x - delta) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Calculates the centroid (center of mass) of a set of finger positions.
+ * 
+ * @param fingerPositions - Map of finger types to their coordinates
+ * @returns The centroid coordinate
+ */
+function calculateCentroid(
+  fingerPositions: Partial<Record<FingerType, FingerCoordinate>>
+): FingerCoordinate {
+  const positions = Object.values(fingerPositions);
+  
+  if (positions.length === 0) {
+    return { x: 3.5, y: 3.5 }; // Center of grid as default
+  }
+  
+  const sumX = positions.reduce((sum, pos) => sum + pos.x, 0);
+  const sumY = positions.reduce((sum, pos) => sum + pos.y, 0);
+  
+  return {
+    x: sumX / positions.length,
+    y: sumY / positions.length,
+  };
+}
+
+/**
+ * Internal function to generate grips with configurable constraints.
+ * 
+ * @param activePads - Array of Pad coordinates that need to be pressed
+ * @param hand - Which hand ('left' or 'right')
+ * @param maxSpan - Maximum allowed finger span
+ * @param thumbDelta - Thumb position tolerance
+ * @param allowOverlap - Allow slight topology overlap
+ * @returns Array of valid HandPose objects
+ */
+function generateGripsWithConstraints(
+  activePads: Pad[],
+  hand: 'left' | 'right',
+  maxSpan: number,
+  thumbDelta: number,
+  allowOverlap: boolean
+): HandPose[] {
+  if (activePads.length === 0) {
+    return [];
+  }
+  
+  // Cannot play more than 5 pads with one hand (5 fingers max)
+  if (activePads.length > 5) {
+    return [];
+  }
+  
+  const validGrips: HandPose[] = [];
+  const availableFingers: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  
+  // Convert pads to finger coordinates
+  const padCoords = activePads.map(padToFingerCoordinate);
+  
+  function generatePermutations(
+    padIndex: number,
+    remainingFingers: FingerType[],
+    currentAssignment: Partial<Record<FingerType, FingerCoordinate>>
+  ): void {
+    // Base case: all pads assigned
+    if (padIndex === padCoords.length) {
+      // Validate the complete assignment against constraints
+      if (!satisfiesSpanConstraint(currentAssignment, maxSpan)) {
+        return; // Span constraint violated
+      }
+      
+      const topologyValid = hand === 'left'
+        ? satisfiesLeftHandTopology(currentAssignment, thumbDelta, allowOverlap)
+        : satisfiesRightHandTopology(currentAssignment, thumbDelta, allowOverlap);
+      
+      if (!topologyValid) {
+        return; // Topological constraint violated
+      }
+      
+      // All constraints satisfied - create HandPose
+      const centroid = calculateCentroid(currentAssignment);
+      const handPose: HandPose = {
+        centroid,
+        fingers: { ...currentAssignment },
+      };
+      
+      validGrips.push(handPose);
+      return;
+    }
+    
+    // Recursive case: try assigning each remaining finger to current pad
+    const currentPadCoord = padCoords[padIndex];
+    
+    for (let i = 0; i < remainingFingers.length; i++) {
+      const finger = remainingFingers[i];
+      
+      // Create new assignment with this finger
+      const newAssignment: Partial<Record<FingerType, FingerCoordinate>> = {
+        ...currentAssignment,
+        [finger]: currentPadCoord,
+      };
+      
+      // Early pruning: check span constraint incrementally
+      let valid = true;
+      for (const [, existingPos] of Object.entries(currentAssignment)) {
+        if (fingerDistance(existingPos, currentPadCoord) > maxSpan) {
+          valid = false;
+          break;
+        }
+      }
+      
+      if (!valid) {
+        continue; // Skip this branch - span already violated
+      }
+      
+      // Remove this finger from available fingers for next level
+      const newRemainingFingers = [
+        ...remainingFingers.slice(0, i),
+        ...remainingFingers.slice(i + 1),
+      ];
+      
+      // Recurse
+      generatePermutations(padIndex + 1, newRemainingFingers, newAssignment);
+    }
+  }
+  
+  // Start the recursive generation
+  generatePermutations(0, availableFingers, {});
+  
+  return validGrips;
+}
+
+/**
+ * Creates a fallback grip by assigning fingers by proximity.
+ * This ignores all biomechanical constraints and just assigns fingers
+ * in order of their natural position (left-to-right for right hand, vice versa).
+ * 
+ * @param activePads - Array of Pad coordinates
+ * @param hand - Which hand
+ * @returns A fallback HandPose
+ */
+function createFallbackGrip(
+  activePads: Pad[],
+  hand: 'left' | 'right'
+): HandPose {
+  // Sort pads by x coordinate (column)
+  const sortedPads = [...activePads].sort((a, b) => {
+    // For left hand: assign from left to right (pinky on left, thumb on right)
+    // For right hand: assign from right to left (pinky on right, thumb on left)
+    return hand === 'left' ? a.col - b.col : b.col - a.col;
+  });
+  
+  // Available fingers in order: prefer strong fingers first
+  const fingerPriority: FingerType[] = ['index', 'middle', 'ring', 'thumb', 'pinky'];
+  
+  const fingers: Partial<Record<FingerType, FingerCoordinate>> = {};
+  
+  for (let i = 0; i < sortedPads.length && i < fingerPriority.length; i++) {
+    const pad = sortedPads[i];
+    const finger = fingerPriority[i];
+    fingers[finger] = padToFingerCoordinate(pad);
+  }
+  
+  const centroid = calculateCentroid(fingers);
+  
+  return {
+    centroid,
+    fingers,
+  };
+}
+
+/**
+ * Generates all valid hand grips for a given set of active pads.
+ * Uses a tiered constraint system to ALWAYS return at least one grip.
+ * 
+ * **Tiered Approach:**
+ * - **Tier 1 (Strict):** Standard constraints (span < 5.5, strict topology)
+ * - **Tier 2 (Relaxed):** Extended span (< 7.5), allow slight topology overlap
+ * - **Tier 3 (Fallback):** Ignore constraints, assign by proximity
+ * 
+ * @param activePads - Array of Pad coordinates that need to be pressed
+ * @param hand - Which hand ('left' or 'right')
+ * @returns Array of valid HandPose objects (NEVER empty)
+ */
+export function generateValidGrips(
+  activePads: Pad[],
+  hand: 'left' | 'right'
+): HandPose[] {
+  // Edge case: no pads
+  if (activePads.length === 0) {
+    return [];
+  }
+  
+  // Tier 1: Strict constraints
+  const tier1Results = generateGripsWithConstraints(
+    activePads,
+    hand,
+    MAX_FINGER_SPAN_STRICT,
+    THUMB_DELTA,
+    false
+  );
+  
+  if (tier1Results.length > 0) {
+    return tier1Results;
+  }
+  
+  // Tier 2: Relaxed constraints
+  const tier2Results = generateGripsWithConstraints(
+    activePads,
+    hand,
+    MAX_FINGER_SPAN_RELAXED,
+    THUMB_DELTA_RELAXED,
+    true
+  );
+  
+  if (tier2Results.length > 0) {
+    return tier2Results;
+  }
+  
+  // Tier 3: Fallback - create a best-effort grip
+  const fallbackGrip = createFallbackGrip(activePads, hand);
+  return [fallbackGrip];
+}
+
+/**
+ * Generates valid grips with GripResult metadata indicating which tier was used.
+ * This is useful for applying penalties to relaxed/fallback grips.
+ * 
+ * @param activePads - Array of Pad coordinates
+ * @param hand - Which hand ('left' or 'right')
+ * @returns Array of GripResult objects with tier metadata
+ */
+export function generateValidGripsWithTier(
+  activePads: Pad[],
+  hand: 'left' | 'right'
+): GripResult[] {
+  // Edge case: no pads
+  if (activePads.length === 0) {
+    return [];
+  }
+  
+  // Tier 1: Strict constraints
+  const tier1Results = generateGripsWithConstraints(
+    activePads,
+    hand,
+    MAX_FINGER_SPAN_STRICT,
+    THUMB_DELTA,
+    false
+  );
+  
+  if (tier1Results.length > 0) {
+    return tier1Results.map(pose => ({
+      pose,
+      tier: 'strict' as ConstraintTier,
+      isFallback: false,
+    }));
+  }
+  
+  // Tier 2: Relaxed constraints
+  const tier2Results = generateGripsWithConstraints(
+    activePads,
+    hand,
+    MAX_FINGER_SPAN_RELAXED,
+    THUMB_DELTA_RELAXED,
+    true
+  );
+  
+  if (tier2Results.length > 0) {
+    return tier2Results.map(pose => ({
+      pose,
+      tier: 'relaxed' as ConstraintTier,
+      isFallback: false,
+    }));
+  }
+  
+  // Tier 3: Fallback
+  const fallbackGrip = createFallbackGrip(activePads, hand);
+  return [{
+    pose: fallbackGrip,
+    tier: 'fallback' as ConstraintTier,
+    isFallback: true,
+  }];
+}
+
+/**
+ * Generates valid grips using GridPosition format (for compatibility with existing code).
+ * This is a convenience wrapper around generateValidGrips.
+ * 
+ * @param positions - Array of GridPosition coordinates
+ * @param hand - Which hand ('left' or 'right')
+ * @returns Array of valid HandPose objects
+ */
+export function generateValidGripsFromPositions(
+  positions: GridPosition[],
+  hand: 'left' | 'right'
+): HandPose[] {
+  // Convert GridPosition to Pad format
+  const pads: Pad[] = positions.map(pos => ({
+    row: pos.row,
+    col: pos.col,
+  }));
+  
+  return generateValidGrips(pads, hand);
 }
 
