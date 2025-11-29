@@ -14,15 +14,15 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
     const navigate = useNavigate();
     const [isEditing, setIsEditing] = useState(false);
     const [editedTitle, setEditedTitle] = useState(song.title);
-    const [editedArtist, setEditedArtist] = useState(song.artist);
+    const [editedBpm, setEditedBpm] = useState(song.bpm);
 
     // Sync edited values when song prop changes (but not while editing)
     useEffect(() => {
         if (!isEditing) {
             setEditedTitle(song.title);
-            setEditedArtist(song.artist);
+            setEditedBpm(song.bpm);
         }
-    }, [song.title, song.artist, isEditing]);
+    }, [song.title, song.bpm, isEditing]);
 
     const handleDeleteClick = (e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent card click navigation
@@ -55,14 +55,14 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
 
     const handleSaveEdit = () => {
         const trimmedTitle = editedTitle.trim();
-        const trimmedArtist = editedArtist.trim();
+        const bpmValue = Math.max(1, Math.min(999, editedBpm)); // Clamp BPM between 1-999
         
         // Only update if values changed
-        if (trimmedTitle !== song.title || trimmedArtist !== song.artist) {
+        if (trimmedTitle !== song.title || bpmValue !== song.bpm) {
             if (onUpdate) {
                 onUpdate(song.id, {
                     title: trimmedTitle,
-                    artist: trimmedArtist,
+                    bpm: bpmValue,
                 });
             }
         }
@@ -71,20 +71,14 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
 
     const handleCancelEdit = () => {
         setEditedTitle(song.title);
-        setEditedArtist(song.artist);
+        setEditedBpm(song.bpm);
         setIsEditing(false);
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent, field: 'title' | 'artist') => {
+    const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (field === 'artist') {
-                handleSaveEdit();
-            } else {
-                // Move to artist field or save
-                const artistInput = e.currentTarget.parentElement?.querySelector('input[data-field="artist"]') as HTMLInputElement;
-                artistInput?.focus();
-            }
+            handleSaveEdit();
         } else if (e.key === 'Escape') {
             handleCancelEdit();
         }
@@ -94,27 +88,52 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
         <div
             className="group relative bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 hover:border-slate-600 rounded-xl p-4 transition-all hover:shadow-xl hover:shadow-blue-900/10 hover:-translate-y-1"
         >
-            {/* Status Badge & Delete Button */}
-            <div className="absolute top-4 right-4 flex items-center gap-2">
-                {song.lastPracticed > Date.now() - 86400000 * 3 ? (
-                    <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-200 bg-blue-600 rounded-full shadow-lg shadow-blue-900/50">
-                        In Progress
-                    </span>
-                ) : song.performanceRating > 90 ? (
-                    <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-200 bg-emerald-600 rounded-full shadow-lg shadow-emerald-900/50">
-                        Mastered
-                    </span>
-                ) : null}
-                {onDelete && (
-                    <button
-                        onClick={handleDeleteClick}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
-                        title="Delete song"
-                        aria-label={`Delete ${song.title}`}
+            {/* Status Badge, Delete Button & Link MIDI */}
+            <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                    {song.lastPracticed > Date.now() - 86400000 * 3 ? (
+                        <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-200 bg-blue-600 rounded-full shadow-lg shadow-blue-900/50">
+                            In Progress
+                        </span>
+                    ) : song.performanceRating > 90 ? (
+                        <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-200 bg-emerald-600 rounded-full shadow-lg shadow-emerald-900/50">
+                            Mastered
+                        </span>
+                    ) : null}
+                    {onDelete && (
+                        <button
+                            onClick={handleDeleteClick}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+                            title="Delete song"
+                            aria-label={`Delete ${song.title}`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
+                {/* Link/Re-link MIDI button - positioned below status badge */}
+                {onLinkMidi && (
+                    <button 
+                        onClick={handleLinkMidiClick}
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 ${
+                            hasMidiLinked 
+                                ? 'bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30' 
+                                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30'
+                        }`}
+                        title={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
+                        {hasMidiLinked ? (
+                            <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                <span className="whitespace-nowrap">Re-link</span>
+                            </>
+                        ) : (
+                            'Link MIDI'
+                        )}
                     </button>
                 )}
             </div>
@@ -138,14 +157,14 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                 )}
             </div>
 
-            {/* Title & Artist */}
+            {/* Title & BPM */}
             {isEditing ? (
                 <div className="mb-4 space-y-2">
                     <input
                         type="text"
                         value={editedTitle}
                         onChange={(e) => setEditedTitle(e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(e, 'title')}
+                        onKeyDown={handleKeyDown}
                         onBlur={(e) => {
                             // Only save on blur if clicking outside the edit area
                             const relatedTarget = e.relatedTarget as HTMLElement;
@@ -153,27 +172,29 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                                 handleSaveEdit();
                             }
                         }}
-                        data-field="title"
                         className="w-full px-2 py-1 text-lg font-bold bg-slate-700 text-slate-200 rounded border border-slate-600 focus:border-blue-500 focus:outline-none"
                         autoFocus
                         placeholder="Song title"
                     />
-                    <input
-                        type="text"
-                        value={editedArtist}
-                        onChange={(e) => setEditedArtist(e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(e, 'artist')}
-                        onBlur={(e) => {
-                            // Only save on blur if clicking outside the edit area
-                            const relatedTarget = e.relatedTarget as HTMLElement;
-                            if (!relatedTarget || !e.currentTarget.parentElement?.contains(relatedTarget)) {
-                                handleSaveEdit();
-                            }
-                        }}
-                        data-field="artist"
-                        className="w-full px-2 py-1 text-sm bg-slate-700 text-slate-400 rounded border border-slate-600 focus:border-blue-500 focus:outline-none"
-                        placeholder="Artist name"
-                    />
+                    <div className="flex items-center gap-2">
+                        <label className="text-xs text-slate-400">BPM:</label>
+                        <input
+                            type="number"
+                            value={editedBpm}
+                            onChange={(e) => setEditedBpm(parseInt(e.target.value) || 0)}
+                            onKeyDown={handleKeyDown}
+                            onBlur={(e) => {
+                                const relatedTarget = e.relatedTarget as HTMLElement;
+                                if (!relatedTarget || !e.currentTarget.parentElement?.parentElement?.contains(relatedTarget)) {
+                                    handleSaveEdit();
+                                }
+                            }}
+                            className="w-20 px-2 py-1 text-sm font-mono bg-slate-700 text-slate-200 rounded border border-slate-600 focus:border-blue-500 focus:outline-none"
+                            min={1}
+                            max={999}
+                            placeholder="120"
+                        />
+                    </div>
                     <div className="flex gap-2">
                         <button
                             onClick={handleSaveEdit}
@@ -190,26 +211,23 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                     </div>
                 </div>
             ) : (
-                <>
-                    <h3 
-                        onDoubleClick={handleDoubleClick}
-                        className="text-lg font-bold text-slate-200 mb-1 truncate group-hover:text-white transition-colors cursor-pointer"
-                        title="Double-click to edit"
-                    >
-                        {song.title}
-                    </h3>
-                    <p 
-                        onDoubleClick={handleDoubleClick}
-                        className="text-sm text-slate-400 mb-4 truncate cursor-pointer"
-                        title="Double-click to edit"
-                    >
-                        {song.artist}
-                    </p>
-                </>
+                <h3 
+                    onDoubleClick={handleDoubleClick}
+                    className="text-lg font-bold text-slate-200 mb-4 truncate group-hover:text-white transition-colors cursor-pointer"
+                    title="Double-click to edit"
+                >
+                    {song.title}
+                </h3>
             )}
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs mb-4">
+            <div className="grid grid-cols-3 gap-y-2 gap-x-3 text-xs mb-4">
+                <div>
+                    <div className="text-slate-500 mb-0.5">BPM</div>
+                    <div className="font-mono font-medium text-slate-300">
+                        {song.bpm}
+                    </div>
+                </div>
                 <div>
                     <div className="text-slate-500 mb-0.5">Rating</div>
                     <div className="font-mono font-medium text-slate-300">
@@ -226,16 +244,6 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
 
             {/* Action Buttons */}
             <div className="flex items-center justify-center gap-2 pt-3 border-t border-slate-700/50">
-                {/* Link MIDI button - only show if no MIDI linked */}
-                {!hasMidiLinked && onLinkMidi && (
-                    <button 
-                        onClick={handleLinkMidiClick}
-                        className="px-2.5 py-1 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-full font-medium shadow-lg shadow-amber-900/30 transition-colors"
-                        title="Link MIDI file"
-                    >
-                        Link MIDI
-                    </button>
-                )}
                 <button 
                     onClick={handleWorkbenchClick}
                     className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-full font-medium shadow-lg shadow-blue-900/30 flex items-center gap-1 transition-colors"

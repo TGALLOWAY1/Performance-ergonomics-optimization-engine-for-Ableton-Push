@@ -13,7 +13,7 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { Voice, GridMapping, cellKey, parseCellKey } from '../types/layout';
+import { Voice, GridMapping, cellKey, parseCellKey, LayoutMode } from '../types/layout';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
@@ -89,7 +89,6 @@ interface LayoutDesignerProps {
   /** Active layout for performance analysis */
   activeLayout: LayoutSnapshot | null;
 
-
   /** View Settings: Show Cell labels (Voice MIDI note numbers) on Pads */
   showNoteLabels?: boolean;
   /** View Settings: Show position labels (row, col) on Pads */
@@ -100,6 +99,14 @@ interface LayoutDesignerProps {
   showHeatmap?: boolean;
   /** Engine result from Workbench (reactive solver loop) */
   engineResult?: EngineResult | null;
+  
+  // ============================================================================
+  // Explicit Layout Control Callbacks (new for user-driven layout model)
+  // ============================================================================
+  /** Callback to run biomechanical optimization on the current layout */
+  onOptimizeLayout?: () => void;
+  /** Callback to save the current layout as a new version */
+  onSaveLayoutVersion?: () => void;
 }
 
 // Droppable Pad Component (represents a Pad on the 8x8 grid)
@@ -438,12 +445,15 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onSetActiveMappingId,
   activeLayout,
 
-
   showNoteLabels = false,
   showPositionLabels = false,
   // viewAllSteps = false,
   showHeatmap = false,
   engineResult: engineResultProp = null,
+  
+  // Explicit layout control callbacks
+  onOptimizeLayout,
+  onSaveLayoutVersion,
 }) => {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -777,7 +787,12 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     }
   };
 
-  // Handle clear grid - moves all sounds back to staging
+  // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Clear Grid
+  // ============================================================================
+  // Removes all pad assignments and moves sounds back to staging.
+  // Sets layoutMode to 'none'.
+  // ============================================================================
   const handleClearGrid = () => {
     if (!activeMapping) {
       return; // Nothing to clear
@@ -795,12 +810,15 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         }
       });
 
-      // Clear the grid
+      // Clear the grid and set layoutMode to 'none'
       onUpdateMapping({
         cells: {},
+        layoutMode: 'none',
       });
       setSelectedCellKey(null);
       setReachabilityConfig(null);
+      
+      console.log('[LayoutDesigner] Clear Grid: all sounds moved to staging. Layout mode set to "none".');
     }
   };
 
@@ -986,7 +1004,12 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     });
   };
 
-  // Handle auto-assign random: Map unassigned Voices to empty Pads
+  // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Assign Manually (Random Placement)
+  // ============================================================================
+  // Maps all unassigned Voices to empty Pads using random, non-colliding placement.
+  // Does NOT move already-assigned pads. Sets layoutMode to 'random'.
+  // ============================================================================
   const handleAutoAssignRandom = () => {
     if (!activeMapping || !instrumentConfig) {
       alert('No active mapping or instrument config available. Please create a mapping first.');
@@ -1029,16 +1052,20 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       assignments[shuffledPads[i].key] = shuffledVoices[i];
     }
 
-    // Batch assign all at once
+    // Batch assign all at once and update layoutMode to 'random'
     if (Object.keys(assignments).length > 0) {
-      if (onAssignSounds) {
-        onAssignSounds(assignments);
-      } else {
-        // Fallback: assign individually
-        Object.entries(assignments).forEach(([key, voice]) => {
-          onAssignSound(key, voice);
-        });
-      }
+      // Merge new assignments with existing cells and update layoutMode
+      const mergedCells = {
+        ...activeMapping.cells,
+        ...assignments,
+      };
+      
+      onUpdateMapping({
+        cells: mergedCells,
+        layoutMode: 'random',
+      });
+      
+      console.log(`[LayoutDesigner] Assign Manually: placed ${Object.keys(assignments).length} voices randomly. Layout mode set to 'random'.`);
     }
   };
 
@@ -1207,18 +1234,87 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               className="flex-1 flex flex-col items-center justify-center overflow-hidden p-2 bg-[var(--bg-app)] min-h-0 relative"
               style={{ containerType: 'size' } as React.CSSProperties}
             >
-              {/* Grid Header Actions */}
-              <div className="absolute top-4 right-4 flex gap-2 z-10">
-                <button
-                  onClick={handleClearGrid}
-                  disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
-                  className="p-2 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-full text-[var(--text-secondary)] hover:text-[var(--text-warning)] hover:border-[var(--text-warning)] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                  title="Clear Grid"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+              {/* ============================================================================ */}
+              {/* EXPLICIT LAYOUT CONTROLS TOOLBAR */}
+              {/* User-driven layout model: All layout changes require explicit user action */}
+              {/* ============================================================================ */}
+              <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
+                {/* Layout Mode Indicator */}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg">
+                  <div className={`w-2 h-2 rounded-full ${
+                    activeMapping?.layoutMode === 'optimized' ? 'bg-emerald-500' :
+                    activeMapping?.layoutMode === 'random' ? 'bg-amber-500' :
+                    activeMapping?.layoutMode === 'manual' ? 'bg-blue-500' :
+                    'bg-slate-500'
+                  }`} />
+                  <span className="text-xs text-[var(--text-secondary)] font-medium">
+                    {activeMapping?.layoutMode === 'optimized' ? 'Optimized Layout' :
+                     activeMapping?.layoutMode === 'random' ? 'Random Layout' :
+                     activeMapping?.layoutMode === 'manual' ? 'Manual Layout' :
+                     'No Layout'}
+                  </span>
+                  {activeMapping?.version && (
+                    <span className="text-[10px] text-[var(--text-secondary)] opacity-60">v{activeMapping.version}</span>
+                  )}
+                </div>
+
+                {/* Explicit Layout Control Buttons */}
+                <div className="flex items-center gap-2">
+                  {/* Assign Manually - Random Placement */}
+                  <button
+                    onClick={handleAutoAssignRandom}
+                    disabled={!activeMapping || stagingAssets.length === 0}
+                    className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
+                    title="Randomly assign all unassigned sounds to empty pads"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Assign Manually
+                  </button>
+
+                  {/* Optimize Layout - Biomechanical Optimization */}
+                  <button
+                    onClick={onOptimizeLayout}
+                    disabled={!activeMapping || !onOptimizeLayout || Object.keys(activeMapping?.cells || {}).length === 0}
+                    className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
+                    title="Run biomechanical optimization to find the best layout (overwrites current layout)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Optimize Layout
+                  </button>
+
+                  {/* Clear Grid */}
+                  <button
+                    onClick={handleClearGrid}
+                    disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
+                    className="px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
+                    title="Clear all sounds from the grid (moves to staging)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear Grid
+                  </button>
+
+                  {/* Divider */}
+                  <div className="w-px h-6 bg-[var(--border-subtle)] mx-1" />
+
+                  {/* Save Layout Version */}
+                  <button
+                    onClick={onSaveLayoutVersion}
+                    disabled={!activeMapping || !onSaveLayoutVersion || Object.keys(activeMapping?.cells || {}).length === 0}
+                    className="px-3 py-1.5 text-xs font-medium bg-[var(--bg-card)] hover:bg-[var(--bg-panel)] border border-[var(--border-subtle)] disabled:opacity-50 text-[var(--text-primary)] rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
+                    title="Save current layout as a new version"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    </svg>
+                    Save Layout
+                  </button>
+                </div>
               </div>
               <div
                 className="grid grid-cols-8 gap-2 bg-[var(--bg-panel)] p-4 rounded-xl shadow-2xl border border-[var(--border-subtle)]"
@@ -1286,10 +1382,10 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </React.Fragment>
                 ))}
               </div>
+              
+              {/* Finger Legend - Centered below grid */}
+              <FingerLegend />
             </div>
-
-            {/* Finger Legend */}
-            <FingerLegend />
 
             {/* Bottom: Performance Timeline - REMOVED: Now rendered in Workbench Dashboard section */}
             {/* Timeline is now displayed in the Dashboard section at the top of Workbench to avoid duplication */}

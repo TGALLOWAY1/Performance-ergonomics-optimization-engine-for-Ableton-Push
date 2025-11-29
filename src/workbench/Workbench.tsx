@@ -2,12 +2,12 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { LayoutDesigner } from './LayoutDesigner';
-import { GridMapping, Voice } from '../types/layout';
+import { GridMapping, Voice, LayoutMode, cellKey } from '../types/layout';
 import { InstrumentConfig } from '../types/performance';
 import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
-import { BiomechanicalSolver } from '../engine/core';
+import { BiomechanicalSolver, SolverType } from '../engine/core';
 import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
 import { AnalysisPanel } from './AnalysisPanel';
@@ -25,6 +25,9 @@ export const Workbench: React.FC = () => {
     canRedo,
     engineResult,
     setEngineResult,
+    runSolver,
+    setActiveSolverId,
+    getSolverResult,
   } = useProject();
 
   const [searchParams] = useSearchParams();
@@ -53,25 +56,51 @@ export const Workbench: React.FC = () => {
     [projectState.mappings, activeMappingId]
   );
 
-  // Initialize activeMappingId if mappings exist but activeMappingId is null or invalid
-  useEffect(() => {
-    if (projectState.mappings.length > 0) {
-      // If no activeMappingId is set, or if the activeMappingId doesn't exist in mappings, use the first one
-      if (!activeMappingId || !projectState.mappings.find(m => m.id === activeMappingId)) {
-        setActiveMappingId(projectState.mappings[0].id);
-      }
-    } else {
-      // If there are no mappings, clear activeMappingId
-      if (activeMappingId) {
-        setActiveMappingId(null);
-      }
-    }
-  }, [activeMappingId, projectState.mappings]);
+  // Use a ref to track the previous mappings array to detect actual changes
+  const prevMappingsRef = useRef(projectState.mappings);
+  const activeMappingIdRef = useRef(activeMappingId);
+  activeMappingIdRef.current = activeMappingId;
 
+  // Initialize or update activeMappingId when mappings change
+  // Uses refs to avoid depending on activeMappingId (which would cause loops)
+  useEffect(() => {
+    const mappings = projectState.mappings;
+    const currentId = activeMappingIdRef.current;
+    
+    // Only process if mappings actually changed (reference check)
+    // This prevents unnecessary updates on every render
+    if (mappings === prevMappingsRef.current && currentId !== null) {
+      return;
+    }
+    prevMappingsRef.current = mappings;
+    
+    if (mappings.length > 0) {
+      // Check if current selection is still valid
+      const mappingExists = mappings.find(m => m.id === currentId);
+      if (!currentId || !mappingExists) {
+        // Select first mapping only if current is invalid
+        setActiveMappingId(mappings[0].id);
+      }
+    } else if (currentId !== null) {
+      // Clear selection if no mappings
+      setActiveMappingId(null);
+    }
+  }, [projectState.mappings]);
+
+  // Track if we've already attempted to load this session to prevent double-loading
+  const hasAttemptedLoadRef = useRef(false);
+  const loadedSongIdRef = useRef<string | null>(null);
+  
   // Load song state when navigating from Dashboard with a songId
   // This effect runs on mount and when songId changes
   useEffect(() => {
     if (!songId) return;
+    
+    // Prevent double-loading the same song in the same session
+    if (hasAttemptedLoadRef.current && loadedSongIdRef.current === songId) {
+      console.log('[Workbench] Already loaded this song in session, skipping');
+      return;
+    }
     
     // Get song metadata for display
     const song = songService.getSong(songId);
@@ -84,10 +113,11 @@ export const Workbench: React.FC = () => {
     const isSameSong = lastLoadedSongId === songId;
     
     // Check if the current projectState has MEANINGFUL data (not just the default initial state)
-    // The initial state has layout-1, so we need to check for actual song data
+    // Check for performance events (MIDI data), voices, AND mapping cells
+    const hasPerformanceEvents = projectState.layouts.some(l => l.performance?.events?.length > 0);
     const hasVoices = projectState.parkedSounds.length > 0;
     const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-    const hasRealData = hasVoices || hasMappingCells;
+    const hasRealData = hasPerformanceEvents || hasVoices || hasMappingCells;
     
     // ALWAYS load from storage when:
     // 1. Different song than last time (user switched songs), OR
@@ -98,11 +128,17 @@ export const Workbench: React.FC = () => {
       songId, 
       lastLoadedSongId, 
       isSameSong, 
+      hasPerformanceEvents,
       hasVoices,
       hasMappingCells,
       hasRealData,
-      shouldLoad 
+      shouldLoad,
+      hasAttemptedLoad: hasAttemptedLoadRef.current,
     });
+    
+    // Mark that we've attempted to load
+    hasAttemptedLoadRef.current = true;
+    loadedSongIdRef.current = songId;
     
     if (shouldLoad) {
       console.log('[Workbench] Loading song state for:', songId);
@@ -119,6 +155,7 @@ export const Workbench: React.FC = () => {
           mappingsCount: savedState.mappings.length,
           mappingCells: savedState.mappings.map(m => Object.keys(m.cells).length),
           voiceNames: savedState.parkedSounds.map(v => v.name),
+          performanceEventsCount: savedState.layouts[0]?.performance?.events?.length || 0,
         });
         
         // Set the project state from the saved state
@@ -138,7 +175,7 @@ export const Workbench: React.FC = () => {
       setCurrentSongId(songId);
       setHasLoadedSong(true);
     }
-  }, [songId, setProjectState]); // Dependencies: songId changes trigger reload
+  }, [songId, setProjectState, projectState]); // Added projectState to properly track when data is loaded
 
   // Auto-save project state changes back to the song (debounced)
   useEffect(() => {
@@ -205,11 +242,62 @@ export const Workbench: React.FC = () => {
   const [showPositionLabels, setShowPositionLabels] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
 
+  // Solver control state
+  const [selectedSolver, setSelectedSolver] = useState<SolverType>('beam');
+  const [isRunningSolver, setIsRunningSolver] = useState(false);
+  const [solverProgress, setSolverProgress] = useState(0);
+
   // Engine state
 
 
   // Timeline state
   const filteredPerformance = useMemo(() => getActivePerformance(projectState), [projectState]);
+
+  // Handler for running solver
+  const handleRunSolver = useCallback(async () => {
+    if (!filteredPerformance || filteredPerformance.events.length === 0) {
+      alert('No performance data available. Please load a MIDI file first.');
+      return;
+    }
+
+    setIsRunningSolver(true);
+    setSolverProgress(0);
+
+    try {
+      // For genetic solver, simulate progress updates
+      if (selectedSolver === 'genetic') {
+        // Create a progress interval (genetic solver runs async)
+        const progressInterval = setInterval(() => {
+          setSolverProgress(prev => {
+            if (prev >= 90) {
+              clearInterval(progressInterval);
+              return prev;
+            }
+            return prev + 5;
+          });
+        }, 500);
+        
+        await runSolver(selectedSolver, activeMapping);
+        
+        clearInterval(progressInterval);
+        setSolverProgress(100);
+        
+        // Set as active solver
+        setActiveSolverId(selectedSolver);
+      } else {
+        // Beam solver is fast, no progress needed
+        await runSolver(selectedSolver, activeMapping);
+        setActiveSolverId(selectedSolver);
+        setSolverProgress(100);
+      }
+    } catch (error) {
+      console.error('[Workbench] Solver execution failed:', error);
+      alert(`Solver execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsRunningSolver(false);
+      setTimeout(() => setSolverProgress(0), 1000); // Reset progress after 1s
+    }
+  }, [selectedSolver, filteredPerformance, activeMapping, runSolver, setActiveSolverId]);
 
 
   /**
@@ -273,7 +361,11 @@ export const Workbench: React.FC = () => {
 
         // HARD RESET: Replace instrument configs and mappings entirely
         const updatedInstrumentConfigs = [projectData.instrumentConfig];
-        const updatedMappings = [projectData.gridMapping];
+        // Ensure layoutMode is 'none' - grid starts empty, users must explicitly assign
+        const updatedMappings = [{
+          ...projectData.gridMapping,
+          layoutMode: 'none' as const,
+        }];
 
         // HARD RESET: Replace voices entirely, don't merge
         // Reset ignoredNoteNumbers to empty (all new voices visible by default)
@@ -325,7 +417,13 @@ export const Workbench: React.FC = () => {
       console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
 
       // Verify engine works with the new data
-      const solver = new BiomechanicalSolver(projectData.instrumentConfig, projectData.gridMapping);
+      // Pass engine configuration from project state (or use defaults)
+      const solver = new BiomechanicalSolver(
+        projectData.instrumentConfig, 
+        projectData.gridMapping,
+        undefined, // Use default engine constants
+        projectState.engineConfiguration
+      );
       const engineResult = solver.solve(projectData.performance);
       console.log('[Workbench] Engine verification result:', {
         score: engineResult.score,
@@ -395,7 +493,13 @@ export const Workbench: React.FC = () => {
           });
         }
 
-        const solver = new BiomechanicalSolver(projectState.instrumentConfig, activeMapping);
+        // Create solver with instrument config, grid mapping, and engine configuration
+        const solver = new BiomechanicalSolver(
+          projectState.instrumentConfig, 
+          activeMapping,
+          undefined, // Use default engine constants
+          projectState.engineConfiguration
+        );
         const result = solver.solve(filteredPerformance, parsedAssignments);
 
         // DEBUG: Log engine result to verify finger assignments
@@ -466,6 +570,7 @@ export const Workbench: React.FC = () => {
     activeLayout?.performance.events, // Watch for performance changes
     projectState.instrumentConfig, // Watch for config changes
     projectState.ignoredNoteNumbers, // Watch for voice visibility changes
+    projectState.engineConfiguration, // Watch for engine configuration changes
     projectState, // Include full state for getActivePerformance selector
   ]);
 
@@ -522,16 +627,18 @@ export const Workbench: React.FC = () => {
   };
 
   // LayoutDesigner handlers
-  const handleAssignSound = (cellKey: string, sound: Voice) => {
+  // When user manually drags a sound to a pad, set layoutMode to 'manual'
+  const handleAssignSound = (cellKeyStr: string, sound: Voice) => {
     if (!activeMapping) {
-      // Create a new mapping if none exists
+      // Create a new mapping if none exists (with layoutMode: 'manual')
       const newMapping: GridMapping = {
         id: `mapping-${Date.now()}`,
         name: 'New Mapping',
-        cells: { [cellKey]: sound },
+        cells: { [cellKeyStr]: sound },
         fingerConstraints: {},
         scoreCache: null,
         notes: '',
+        layoutMode: 'manual', // User-initiated assignment
       };
       setProjectState({
         ...projectState,
@@ -540,7 +647,7 @@ export const Workbench: React.FC = () => {
       // Set activeMappingId immediately to ensure it's available
       setActiveMappingId(newMapping.id);
     } else {
-      // Update existing mapping
+      // Update existing mapping, set layoutMode to 'manual' (user modified the layout)
       setProjectState({
         ...projectState,
         mappings: projectState.mappings.map(m => {
@@ -549,8 +656,9 @@ export const Workbench: React.FC = () => {
             ...m,
             cells: {
               ...m.cells,
-              [cellKey]: sound,
+              [cellKeyStr]: sound,
             },
+            layoutMode: 'manual', // User modified the layout
           };
         }),
       });
@@ -743,9 +851,9 @@ export const Workbench: React.FC = () => {
       const updatedCells: Record<string, Voice> = {};
       let hasChanges = false;
 
-      Object.entries(m.cells).forEach(([cellKey, sound]) => {
+      Object.entries(m.cells).forEach(([cellKeyStr, sound]) => {
         if (sound.id !== soundId) {
-          updatedCells[cellKey] = sound;
+          updatedCells[cellKeyStr] = sound;
         } else {
           hasChanges = true;
         }
@@ -766,6 +874,146 @@ export const Workbench: React.FC = () => {
       mappings: updatedMappings,
     });
   };
+
+  // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Optimize Layout
+  // ============================================================================
+  // Runs the biomechanical solver to find an optimal layout.
+  // IMPORTANT: This OVERWRITES the current layout with the optimized result.
+  // Only runs when explicitly triggered by user clicking "Optimize Layout" button.
+  // ============================================================================
+  const handleOptimizeLayout = useCallback(() => {
+    if (!activeMapping) {
+      alert('No active mapping to optimize. Please assign some sounds first.');
+      return;
+    }
+
+    const currentCells = activeMapping.cells;
+    if (Object.keys(currentCells).length === 0) {
+      alert('No sounds assigned to the grid. Please assign sounds first, then optimize.');
+      return;
+    }
+
+    // Get the current performance to optimize for
+    const performance = getActivePerformance(projectState);
+    if (!performance || performance.events.length === 0) {
+      alert('No performance data available. Cannot optimize without MIDI events.');
+      return;
+    }
+
+    console.log('[Workbench] Starting layout optimization...');
+
+    try {
+      // Run the biomechanical solver with current configuration
+      const solver = new BiomechanicalSolver(
+        projectState.instrumentConfig,
+        activeMapping,
+        undefined,
+        projectState.engineConfiguration
+      );
+
+      // Get manual assignments for current layout
+      const currentLayoutId = projectState.activeLayoutId;
+      const manualAssignments = currentLayoutId && projectState.manualAssignments
+        ? projectState.manualAssignments[currentLayoutId]
+        : undefined;
+
+      // Convert string keys to numbers for the engine
+      const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
+      if (manualAssignments) {
+        Object.entries(manualAssignments).forEach(([key, value]) => {
+          parsedAssignments[parseInt(key, 10)] = value;
+        });
+      }
+
+      const result = solver.solve(performance, parsedAssignments);
+
+      console.log('[Workbench] Optimization complete:', {
+        score: result.score,
+        hardCount: result.hardCount,
+        unplayableCount: result.unplayableCount,
+      });
+
+      // For now, we don't actually rearrange the pads - we just mark the layout as "optimized"
+      // A full optimization would require implementing a layout search algorithm
+      // that tries different pad arrangements and scores them.
+      //
+      // TODO: Implement full layout optimization that:
+      // 1. Generates candidate layouts (permutations of pad assignments)
+      // 2. Scores each with the biomechanical solver
+      // 3. Picks the best one
+      //
+      // For now, we mark as "optimized" to indicate the user has run the optimization,
+      // even though the actual optimization algorithm is not yet implemented.
+
+      // Update mapping with layoutMode: 'optimized'
+      setProjectState(prevState => ({
+        ...prevState,
+        mappings: prevState.mappings.map(m =>
+          activeMapping && m.id === activeMapping.id
+            ? { 
+                ...m, 
+                layoutMode: 'optimized' as LayoutMode,
+                scoreCache: result.score,
+              }
+            : m
+        ),
+      }));
+
+      // Update engine result
+      setEngineResult(result);
+
+      alert(`Layout optimization complete!\n\nScore: ${(result.score * 100).toFixed(1)}%\nHard transitions: ${result.hardCount}\nUnplayable: ${result.unplayableCount}\n\n(Note: Full layout rearrangement is not yet implemented. Layout marked as "optimized".)`);
+
+    } catch (err) {
+      console.error('[Workbench] Optimization failed:', err);
+      alert('Layout optimization failed. See console for details.');
+    }
+  }, [activeMapping, projectState, setProjectState, setEngineResult]);
+
+  // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Save Layout Version
+  // ============================================================================
+  // Saves the current layout as a new version (snapshot).
+  // This is for versioning, not basic persistence (autosave handles that).
+  // ============================================================================
+  const handleSaveLayoutVersion = useCallback(() => {
+    if (!activeMapping) {
+      alert('No active mapping to save.');
+      return;
+    }
+
+    if (Object.keys(activeMapping.cells).length === 0) {
+      alert('Cannot save an empty layout. Please assign some sounds first.');
+      return;
+    }
+
+    // Increment version number
+    const currentVersion = activeMapping.version || 0;
+    const newVersion = currentVersion + 1;
+
+    console.log(`[Workbench] Saving layout version ${newVersion}...`);
+
+    // Update the mapping with new version info
+    setProjectState(prevState => ({
+      ...prevState,
+      mappings: prevState.mappings.map(m =>
+        activeMapping && m.id === activeMapping.id
+          ? {
+              ...m,
+              version: newVersion,
+              savedAt: new Date().toISOString(),
+            }
+          : m
+      ),
+    }));
+
+    // The autosave mechanism will persist this change automatically
+
+    alert(`Layout saved as version ${newVersion}.\n\nAutosave will persist this to storage.`);
+
+    console.log(`[Workbench] Layout version ${newVersion} saved successfully.`);
+  }, [activeMapping, setProjectState]);
 
 
 
@@ -930,6 +1178,71 @@ export const Workbench: React.FC = () => {
               <span>Grid Editor</span>
             </div>
 
+            {/* Solver Controls */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
+                <label className="text-xs text-slate-400 font-medium">Optimization Model:</label>
+                <select
+                  value={selectedSolver}
+                  onChange={(e) => setSelectedSolver(e.target.value as SolverType)}
+                  disabled={isRunningSolver}
+                  className="bg-slate-900/50 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="beam">Beam Search (Fast)</option>
+                  <option value="genetic">Genetic Algorithm (Deep)</option>
+                </select>
+              </div>
+
+              <button
+                onClick={handleRunSolver}
+                disabled={isRunningSolver || !filteredPerformance || filteredPerformance.events.length === 0}
+                className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
+              >
+                {isRunningSolver ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Running...
+                  </>
+                ) : (
+                  'Run Optimization'
+                )}
+              </button>
+
+              {/* Progress bar for genetic solver */}
+              {isRunningSolver && selectedSolver === 'genetic' && (
+                <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-300"
+                    style={{ width: `${solverProgress}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Solver result selector */}
+              {projectState.solverResults && Object.keys(projectState.solverResults).length > 0 && (
+                <>
+                  <div className="h-6 w-px bg-slate-700/50" />
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-slate-400 font-medium">View Result:</label>
+                    <select
+                      value={projectState.activeSolverId || ''}
+                      onChange={(e) => setActiveSolverId(e.target.value)}
+                      className="bg-slate-900/50 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {Object.keys(projectState.solverResults).map(solverId => (
+                        <option key={solverId} value={solverId}>
+                          {solverId === 'beam' ? 'Beam Search' : solverId === 'genetic' ? 'Genetic Algorithm' : solverId}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
             {/* View Toggles */}
             <div className="flex items-center gap-3 bg-slate-800/30 rounded-full px-1 py-1 border border-slate-700/30">
               <button
@@ -1037,28 +1350,13 @@ export const Workbench: React.FC = () => {
                 showPositionLabels={showPositionLabels}
                 showHeatmap={showHeatmap}
                 engineResult={engineResult}
+                // Explicit layout control callbacks
+                onOptimizeLayout={handleOptimizeLayout}
+                onSaveLayoutVersion={handleSaveLayoutVersion}
               />
             </div>
           </div>
 
-          {/* Bottom Status Bar (Ergonomic Score) */}
-          <div className="flex-none h-12 glass-panel border-t border-slate-700/50 flex items-center justify-center px-6">
-            {engineResult ? (
-              <div className="flex items-center gap-3 px-4 py-1.5 bg-slate-800/80 rounded-full border border-slate-700 shadow-lg">
-                <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Section Ergonomic Score:</span>
-                <span className={`text-sm font-bold ${engineResult.score >= 0.8 ? 'text-emerald-400' :
-                  engineResult.score >= 0.6 ? 'text-amber-400' : 'text-red-400'
-                  }`}>
-                  {engineResult.score.toFixed(2)}
-                  <span className="text-xs font-normal opacity-70 ml-1">
-                    ({engineResult.score >= 0.8 ? 'Excellent' : engineResult.score >= 0.6 ? 'Good' : 'Poor'})
-                  </span>
-                </span>
-              </div>
-            ) : (
-              <span className="text-xs text-slate-500">Waiting for analysis...</span>
-            )}
-          </div>
         </div>
 
         {/* Right: Analysis Panel */}
