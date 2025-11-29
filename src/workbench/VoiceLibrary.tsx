@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Voice, GridMapping, parseCellKey } from '../types/layout';
 import { InstrumentConfig } from '../types/performance';
@@ -324,7 +324,6 @@ interface VoiceLibraryProps {
     onUpdateMappingSound: (key: string, updates: Partial<Voice>) => void;
     onDeleteSound: (id: string) => void;
     onToggleVoiceVisibility: (note: number) => void;
-    onImport?: (file: File) => void;
     handleDestructiveDelete: (note: number) => void;
     handleAutoAssignRandom: () => void;
     handleClearStaging: () => void;
@@ -345,13 +344,11 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
     onUpdateMappingSound,
     onDeleteSound,
     onToggleVoiceVisibility,
-    onImport,
     handleDestructiveDelete,
     handleAutoAssignRandom,
     handleClearStaging,
 }) => {
     const [activeTab, setActiveTab] = useState<'all' | 'unassigned' | 'placed'>('unassigned');
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Derived Data
     const placedAssets = activeMapping ? Object.values(activeMapping.cells) : [];
@@ -363,55 +360,12 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
         ? Array.from(new Set(rawPerformance.events.map(e => e.noteNumber))).sort((a, b) => a - b)
         : [];
 
-    const handleNewSound = () => {
-        const newSound: Voice = {
-            id: `sound-${Date.now()}`,
-            name: 'New Sound',
-            sourceType: 'midi_track',
-            sourceFile: '',
-            originalMidiNote: null,
-            color: '#333333',
-        };
-        onAddSound(newSound);
-        onSelectSound(newSound.id);
-    };
-
-    const handleMidiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file || !onImport) return;
-        onImport(file);
-        if (event.target) event.target.value = '';
-    };
-
     return (
         <div className="flex flex-col h-full">
             {/* Library Header */}
             <div className="flex items-center justify-between p-4 pb-2">
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">Voice Library</h2>
-                <div className="flex gap-2">
-                    <button
-                        onClick={handleNewSound}
-                        className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded border border-green-500 transition-colors"
-                        title="Add New Sound"
-                    >
-                        + New
-                    </button>
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="px-2 py-1 text-xs bg-[var(--finger-L1)] hover:bg-[var(--finger-L2)] text-white rounded border border-[var(--finger-L2)] transition-colors"
-                        disabled={!instrumentConfig}
-                        title={!instrumentConfig ? 'No instrument config available' : 'Import MIDI file'}
-                    >
-                        Import MIDI
-                    </button>
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".mid,.midi"
-                        onChange={handleMidiFileSelect}
-                        className="hidden"
-                    />
-                </div>
+                {/* Import MIDI and +New buttons removed - use Dashboard for importing */}
             </div>
 
             {/* Clear Staging Icon (Only visible in Unassigned tab) */}

@@ -536,13 +536,6 @@ export class BiomechanicalSolver {
     this.rightHandState = createInitialHandState();
     this.lastEventTime = -1;
 
-    // Track usage stats
-    // const fingerUsageStats: FingerUsageStats = {}; // REMOVED: Redeclared
-
-    // Track drift
-    // let totalDrift = 0; // REMOVED: Redeclared
-    // let driftCount = 0; // REMOVED: Redeclared
-
     // Initialize home positions
     const leftHome = getHomePosition('left');
     const rightHome = getHomePosition('right');
@@ -550,10 +543,28 @@ export class BiomechanicalSolver {
     this.leftHandState.centerOfGravity = leftHome;
     this.rightHandState.centerOfGravity = rightHome;
 
+    // CRITICAL FIX: Track used fingers per time slice to prevent same finger playing multiple notes
+    // Epsilon for grouping simultaneous events (1ms tolerance for MIDI timing)
+    const TIME_EPSILON = 0.001;
+    
+    // Helper to create a unique key for (hand, finger) pair
+    const fingerKey = (hand: 'left' | 'right', finger: FingerType): string => `${hand}-${finger}`;
+    
+    // Track which fingers are used in current time slice
+    let currentTimeSlice = -Infinity;
+    let usedFingersInSlice = new Set<string>();
+
     // Event loop: process each note
     for (let i = 0; i < sortedEvents.length; i++) {
       const note = sortedEvents[i];
       const nextNote = i < sortedEvents.length - 1 ? sortedEvents[i + 1] : null;
+      
+      // Check if we're in a new time slice
+      if (note.startTime - currentTimeSlice > TIME_EPSILON) {
+        // New time slice - reset used fingers
+        currentTimeSlice = note.startTime;
+        usedFingersInSlice = new Set<string>();
+      }
 
       // Get target position for this note
       const targetPos = this.getNotePosition(note.noteNumber);
@@ -624,6 +635,11 @@ export class BiomechanicalSolver {
           const candidateFingers = this.generateCandidateFingers(handState, targetPos);
 
           for (const finger of candidateFingers) {
+            // CRITICAL: Skip fingers already used in this time slice (prevents same finger playing multiple notes)
+            if (usedFingersInSlice.has(fingerKey(hand, finger))) {
+              continue; // This finger is already playing another note in this chord/slice
+            }
+            
             // Filter by feasibility: check finger ordering
             const tempHandState: HandState = {
               ...handState,
@@ -687,6 +703,10 @@ export class BiomechanicalSolver {
       const winner = candidates.reduce((best, candidate) =>
         candidate.cost < best.cost ? candidate : best
       );
+
+      // CRITICAL: Mark this finger as used in the current time slice
+      // This prevents the same finger from being assigned to multiple simultaneous notes
+      usedFingersInSlice.add(fingerKey(winner.hand, winner.finger));
 
       // Update hand state
       const winnerHandState = winner.hand === 'left' ? this.leftHandState : this.rightHandState;

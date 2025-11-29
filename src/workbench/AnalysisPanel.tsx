@@ -5,8 +5,6 @@ import { SoundAssignmentTable } from './SoundAssignmentTable';
 import { Performance } from '../types/performance';
 import { EventLogTable } from './EventLogTable';
 import { FingerType } from '../engine/models';
-import { GridVisContainer } from '../components/grid-v3/GridVisContainer';
-import { engineResultToPadActivations } from '../components/grid-v3/adapters';
 
 interface AnalysisPanelProps {
     engineResult: EngineResult | null;
@@ -21,6 +19,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     performance,
     onAssignmentChange,
 }) => {
+
     // Calculate summary stats
     const stats = useMemo(() => {
         if (!engineResult) return null;
@@ -51,8 +50,10 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     return (
         <div className="h-full flex flex-col bg-[var(--bg-panel)] border-l border-[var(--border-subtle)] backdrop-blur-md">
             {/* Header */}
-            <div className="flex-none h-12 border-b border-[var(--border-subtle)] flex items-center px-4 bg-[var(--bg-card)]">
-                <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-wide uppercase">Analysis & Insights</h2>
+            <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--bg-card)]">
+                <div className="flex items-center px-4 h-12">
+                    <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-wide uppercase">Analysis & Insights</h2>
+                </div>
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6 flex flex-col">
@@ -135,31 +136,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             No analysis data available.
                         </div>
                     )}
-                </div>
-
-                {/* Grid Visualization (New v3 Component) */}
-                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex-none border border-[var(--border-subtle)] shadow-sm">
-                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Event Visualization (Snapshot)</h3>
-                    <div className="w-full max-w-[400px] mx-auto aspect-square bg-[var(--bg-app)] rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-subtle)]">
-                        {engineResult ? (
-                            <GridVisContainer
-                                mode="snapshot"
-                                rows={8}
-                                cols={8}
-                                pads={engineResultToPadActivations(engineResult)}
-                                theme={{
-                                    backgroundColor: 'var(--bg-app)',
-                                    gridLineColor: 'var(--border-subtle)',
-                                    padIdleColor: 'var(--bg-panel)',
-                                    padActiveColor: 'var(--bg-card)',
-                                }}
-                            />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs italic">
-                                No visualization data
-                            </div>
-                        )}
-                    </div>
                 </div>
 
                 {/* Event Log & Manual Assignments */}

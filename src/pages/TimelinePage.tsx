@@ -1,16 +1,66 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { Timeline } from '../workbench/Timeline';
 import { Voice } from '../types/layout';
+import { songService } from '../services/SongService';
 
 export const TimelinePage: React.FC = () => {
-    const { projectState, engineResult } = useProject();
+    const { projectState, setProjectState, engineResult } = useProject();
+    const [searchParams] = useSearchParams();
+    const songId = searchParams.get('songId');
+    
+    // Song loading state
+    const [hasLoadedSong, setHasLoadedSong] = useState(false);
+    const [songName, setSongName] = useState<string | null>(null);
+    
+    // Build the workbench link with songId if present
+    const workbenchLink = songId ? `/workbench?songId=${songId}` : '/workbench';
+    const dashboardLink = '/';
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [zoom, setZoom] = useState(100); // pixels per second
     const lastFrameTimeRef = useRef<number>(0);
     const requestRef = useRef<number>();
+
+    // Load song state when page is loaded/refreshed with a songId
+    useEffect(() => {
+        if (!songId) return;
+        
+        // Get song metadata for display
+        const song = songService.getSong(songId);
+        if (song) {
+            setSongName(song.metadata.title);
+        }
+        
+        // Check if the current projectState has MEANINGFUL data
+        const hasVoices = projectState.parkedSounds.length > 0;
+        const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
+        const hasRealData = hasVoices || hasMappingCells;
+        
+        // Load from storage if no real data (page refresh scenario)
+        if (!hasRealData) {
+            console.log('[TimelinePage] No data in context, loading from storage for song:', songId);
+            
+            const savedState = songService.loadSongState(songId);
+            if (savedState) {
+                console.log('[TimelinePage] Loaded saved project state:', {
+                    layoutsCount: savedState.layouts.length,
+                    parkedSoundsCount: savedState.parkedSounds.length,
+                    mappingsCount: savedState.mappings.length,
+                    voiceNames: savedState.parkedSounds.map(v => v.name),
+                });
+                
+                setProjectState(savedState, true); // Skip history for initial load
+            } else {
+                console.log('[TimelinePage] No saved state found for song:', songId);
+            }
+        } else {
+            console.log('[TimelinePage] Using existing data in context');
+        }
+        
+        setHasLoadedSong(true);
+    }, [songId, setProjectState]);
 
     const activeLayout = useMemo(() =>
         projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -135,11 +185,69 @@ export const TimelinePage: React.FC = () => {
         setCurrentTime(time);
     };
 
-    if (!activeLayout) {
+    // Show loading state while loading song
+    if (songId && !hasLoadedSong) {
         return (
             <div className="h-screen w-screen flex flex-col bg-slate-900 text-white items-center justify-center">
-                <p className="text-slate-500 mb-4">No active layout found.</p>
-                <Link to="/" className="text-blue-400 hover:text-blue-300">Return to Workbench</Link>
+                <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mb-4" />
+                <p className="text-slate-400">Loading song data...</p>
+            </div>
+        );
+    }
+
+    // No song selected
+    if (!songId) {
+        return (
+            <div className="h-screen w-screen flex flex-col bg-slate-900 text-white items-center justify-center">
+                <div className="text-center p-8 max-w-md">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-200 mb-2">No Song Selected</h3>
+                    <p className="text-sm text-slate-400 mb-4">
+                        Select a song from the Dashboard to view the timeline.
+                    </p>
+                    <Link
+                        to={dashboardLink}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                        </svg>
+                        Go to Dashboard
+                    </Link>
+                </div>
+            </div>
+        );
+    }
+
+    // Song has no MIDI data
+    if (!activeLayout || projectState.parkedSounds.length === 0) {
+        return (
+            <div className="h-screen w-screen flex flex-col bg-slate-900 text-white items-center justify-center">
+                <div className="text-center p-8 max-w-md">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-900/30 border-2 border-amber-600/50 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-200 mb-2">No MIDI Data</h3>
+                    <p className="text-sm text-slate-400 mb-4">
+                        {songName ? `"${songName}" doesn't have any MIDI data linked yet.` : "This song doesn't have any MIDI data linked yet."} 
+                        Go back to the Dashboard and use the "Link MIDI" button to add a MIDI file.
+                    </p>
+                    <Link
+                        to={dashboardLink}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+                        </svg>
+                        Back to Dashboard
+                    </Link>
+                </div>
             </div>
         );
     }
@@ -149,12 +257,21 @@ export const TimelinePage: React.FC = () => {
             {/* Header */}
             <div className="flex-none h-16 glass-panel-strong border-b border-slate-700/50 flex items-center justify-between px-6 z-20 relative">
                 <div className="flex items-center gap-4">
-                    <Link to="/" className="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
+                    <Link to={workbenchLink} className="text-slate-400 hover:text-white transition-colors flex items-center gap-2">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-                        Back
+                        Back to Grid Editor
                     </Link>
                     <div className="h-6 w-px bg-slate-700/50 mx-2" />
-                    <h1 className="text-lg font-bold text-slate-100">{activeLayout.name}</h1>
+                    <h1 className="text-lg font-bold text-slate-100">Timeline View</h1>
+                    {songName && (
+                        <>
+                            <div className="h-6 w-px bg-slate-700/50 mx-2" />
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-900/30 border border-emerald-700/50 rounded-lg">
+                                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                <span className="text-xs font-medium text-emerald-300">{songName}</span>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Controls */}

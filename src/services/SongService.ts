@@ -3,9 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 const STORAGE_KEY = 'push_perf_songs';
 
-import { parseMidiFileToProject } from '../utils/midiImport';
+import { parseMidiFileToProject, MidiProjectData } from '../utils/midiImport';
 import { saveProjectStateToStorage, loadProjectStateFromStorage, deleteProjectStateFromStorage } from '../utils/projectPersistence';
-import { ProjectState } from '../types/projectState';
+import { ProjectState, createInitialProjectState } from '../types/projectState';
+import { generateId } from '../utils/performanceUtils';
 
 class SongService {
     private getSongsMap(): Record<string, Song> {
@@ -55,11 +56,72 @@ class SongService {
     }
 
     /**
+     * Converts a File to base64 string for persistent storage.
+     */
+    private async fileToBase64(file: File): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = reader.result as string;
+                // Remove the data URL prefix (e.g., "data:audio/midi;base64,")
+                const base64 = result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * Converts base64 string back to ArrayBuffer for parsing.
+     */
+    private base64ToArrayBuffer(base64: string): ArrayBuffer {
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    /**
+     * Creates a ProjectState from parsed MIDI data.
+     */
+    private createProjectStateFromMidi(projectData: MidiProjectData): ProjectState {
+        const layoutId = generateId('layout');
+        
+        const state: ProjectState = {
+            layouts: [{
+                id: layoutId,
+                name: projectData.performance.name || 'Imported Layout',
+                createdAt: new Date().toISOString(),
+                performance: projectData.performance,
+            }],
+            instrumentConfigs: [projectData.instrumentConfig],
+            sectionMaps: projectData.sectionMaps || [],
+            instrumentConfig: projectData.instrumentConfig,
+            activeLayoutId: layoutId,
+            projectTempo: projectData.performance.tempo || 120,
+            parkedSounds: projectData.voices,
+            mappings: [projectData.gridMapping],
+            ignoredNoteNumbers: [],
+            manualAssignments: {},
+        };
+
+        return state;
+    }
+
+    /**
      * Imports a song from a MIDI file.
      * Parses the MIDI to extract metadata (tempo, duration, key inference) and creates a new Song.
+     * Also stores the MIDI data and creates initial project state for later loading.
      */
     async importSongFromMidi(file: File): Promise<Song> {
         try {
+            // Store MIDI file as base64
+            const midiData = await this.fileToBase64(file);
+            
             const projectData = await parseMidiFileToProject(file);
             const { performance, minNoteNumber } = projectData;
 
@@ -74,8 +136,11 @@ class SongService {
             const duration = lastEvent ? Math.ceil(lastEvent.startTime + (lastEvent.duration || 0)) : 0;
 
             const id = uuidv4();
+            const projectStateId = uuidv4();
             const newSong: Song = {
-                projectStateId: uuidv4(),
+                projectStateId,
+                midiData,
+                midiFileName: file.name,
                 metadata: {
                     id,
                     title: performance.name || file.name.replace(/\.[^/.]+$/, ""),
@@ -93,6 +158,10 @@ class SongService {
                 sections: []
             };
 
+            // Create and save initial project state
+            const initialState = this.createProjectStateFromMidi(projectData);
+            saveProjectStateToStorage(projectStateId, initialState);
+
             const songs = this.getSongsMap();
             songs[id] = newSong;
             this.saveSongsMap(songs);
@@ -102,6 +171,80 @@ class SongService {
             console.error('Failed to import song from MIDI:', error);
             throw error;
         }
+    }
+
+    /**
+     * Links a MIDI file to an existing song.
+     * This stores the MIDI data and creates the initial project state.
+     */
+    async linkMidiToSong(songId: string, file: File): Promise<Song | null> {
+        try {
+            const song = this.getSong(songId);
+            if (!song) {
+                console.error('Song not found:', songId);
+                return null;
+            }
+
+            // Store MIDI file as base64
+            const midiData = await this.fileToBase64(file);
+            
+            const projectData = await parseMidiFileToProject(file);
+            const { performance, minNoteNumber } = projectData;
+
+            // Calculate duration from last event
+            const lastEvent = performance.events[performance.events.length - 1];
+            const duration = lastEvent ? Math.ceil(lastEvent.startTime + (lastEvent.duration || 0)) : 0;
+
+            // Infer key
+            const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const rootNote = minNoteNumber !== null ? noteNames[minNoteNumber % 12] : 'C';
+            const inferredKey = `${rootNote} Major`;
+
+            // Update song with MIDI data
+            song.midiData = midiData;
+            song.midiFileName = file.name;
+            song.metadata.bpm = performance.tempo || song.metadata.bpm;
+            song.metadata.duration = duration || song.metadata.duration;
+            song.metadata.key = inferredKey;
+            song.metadata.lastPracticed = Date.now();
+            if (!song.metadata.tags.includes('Imported')) {
+                song.metadata.tags.push('Imported');
+            }
+
+            // Create and save project state
+            const projectState = this.createProjectStateFromMidi(projectData);
+            saveProjectStateToStorage(song.projectStateId, projectState);
+
+            // Save updated song
+            const songs = this.getSongsMap();
+            songs[songId] = song;
+            this.saveSongsMap(songs);
+
+            return song;
+
+        } catch (error) {
+            console.error('Failed to link MIDI to song:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Checks if a song has linked MIDI data.
+     */
+    hasMidiData(songId: string): boolean {
+        const song = this.getSong(songId);
+        return !!song?.midiData;
+    }
+
+    /**
+     * Gets the MIDI ArrayBuffer for a song (for re-parsing if needed).
+     */
+    getMidiArrayBuffer(songId: string): ArrayBuffer | null {
+        const song = this.getSong(songId);
+        if (song?.midiData) {
+            return this.base64ToArrayBuffer(song.midiData);
+        }
+        return null;
     }
 
     updateSongMetadata(id: string, updates: Partial<SongMetadata>): void {
