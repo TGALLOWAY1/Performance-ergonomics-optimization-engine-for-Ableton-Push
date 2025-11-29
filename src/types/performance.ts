@@ -9,6 +9,73 @@
  * - Assignment: The mapping of a Voice/Cell to a Pad
  */
 
+import { FingerType } from '../engine/models';
+
+// ============================================================================
+// Biomechanical Solver Types (Beam Search Engine)
+// ============================================================================
+
+/**
+ * FingerCoordinate: 2D position for finger/hand tracking.
+ * Uses continuous coordinates to allow for sub-pad precision in biomechanical modeling.
+ */
+export interface FingerCoordinate {
+  /** X position (column-axis, 0 = left edge) */
+  x: number;
+  /** Y position (row-axis, 0 = bottom edge) */
+  y: number;
+}
+
+/**
+ * HandPose: Represents the biomechanical state of a hand at a specific time step.
+ * Used by the Beam Search solver to track hand positions during sequence analysis.
+ */
+export interface HandPose {
+  /** Center of the hand (palm centroid) - used for attractor force calculations */
+  centroid: FingerCoordinate;
+  /** 
+   * Current finger positions on the grid.
+   * Partial record allows for fingers to be unplaced (not actively touching a pad).
+   */
+  fingers: Partial<Record<FingerType, FingerCoordinate>>;
+}
+
+/**
+ * RestingPose: Defines the "Home" position for both hands.
+ * This is the neutral position that hands are attracted back to when idle.
+ * Used by the biomechanical cost function to calculate attractor forces.
+ */
+export interface RestingPose {
+  /** Home position for the left hand */
+  left: HandPose;
+  /** Home position for the right hand */
+  right: HandPose;
+}
+
+/**
+ * EngineConfiguration: Parameters for the Beam Search biomechanical solver.
+ * Controls the solver behavior and biomechanical cost calculations.
+ */
+export interface EngineConfiguration {
+  /** 
+   * Beam width: Number of top candidates to keep at each step.
+   * Higher values = more accurate but slower.
+   * Typical values: 10-50. Default: 20.
+   */
+  beamWidth: number;
+  /** 
+   * Stiffness (alpha): Controls the attractor force pulling hands back to resting pose.
+   * Higher values = hands strongly prefer resting position.
+   * Range: 0.0 (no attraction) to 1.0 (very strong). Default: 0.3.
+   */
+  stiffness: number;
+  /** 
+   * The defined home positions for left and right hands.
+   * Used to calculate attractor force costs in the biomechanical model.
+   */
+  restingPose: RestingPose;
+}
+
 /**
  * NoteEvent: A specific instance in time where a Voice is triggered.
  * 

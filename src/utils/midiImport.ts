@@ -3,7 +3,6 @@ import { Performance, NoteEvent, InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { Voice, GridMapping } from '../types/layout';
 import { generateId } from './performanceUtils';
-import { cellKey } from '../types/layout';
 
 /**
  * Result type for MIDI import with unmapped Voice count.
@@ -177,53 +176,28 @@ export async function parseMidiProject(
   console.log('[parseMidiProject] Voices created:', voices.length);
   voices.forEach(v => console.log(`  - ${v.name} (MIDI ${v.originalMidiNote})`));
 
-
-
-  // Create initial grid mapping with voice assignments
-  // IMPORTANT: Only map voices that don't conflict (first voice wins if multiple map to same cell)
+  // ============================================================================
+  // EXPLICIT LAYOUT MODEL: No auto-mapping on import
+  // ============================================================================
+  // All voices go to parkedSounds (staging area). The grid starts EMPTY.
+  // Users must explicitly assign sounds to pads via:
+  // - Drag & drop
+  // - "Assign Manually" button (random placement)
+  // - "Optimize Layout" button (biomechanical optimization)
+  // ============================================================================
   const cells: Record<string, Voice> = {};
-  const usedCells = new Set<string>();
-  let mappedCount = 0;
-  let unmappedCount = 0;
-  let conflictCount = 0;
-
-  voices.forEach(voice => {
-    if (voice.originalMidiNote !== null) {
-      const position = GridMapService.noteToGrid(voice.originalMidiNote, instrumentConfig);
-      if (position) {
-        // position is [row, col] tuple, not an object
-        const [row, col] = position;
-        const cellKeyStr = cellKey(row, col);
-        // Check if this cell is already occupied
-        if (usedCells.has(cellKeyStr)) {
-          console.warn(`[parseMidiProject] Cell ${cellKeyStr} (row ${row}, col ${col}) already occupied! Skipping ${voice.name} (MIDI ${voice.originalMidiNote}) - will be in parkedSounds only`);
-          conflictCount++;
-          // Don't overwrite - voice will remain in parkedSounds but not on grid
-        } else {
-          cells[cellKeyStr] = voice;
-          usedCells.add(cellKeyStr);
-          mappedCount++;
-          console.log(`[parseMidiProject] Mapped ${voice.name} (MIDI ${voice.originalMidiNote}) to cell ${cellKeyStr} (row ${row}, col ${col})`);
-        }
-      } else {
-        console.warn(`[parseMidiProject] Voice ${voice.name} (MIDI ${voice.originalMidiNote}) is outside grid bounds (bottomLeftNote: ${instrumentConfig.bottomLeftNote})`);
-        unmappedCount++;
-      }
-    }
-  });
-
-  // DEBUG: Log grid mapping results
-  console.log(`[parseMidiProject] Grid mapping: ${mappedCount} voices mapped to grid, ${unmappedCount} voices unmapped, ${conflictCount} conflicts (will be in parkedSounds only)`);
-  console.log(`[parseMidiProject] Total cells in mapping: ${Object.keys(cells).length}`);
-  console.log(`[parseMidiProject] Total voices (all will be in parkedSounds): ${voices.length}`);
+  
+  console.log('[parseMidiProject] Grid starts EMPTY - all voices go to parkedSounds (staging area)');
+  console.log(`[parseMidiProject] Total voices for staging: ${voices.length}`);
 
   const gridMapping: GridMapping = {
     id: generateId('mapping'),
     name: `${performance.name} Layout`,
-    cells,
+    cells, // EMPTY - no auto-mapping
     fingerConstraints: {},
     scoreCache: null,
-    notes: `Auto-generated from ${fileName || 'MIDI import'}`,
+    notes: `Created from ${fileName || 'MIDI import'} - use layout controls to assign sounds`,
+    layoutMode: 'none', // Explicit: grid starts with no layout
   };
 
   // DEBUG: Final verification before return
