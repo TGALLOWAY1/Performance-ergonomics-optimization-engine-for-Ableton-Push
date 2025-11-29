@@ -64,13 +64,21 @@ export const PadLayer = memo(({ pads, variant, geometry, theme, onPadClick, onPa
                     strokeWidth = 3;
                 }
 
+                // Ghost pads should not be interactive
+                const isGhost = variant === 'ghost' || pad.state === 'ghost';
+                const pointerEvents = isGhost ? 'none' : 'auto';
+
                 return (
                     <g
                         key={`pad-${pad.id}`}
-                        onClick={() => onPadClick?.(pad.id, pad.row, pad.col)}
-                        onMouseEnter={() => onPadHover?.(pad.id)}
-                        onMouseLeave={() => onPadHover?.(null)}
-                        style={{ cursor: onPadClick ? 'pointer' : 'default' }}
+                        data-shared={pad.isShared || pad.state === 'shared' ? 'true' : undefined}
+                        onClick={isGhost ? undefined : () => onPadClick?.(pad.id, pad.row, pad.col)}
+                        onMouseEnter={isGhost ? undefined : () => onPadHover?.(pad.id)}
+                        onMouseLeave={isGhost ? undefined : () => onPadHover?.(null)}
+                        style={{ 
+                            cursor: isGhost ? 'default' : (onPadClick ? 'pointer' : 'default'),
+                            pointerEvents,
+                        }}
                     >
                         <rect
                             x={xPos}

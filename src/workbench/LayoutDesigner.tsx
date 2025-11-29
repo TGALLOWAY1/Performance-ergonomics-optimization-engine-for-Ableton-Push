@@ -17,11 +17,27 @@ import { Voice, GridMapping, cellKey, parseCellKey } from '../types/layout';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
+import { FingerType } from '../engine/models';
 // MIDI import logic removed - handled by parent Workbench component
+
+/**
+ * Converts FingerType string to FingerID number for CSS variable lookup.
+ * Maps: thumb=1, index=2, middle=3, ring=4, pinky=5
+ */
+const fingerTypeToId = (fingerType: FingerType | null): FingerID | null => {
+  if (!fingerType) return null;
+  const mapping: Record<FingerType, FingerID> = {
+    'thumb': 1,
+    'index': 2,
+    'middle': 3,
+    'ring': 4,
+    'pinky': 5,
+  };
+  return mapping[fingerType] ?? null;
+};
 import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
 import { mapToQuadrants } from '../utils/autoLayout';
-import { exportLayout, importLayout } from '../utils/projectPersistence';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { EngineResult } from '../engine/core';
 import { VoiceLibrary } from './VoiceLibrary';
@@ -76,12 +92,12 @@ interface LayoutDesignerProps {
 
   /** View Settings: Show Cell labels (Voice MIDI note numbers) on Pads */
   showNoteLabels?: boolean;
+  /** View Settings: Show position labels (row, col) on Pads */
+  showPositionLabels?: boolean;
   /** View Settings: View all steps (flatten time) */
   viewAllSteps?: boolean;
   /** View Settings: Show heatmap overlay */
   showHeatmap?: boolean;
-  /** Callback when user wants to import a MIDI file */
-  onImport?: (file: File) => void;
   /** Engine result from Workbench (reactive solver loop) */
   engineResult?: EngineResult | null;
 }
@@ -101,6 +117,7 @@ interface DroppableCellProps {
   heatmapHand?: 'LH' | 'RH' | null;
   fingerConstraint?: string | null;
   showNoteLabels?: boolean;
+  showPositionLabels?: boolean;
   instrumentConfig?: InstrumentConfig | null;
   onClick: () => void;
   onDoubleClick: () => void;
@@ -120,7 +137,8 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
   heatmapFinger,
   heatmapHand,
   fingerConstraint,
-  // showNoteLabels = false,
+  showNoteLabels = false,
+  showPositionLabels = false,
   instrumentConfig = null,
   onClick,
   onDoubleClick,
@@ -207,17 +225,28 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
   // Dynamic Styles based on state
   const getBackgroundStyle = () => {
     if (assignedSound) {
-      // If heatmap is active, overlay color
+      // PRIORITY 1: Use finger colors when we have finger assignment data (matches the legend)
+      // This includes manual assignments, which take priority over engine results
+      if (heatmapFinger && heatmapHand) {
+        // Use the finger colors from the thermal legend
+        const fingerVar = `var(--finger-${heatmapHand === 'LH' ? 'L' : 'R'}${heatmapFinger})`;
+        const fingerVarDark = `var(--finger-${heatmapHand === 'LH' ? 'L' : 'R'}${Math.max(1, heatmapFinger - 1)})`;
+        return `linear-gradient(135deg, ${fingerVar} 0%, ${fingerVarDark} 100%)`;
+      }
+      
+      // PRIORITY 2: Fallback to difficulty colors ONLY if we have difficulty but no finger assignment
+      // This handles cases where the engine couldn't assign a finger (e.g., truly unplayable)
       if (heatmapDifficulty) {
         switch (heatmapDifficulty) {
-          case 'Unplayable': return 'linear-gradient(135deg, #ef4444 0%, #7f1d1d 100%)'; // Red
+          case 'Unplayable': return 'linear-gradient(135deg, #ef4444 0%, #7f1d1d 100%)'; // Red (unplayable)
           case 'Hard': return 'linear-gradient(135deg, #f97316 0%, #9a3412 100%)'; // Orange
           case 'Medium': return 'linear-gradient(135deg, #eab308 0%, #854d0e 100%)'; // Yellow
           default: return 'linear-gradient(135deg, var(--finger-L1) 0%, var(--finger-L2) 100%)'; // Blue (Easy)
         }
       }
-      // Default sound color gradient
-      return `linear-gradient(135deg, ${assignedSound.color || 'var(--finger-L1)'} 0%, ${adjustColorBrightness(assignedSound.color || 'var(--finger-L1)', -40)} 100%)`;
+      
+      // PRIORITY 3: Default: neutral color for cells without engine data yet
+      return 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-panel) 100%)';
     }
 
     // Empty Cell State
@@ -310,17 +339,30 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
             </span>
           )}
 
-          {/* Note Info */}
-          <span className="text-[9px] text-[var(--text-primary)] opacity-60 mt-0.5 font-mono">
-            {noteNumber !== null ? getNoteName(noteNumber) : ''}
-          </span>
+          {/* Note Info - Show when showNoteLabels is enabled */}
+          {showNoteLabels && noteNumber !== null && (
+            <span className="text-[9px] text-[var(--text-primary)] opacity-60 mt-0.5 font-mono">
+              {getNoteName(noteNumber)}
+            </span>
+          )}
 
-          {/* Finger Badge (Top Right) */}
+          {/* Position Label - Show when showPositionLabels is enabled */}
+          {showPositionLabels && (
+            <span className="text-[8px] text-[var(--text-primary)] opacity-50 mt-0.5 font-mono">
+              {row},{col}
+            </span>
+          )}
+
+          {/* Finger Badge (Top Right) - Uses finger colors from legend */}
           {heatmapFinger && heatmapHand && (
-            <div className={`
-              absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-sm z-10 border border-white/20
-              ${heatmapHand === 'LH' ? 'bg-blue-500 text-white' : 'bg-rose-500 text-white'}
-            `}>
+            <div
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-md z-10 border-2 border-white/30"
+              style={{
+                backgroundColor: `var(--finger-${heatmapHand === 'LH' ? 'L' : 'R'}${heatmapFinger})`,
+                color: 'white',
+                textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+              }}
+            >
               {heatmapHand === 'LH' ? 'L' : 'R'}{heatmapFinger}
             </div>
           )}
@@ -340,12 +382,37 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
               <span className="text-[9px] font-medium text-[var(--text-secondary)] uppercase tracking-wider">
                 {templateSlot.label}
               </span>
+              {/* Show Note ID for template slots when showNoteLabels is enabled */}
+              {showNoteLabels && noteNumber !== null && (
+                <span className="text-[9px] text-[var(--text-secondary)] opacity-60 mt-0.5 font-mono">
+                  {getNoteName(noteNumber)}
+                </span>
+              )}
+              {/* Show Position Label for template slots when showPositionLabels is enabled */}
+              {showPositionLabels && (
+                <span className="text-[8px] text-[var(--text-secondary)] opacity-50 mt-0.5 font-mono">
+                  {row},{col}
+                </span>
+              )}
             </div>
           ) : (
-            // Subtle coordinate for empty cells
-            <span className="text-[8px] text-[var(--text-secondary)] font-mono opacity-0 hover:opacity-100 transition-opacity">
-              {row},{col}
-            </span>
+            <>
+              {/* Show Note ID or Position Label for empty cells */}
+              {showNoteLabels && noteNumber !== null ? (
+                <span className="text-[9px] text-[var(--text-secondary)] font-mono opacity-70">
+                  {getNoteName(noteNumber)}
+                </span>
+              ) : showPositionLabels ? (
+                <span className="text-[8px] text-[var(--text-secondary)] font-mono opacity-70">
+                  {row},{col}
+                </span>
+              ) : (
+                // Subtle coordinate for empty cells (only when both labels are off)
+                <span className="text-[8px] text-[var(--text-secondary)] font-mono opacity-0 hover:opacity-100 transition-opacity">
+                  {row},{col}
+                </span>
+              )}
+            </>
           )}
         </>
       )}
@@ -373,14 +440,12 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
 
   showNoteLabels = false,
+  showPositionLabels = false,
   // viewAllSteps = false,
   showHeatmap = false,
-  onImport,
   engineResult: engineResultProp = null,
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const importLayoutInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draggedSound, setDraggedSound] = useState<Voice | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -393,6 +458,68 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Engine result is now passed from Workbench (reactive solver loop)
   // Use prop if provided, otherwise fall back to null
   const engineResult = engineResultProp;
+  
+  // Build a lookup map from noteNumber -> finger assignment for efficient cell coloring
+  // This is computed once when engineResult changes, then used for all cells
+  // Uses the LAST occurrence of each note, so manual assignment changes are reflected
+  const fingerAssignmentMap = useMemo(() => {
+    const map = new Map<number, { finger: FingerID | null; hand: 'LH' | 'RH' | null; difficulty: string }>();
+    
+    if (!engineResult) return map;
+    
+    // Get manual assignments for current layout (these take priority over engine results)
+    const currentLayoutId = projectState.activeLayoutId;
+    const manualAssignments = currentLayoutId && projectState.manualAssignments
+      ? projectState.manualAssignments[currentLayoutId]
+      : undefined;
+    
+    // Get filtered performance to map event indices to note numbers
+    const filteredPerformance = getActivePerformance(projectState);
+    
+    // First, process manual assignments (they override engine results)
+    if (manualAssignments && filteredPerformance) {
+      filteredPerformance.events.forEach((event, eventIndex) => {
+        const eventIndexStr = String(eventIndex);
+        const manualAssignment = manualAssignments[eventIndexStr];
+        
+        if (manualAssignment) {
+          // Manual assignment takes priority - use it even if engine says Unplayable
+          map.set(event.noteNumber, {
+            finger: fingerTypeToId(manualAssignment.finger),
+            hand: manualAssignment.hand === 'left' ? 'LH' : 'RH',
+            // Still get difficulty from engine if available, but use manual finger for color
+            difficulty: engineResult.debugEvents[eventIndex]?.difficulty || 'Medium',
+          });
+        }
+      });
+    }
+    
+    // Then, process engine results for notes without manual assignments
+    // For each note, store the LAST finger assignment (so manual changes show up)
+    engineResult.debugEvents.forEach((event, eventIndex) => {
+      // Skip if this event has a manual assignment (already processed above)
+      if (manualAssignments && filteredPerformance) {
+        const eventIndexStr = String(eventIndex);
+        if (manualAssignments[eventIndexStr]) {
+          return; // Skip - manual assignment already handled
+        }
+      }
+      
+      // Only add if we have a valid finger assignment
+      if (event.assignedHand !== 'Unplayable' && event.finger) {
+        // Only set if not already set by manual assignment
+        if (!map.has(event.noteNumber)) {
+          map.set(event.noteNumber, {
+            finger: fingerTypeToId(event.finger),
+            hand: event.assignedHand === 'left' ? 'LH' : 'RH',
+            difficulty: event.difficulty,
+          });
+        }
+      }
+    });
+    
+    return map;
+  }, [engineResult, projectState]);
   const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
   const [autoLayoutDropdownOpen, setAutoLayoutDropdownOpen] = useState(false);
   const autoLayoutDropdownRef = useRef<HTMLDivElement>(null);
@@ -678,45 +805,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   };
 
   // Note: Save/Load Project functionality moved to main Workbench header to avoid duplication
-
-  // Handle export current layout
-  const handleExportLayout = () => {
-    if (!activeMapping) {
-      alert('No active layout to export. Please create or select a layout first.');
-      return;
-    }
-    exportLayout(activeMapping, parkedSounds);
-  };
-
-  // Handle import layout
-  const handleImportLayoutClick = () => {
-    if (importLayoutInputRef.current) {
-      importLayoutInputRef.current.click();
-    }
-  };
-
-  const handleImportLayout = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      event.target.value = '';
-      return;
-    }
-
-    try {
-      const updatedState = await importLayout(file, projectState);
-      onUpdateProjectState(updatedState);
-      // Set the imported mapping as active
-      if (updatedState.mappings.length > 0 && onSetActiveMappingId) {
-        const importedMapping = updatedState.mappings[updatedState.mappings.length - 1];
-        onSetActiveMappingId(importedMapping.id);
-      }
-      event.target.value = '';
-    } catch (err) {
-      console.error('Failed to import layout:', err);
-      alert(`Failed to import layout: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      event.target.value = '';
-    }
-  };
 
   // Keyboard shortcuts
   // Note: Ctrl+S keyboard shortcut removed - Save Project is handled by main Workbench header
@@ -1073,33 +1161,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               )}
             </div>
 
-            <div className="h-6 w-px bg-[var(--border-subtle)]" />
-
-            {/* Export/Import Layout (layout-specific, not project-wide) */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleExportLayout}
-                disabled={!activeMapping}
-                className="px-3 py-1.5 text-xs bg-[var(--finger-L4)] hover:bg-[var(--finger-L5)] disabled:bg-[var(--bg-input)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed text-white rounded transition-colors"
-                title={!activeMapping ? 'No active layout to export' : 'Export Current Layout'}
-              >
-                Export Layout
-              </button>
-              <button
-                onClick={handleImportLayoutClick}
-                className="px-3 py-1.5 text-xs bg-[var(--bg-input)] hover:bg-[var(--bg-card)] text-[var(--text-primary)] rounded transition-colors"
-                title="Import Layout"
-              >
-                Import Layout
-              </button>
-              <input
-                ref={importLayoutInputRef}
-                type="file"
-                accept=".json"
-                onChange={handleImportLayout}
-                className="hidden"
-              />
-            </div>
           </div>
         </div>
 
@@ -1133,7 +1194,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               onUpdateMappingSound={onUpdateMappingSound}
               onDeleteSound={(id) => onDeleteSound?.(id)}
               onToggleVoiceVisibility={handleToggleVoiceVisibility}
-              onImport={onImport}
               handleDestructiveDelete={handleDestructiveDelete}
               handleAutoAssignRandom={handleAutoAssignRandom}
               handleClearStaging={handleClearStaging}
@@ -1179,34 +1239,18 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                       const cellKeyStr = cellKey(row, col);
                       const reachabilityLevel = reachabilityMap?.[cellKeyStr] || null;
 
-                      // Get heatmap data from engineResult if heatmap overlay is enabled
+                      // Get finger assignment data for cell coloring using the pre-computed map
                       let heatmapDifficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable' | null = null;
                       let heatmapFinger: FingerID | null = null;
                       let heatmapHand: 'LH' | 'RH' | null = null;
 
-                      if (showHeatmap && engineResult && filteredPerformance && filteredPerformance.events.length > 0 && assignedSound) {
-                        // Find the debug event for this cell's note
-                        const noteNumber = assignedSound?.originalMidiNote ?? null;
-                        if (noteNumber !== null) {
-                          // Find the worst-case event for this note
-                          const noteEvents = engineResult.debugEvents.filter(e => e.noteNumber === noteNumber);
-                          if (noteEvents.length > 0) {
-                            const worstEvent = noteEvents.reduce((worst, current) => {
-                              const worstRank = worst.difficulty === 'Unplayable' ? 3 :
-                                worst.difficulty === 'Hard' ? 2 :
-                                  worst.difficulty === 'Medium' ? 1 : 0;
-                              const currentRank = current.difficulty === 'Unplayable' ? 3 :
-                                current.difficulty === 'Hard' ? 2 :
-                                  current.difficulty === 'Medium' ? 1 : 0;
-                              return currentRank > worstRank ? current : worst;
-                            }, noteEvents[0]);
-                            heatmapDifficulty = worstEvent.difficulty;
-                            // Type assertion: runtime data from runEngine uses FingerID (1-5), not FingerType
-                            heatmapFinger = worstEvent.finger as FingerID | null;
-                            // Type assertion: runtime data from runEngine uses 'LH'/'RH', but type says 'left'/'right'
-                            const hand = worstEvent.assignedHand as 'left' | 'right' | 'Unplayable' | 'LH' | 'RH';
-                            heatmapHand = hand === 'Unplayable' ? null : (hand === 'left' || hand === 'LH' ? 'LH' : 'RH');
-                          }
+                      // Look up finger assignment for this cell's note
+                      if (assignedSound && assignedSound.originalMidiNote !== null) {
+                        const assignment = fingerAssignmentMap.get(assignedSound.originalMidiNote);
+                        if (assignment) {
+                          heatmapFinger = assignment.finger;
+                          heatmapHand = assignment.hand;
+                          heatmapDifficulty = assignment.difficulty as 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
                         }
                       }
 
@@ -1230,6 +1274,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                           heatmapHand={heatmapHand}
                           fingerConstraint={fingerConstraint}
                           showNoteLabels={showNoteLabels}
+                          showPositionLabels={showPositionLabels}
                           instrumentConfig={instrumentConfig}
                           onUpdateSound={(updates) => onUpdateMappingSound(cellKeyStr, updates)}
                           onClick={() => handleCellClick(row, col)}

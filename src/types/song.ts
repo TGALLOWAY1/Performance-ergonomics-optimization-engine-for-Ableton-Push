@@ -32,4 +32,13 @@ export interface Song {
     // or embed it if we want a monolithic file structure.
     // For now, let's keep it lightweight for the dashboard.
     projectStateId: string;
+    /** 
+     * Base64-encoded MIDI file data for persistent storage.
+     * When present, the song can be loaded with its MIDI data without re-importing.
+     */
+    midiData?: string;
+    /** 
+     * Original MIDI filename for display purposes.
+     */
+    midiFileName?: string;
 }

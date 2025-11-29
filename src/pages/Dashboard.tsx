@@ -1,19 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { SongCard } from '../components/dashboard/SongCard';
 import { SongMetadata } from '../types/song';
 import { songService } from '../services/SongService';
 
 export const Dashboard: React.FC = () => {
     const [songs, setSongs] = useState<SongMetadata[]>([]);
+    const [songsWithMidi, setSongsWithMidi] = useState<Set<string>>(new Set());
+    const [linkingMidiForSongId, setLinkingMidiForSongId] = useState<string | null>(null);
+
+    const refreshSongs = () => {
+        setSongs(songService.getAllSongs());
+        // Check which songs have MIDI data
+        const allSongs = songService.getAllSongs();
+        const withMidi = new Set<string>();
+        allSongs.forEach(song => {
+            if (songService.hasMidiData(song.id)) {
+                withMidi.add(song.id);
+            }
+        });
+        setSongsWithMidi(withMidi);
+    };
 
     useEffect(() => {
         // Seed mock data for MVP if empty
         songService.seedMockData();
         // Load songs
-        setSongs(songService.getAllSongs());
+        refreshSongs();
     }, []);
 
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const linkMidiInputRef = useRef<HTMLInputElement>(null);
 
     const handleImportClick = () => {
         fileInputRef.current?.click();
@@ -26,7 +42,7 @@ export const Dashboard: React.FC = () => {
         try {
             await songService.importSongFromMidi(file);
             // Refresh list
-            setSongs(songService.getAllSongs());
+            refreshSongs();
         } catch (error) {
             console.error("Failed to import MIDI:", error);
             alert("Failed to import MIDI file. See console for details.");
@@ -38,20 +54,68 @@ export const Dashboard: React.FC = () => {
         }
     };
 
+    const handleLinkMidiClick = (songId: string) => {
+        setLinkingMidiForSongId(songId);
+        linkMidiInputRef.current?.click();
+    };
+
+    const handleLinkMidiFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !linkingMidiForSongId) return;
+
+        try {
+            await songService.linkMidiToSong(linkingMidiForSongId, file);
+            // Refresh list
+            refreshSongs();
+        } catch (error) {
+            console.error("Failed to link MIDI:", error);
+            alert("Failed to link MIDI file. See console for details.");
+        } finally {
+            // Reset
+            setLinkingMidiForSongId(null);
+            if (linkMidiInputRef.current) {
+                linkMidiInputRef.current.value = '';
+            }
+        }
+    };
+
     const handleAddSongClick = () => {
         songService.createSong('New Song', 'Unknown Artist', 120, 'C Major');
-        setSongs(songService.getAllSongs());
+        refreshSongs();
+    };
+
+    const handleDeleteSong = (id: string, title: string) => {
+        if (window.confirm(`Are you sure you want to delete "${title}"? This action cannot be undone.`)) {
+            songService.deleteSong(id);
+            refreshSongs();
+        }
+    };
+
+    const handleUpdateSong = (id: string, updates: Partial<SongMetadata>) => {
+        songService.updateSongMetadata(id, updates);
+        refreshSongs();
     };
 
     return (
         <div className="h-screen w-screen bg-slate-950 text-slate-200 flex flex-col overflow-hidden font-sans selection:bg-blue-500/30">
-            {/* Hidden File Input */}
+            {/* Hidden File Inputs */}
             <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 accept=".mid,.midi"
                 className="hidden"
+                id="import-midi-input"
+                name="import-midi"
+            />
+            <input
+                type="file"
+                ref={linkMidiInputRef}
+                onChange={handleLinkMidiFileChange}
+                accept=".mid,.midi"
+                className="hidden"
+                id="link-midi-input"
+                name="link-midi"
             />
 
             {/* Header */}
@@ -91,7 +155,14 @@ export const Dashboard: React.FC = () => {
                 <div className="flex-1 overflow-y-auto p-8 bg-gradient-to-br from-slate-900 to-slate-950">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-7xl mx-auto">
                         {songs.map(song => (
-                            <SongCard key={song.id} song={song} />
+                            <SongCard 
+                                key={song.id} 
+                                song={song} 
+                                onDelete={handleDeleteSong}
+                                onLinkMidi={handleLinkMidiClick}
+                                onUpdate={handleUpdateSong}
+                                hasMidiLinked={songsWithMidi.has(song.id)}
+                            />
                         ))}
 
                         {/* Add New Card */}

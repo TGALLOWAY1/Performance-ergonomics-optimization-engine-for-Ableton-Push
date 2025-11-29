@@ -155,6 +155,13 @@ export function saveProjectStateToStorage(id: string, state: ProjectState): void
     const key = `push_perf_project_${id}`;
     const json = JSON.stringify(state);
     localStorage.setItem(key, json);
+    console.log('[projectPersistence] Saved state to localStorage:', {
+      key,
+      parkedSoundsCount: state.parkedSounds.length,
+      voiceNames: state.parkedSounds.map(v => v.name),
+      mappingsCount: state.mappings.length,
+      mappingCells: state.mappings.map(m => Object.keys(m.cells).length),
+    });
   } catch (err) {
     console.error('Failed to save project state to storage:', err);
     // Handle quota exceeded or other errors
@@ -171,10 +178,19 @@ export function loadProjectStateFromStorage(id: string): ProjectState | null {
   try {
     const key = `push_perf_project_${id}`;
     const json = localStorage.getItem(key);
-    if (!json) return null;
+    if (!json) {
+      console.log('[projectPersistence] No state found in localStorage for key:', key);
+      return null;
+    }
 
     const parsed = JSON.parse(json);
-    // Basic validation/migration could go here
+    console.log('[projectPersistence] Loaded state from localStorage:', {
+      key,
+      parkedSoundsCount: parsed.parkedSounds?.length || 0,
+      voiceNames: parsed.parkedSounds?.map((v: { name: string }) => v.name) || [],
+      mappingsCount: parsed.mappings?.length || 0,
+      mappingCells: parsed.mappings?.map((m: { cells: Record<string, unknown> }) => Object.keys(m.cells).length) || [],
+    });
     return parsed as ProjectState;
   } catch (err) {
     console.error('Failed to load project state from storage:', err);

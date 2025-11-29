@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { LayoutDesigner } from './LayoutDesigner';
 import { GridMapping, Voice } from '../types/layout';
@@ -12,6 +12,7 @@ import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { songService } from '../services/SongService';
 
 
 export const Workbench: React.FC = () => {
@@ -25,6 +26,13 @@ export const Workbench: React.FC = () => {
     engineResult,
     setEngineResult,
   } = useProject();
+
+  const [searchParams] = useSearchParams();
+  const songId = searchParams.get('songId');
+  const [currentSongId, setCurrentSongId] = useState<string | null>(null);
+  const [songName, setSongName] = useState<string | null>(null);
+  const [hasLoadedSong, setHasLoadedSong] = useState(false);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
 
@@ -60,10 +68,141 @@ export const Workbench: React.FC = () => {
     }
   }, [activeMappingId, projectState.mappings]);
 
+  // Load song state when navigating from Dashboard with a songId
+  // This effect runs on mount and when songId changes
+  useEffect(() => {
+    if (!songId) return;
+    
+    // Get song metadata for display
+    const song = songService.getSong(songId);
+    if (song) {
+      setSongName(song.metadata.title);
+    }
+    
+    // Check which song was last loaded (persists across page refresh)
+    const lastLoadedSongId = localStorage.getItem('workbench_current_song_id');
+    const isSameSong = lastLoadedSongId === songId;
+    
+    // Check if the current projectState has MEANINGFUL data (not just the default initial state)
+    // The initial state has layout-1, so we need to check for actual song data
+    const hasVoices = projectState.parkedSounds.length > 0;
+    const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
+    const hasRealData = hasVoices || hasMappingCells;
+    
+    // ALWAYS load from storage when:
+    // 1. Different song than last time (user switched songs), OR
+    // 2. Same song but no real data in context (page refresh / initial load)
+    const shouldLoad = !isSameSong || !hasRealData;
+    
+    console.log('[Workbench] Song load check:', { 
+      songId, 
+      lastLoadedSongId, 
+      isSameSong, 
+      hasVoices,
+      hasMappingCells,
+      hasRealData,
+      shouldLoad 
+    });
+    
+    if (shouldLoad) {
+      console.log('[Workbench] Loading song state for:', songId);
+      
+      // Save the current song ID to localStorage
+      localStorage.setItem('workbench_current_song_id', songId);
+      setCurrentSongId(songId);
+      
+      const savedState = songService.loadSongState(songId);
+      if (savedState) {
+        console.log('[Workbench] Loaded saved project state:', {
+          layoutsCount: savedState.layouts.length,
+          parkedSoundsCount: savedState.parkedSounds.length,
+          mappingsCount: savedState.mappings.length,
+          mappingCells: savedState.mappings.map(m => Object.keys(m.cells).length),
+          voiceNames: savedState.parkedSounds.map(v => v.name),
+        });
+        
+        // Set the project state from the saved state
+        setProjectState(savedState, true); // Skip history for initial load
+        
+        // Set active mapping if available
+        if (savedState.mappings.length > 0) {
+          setActiveMappingId(savedState.mappings[0].id);
+        }
+      } else {
+        console.log('[Workbench] No saved state found for song:', songId);
+      }
+      
+      setHasLoadedSong(true);
+    } else {
+      console.log('[Workbench] Using existing data in context (navigation back from Timeline)');
+      setCurrentSongId(songId);
+      setHasLoadedSong(true);
+    }
+  }, [songId, setProjectState]); // Dependencies: songId changes trigger reload
+
+  // Auto-save project state changes back to the song (debounced)
+  useEffect(() => {
+    // Only auto-save if we have a song loaded and the state has been initialized
+    if (!currentSongId || !hasLoadedSong) return;
+
+    // Skip saving if the project state is empty (initial state)
+    if (projectState.layouts.length === 0 && projectState.parkedSounds.length === 0) return;
+
+    // Debounce saving to prevent excessive writes
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log('[Workbench] Auto-saving project state for song:', currentSongId);
+      songService.saveSongState(currentSongId, projectState);
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [projectState, currentSongId, hasLoadedSong]);
+
+  // Save immediately on unmount (flush pending save)
+  useEffect(() => {
+    return () => {
+      // Cancel pending debounced save
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      // Perform immediate save on unmount if we have a song loaded
+      // We use a ref pattern to get current values in cleanup
+    };
+  }, []);
+
+  // Use a ref to track current values for unmount save
+  const currentSongIdRef = useRef<string | null>(null);
+  const projectStateRef = useRef(projectState);
+  const hasLoadedSongRef = useRef(hasLoadedSong);
+  
+  useEffect(() => {
+    currentSongIdRef.current = currentSongId;
+    projectStateRef.current = projectState;
+    hasLoadedSongRef.current = hasLoadedSong;
+  }, [currentSongId, projectState, hasLoadedSong]);
+
+  // Immediate save on unmount
+  useEffect(() => {
+    return () => {
+      if (currentSongIdRef.current && hasLoadedSongRef.current) {
+        console.log('[Workbench] Saving on unmount for song:', currentSongIdRef.current);
+        songService.saveSongState(currentSongIdRef.current, projectStateRef.current);
+      }
+    };
+  }, []);
+
   // Track if default MIDI has been loaded to show status indicator
 
   // View Settings state
   const [showNoteLabels, setShowNoteLabels] = useState(false);
+  const [showPositionLabels, setShowPositionLabels] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
 
   // Engine state
@@ -662,6 +801,15 @@ export const Workbench: React.FC = () => {
           {/* Divider */}
           <div className="h-8 w-px bg-[var(--border-subtle)] mx-2" />
 
+          {/* Current Song Indicator */}
+          {songName && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-900/30 border border-emerald-700/50 rounded-[var(--radius-sm)]">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs font-medium text-emerald-300">{songName}</span>
+              <span className="text-[10px] text-emerald-500/70">(Auto-saving)</span>
+            </div>
+          )}
+
           {/* Song Section Selector (Mockup Style) */}
           <div className="flex items-center gap-2 bg-[var(--bg-input)] rounded-[var(--radius-sm)] p-1 border border-[var(--border-subtle)]">
             <span className="text-xs text-[var(--text-secondary)] pl-2">Song Section:</span>
@@ -684,10 +832,21 @@ export const Workbench: React.FC = () => {
           </Link>
 
           <Link
-            to="/timeline"
+            to={songId ? `/timeline?songId=${songId}` : '/timeline'}
             className="ml-2 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
           >
             Timeline View
+          </Link>
+
+          <Link
+            to={songId ? `/event-analysis?songId=${songId}` : '/event-analysis'}
+            className="ml-2 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all flex items-center gap-1.5"
+            title="Open Event Analysis Page"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            Event Analysis
           </Link>
         </div>
 
@@ -780,10 +939,16 @@ export const Workbench: React.FC = () => {
                 Notes
               </button>
               <button
+                onClick={() => setShowPositionLabels(!showPositionLabels)}
+                className={`px-3 py-1 text-xs rounded-full transition-all ${showPositionLabels ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Pos
+              </button>
+              <button
                 onClick={() => setShowHeatmap(!showHeatmap)}
                 className={`px-3 py-1 text-xs rounded-full transition-all ${showHeatmap ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               >
-                Heatmap
+                Finger Assignment
               </button>
             </div>
           </div>
@@ -797,6 +962,59 @@ export const Workbench: React.FC = () => {
                 backgroundSize: '24px 24px'
               }}
             />
+            
+            {/* Empty State Message */}
+            {!songId && projectState.parkedSounds.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 bg-slate-900/80 backdrop-blur-sm">
+                <div className="text-center p-8 max-w-md">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-800 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-200 mb-2">No Song Selected</h3>
+                  <p className="text-sm text-slate-400 mb-4">
+                    Select a song from the Dashboard to start editing your pad layout.
+                  </p>
+                  <Link
+                    to="/"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                    </svg>
+                    Go to Dashboard
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* Song has no MIDI linked message */}
+            {songId && projectState.parkedSounds.length === 0 && hasLoadedSong && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 bg-slate-900/80 backdrop-blur-sm">
+                <div className="text-center p-8 max-w-md">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-900/30 border-2 border-amber-600/50 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-200 mb-2">No MIDI Data</h3>
+                  <p className="text-sm text-slate-400 mb-4">
+                    This song doesn't have any MIDI data linked yet. Go back to the Dashboard and use the "Link MIDI" button to add a MIDI file.
+                  </p>
+                  <Link
+                    to="/"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+                    </svg>
+                    Back to Dashboard
+                  </Link>
+                </div>
+              </div>
+            )}
+            
             <div className="w-full h-full flex flex-col">
               <LayoutDesigner
                 parkedSounds={projectState.parkedSounds}
@@ -808,7 +1026,6 @@ export const Workbench: React.FC = () => {
                 onDuplicateMapping={handleDuplicateMapping}
                 onAddSound={handleAddSound}
                 onUpdateSound={handleUpdateSound}
-                onImport={(file) => handleProjectLoad(file, projectState.instrumentConfig)}
                 onUpdateMappingSound={handleUpdateMappingSound}
                 onRemoveSound={handleRemoveSound}
                 onDeleteSound={handleDeleteSound}
@@ -817,6 +1034,7 @@ export const Workbench: React.FC = () => {
                 onSetActiveMappingId={setActiveMappingId}
                 activeLayout={activeLayout}
                 showNoteLabels={showNoteLabels}
+                showPositionLabels={showPositionLabels}
                 showHeatmap={showHeatmap}
                 engineResult={engineResult}
               />
