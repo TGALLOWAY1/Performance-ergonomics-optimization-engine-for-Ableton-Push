@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 interface SongCardProps {
     song: SongMetadata;
     onDelete?: (id: string, title: string) => void;
-    onLinkMidi?: (id: string) => void;
+    onLinkMidi?: (songId: string, file: File) => void | Promise<void>;
     onUpdate?: (id: string, updates: Partial<SongMetadata>) => void;
     hasMidiLinked?: boolean;
 }
@@ -31,11 +31,34 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
         }
     };
 
-    const handleLinkMidiClick = (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent card click navigation
-        if (onLinkMidi) {
-            onLinkMidi(song.id);
+    const handleLinkMidiFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+
+        console.log("[LinkMIDI Debug] handleLinkMidiFileChange fired in SongCard:", {
+            songId: song.id,
+            hasFiles: !!e.target.files && e.target.files.length > 0,
+            fileName: file?.name ?? null,
+        });
+
+        if (!file) {
+            console.warn("[LinkMIDI Debug] No file selected for song:", song.id);
+            return;
         }
+
+        console.log("[LinkMIDI Debug] File selected in SongCard:", {
+            songId: song.id,
+            fileName: file.name,
+            fileSize: file.size,
+        });
+
+        if (onLinkMidi) {
+            await onLinkMidi(song.id, file);
+        } else {
+            console.warn("[LinkMIDI Debug] onLinkMidi callback is not provided");
+        }
+
+        // Reset so choosing the same file again re-triggers onChange
+        e.target.value = "";
     };
 
     const handleWorkbenchClick = (e: React.MouseEvent) => {
@@ -89,7 +112,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
             className="group relative bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 hover:border-slate-600 rounded-xl p-4 transition-all hover:shadow-xl hover:shadow-blue-900/10 hover:-translate-y-1"
         >
             {/* Status Badge, Delete Button & Link MIDI */}
-            <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
+            <div className="absolute top-4 right-4 flex flex-col items-end gap-2 z-20">
                 <div className="flex items-center gap-2">
                     {song.lastPracticed > Date.now() - 86400000 * 3 ? (
                         <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-200 bg-blue-600 rounded-full shadow-lg shadow-blue-900/50">
@@ -113,28 +136,57 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                         </button>
                     )}
                 </div>
-                {/* Link/Re-link MIDI button - positioned below status badge */}
+                {/* Link/Re-link MIDI: label wraps input and button so browser handles the click → file dialog */}
                 {onLinkMidi && (
-                    <button 
-                        onClick={handleLinkMidiClick}
-                        className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 ${
-                            hasMidiLinked 
-                                ? 'bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30' 
-                                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30'
+                    <label
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer relative z-30 ${
+                            hasMidiLinked
+                                ? "bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30"
+                                : "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30"
                         }`}
                         title={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
+                        aria-label={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
+                        onClick={(e) => {
+                            // Prevent card-level click handlers from firing
+                            e.stopPropagation();
+                            console.log("[LinkMIDI Debug] Link MIDI label clicked:", {
+                                songId: song.id,
+                                songTitle: song.title,
+                                hasMidiLinked,
+                            });
+                        }}
                     >
+                        {/* Hidden file input INSIDE the label; clicking label will open dialog */}
+                        <input
+                            type="file"
+                            accept=".mid,.midi"
+                            onChange={handleLinkMidiFileChange}
+                            className="absolute opacity-0 w-px h-px -z-10 pointer-events-none"
+                            tabIndex={-1}
+                        />
+
                         {hasMidiLinked ? (
                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    className="h-2.5 w-2.5 flex-shrink-0"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                    />
                                 </svg>
                                 <span className="whitespace-nowrap">Re-link</span>
                             </>
                         ) : (
-                            'Link MIDI'
+                            <span className="whitespace-nowrap">Link MIDI</span>
                         )}
-                    </button>
+                    </label>
                 )}
             </div>
 

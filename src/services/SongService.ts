@@ -188,6 +188,11 @@ class SongService {
      * This stores the MIDI data and creates the initial project state.
      */
     async linkMidiToSong(songId: string, file: File): Promise<Song | null> {
+        console.log("[LinkMIDI Debug] linkMidiToSong called:", {
+            songId,
+            fileName: file.name,
+            fileSize: file.size,
+        });
         try {
             const song = this.getSong(songId);
             if (!song) {
@@ -230,9 +235,15 @@ class SongService {
             songs[songId] = song;
             this.saveSongsMap(songs);
 
+            console.log("[LinkMIDI Debug] linkMidiToSong finished:", {
+                songId,
+                success: true,
+                projectStateId: song.projectStateId,
+            });
             return song;
 
         } catch (error) {
+            console.error("[LinkMIDI Debug] linkMidiToSong error:", { songId, error });
             console.error('Failed to link MIDI to song:', error);
             throw error;
         }
