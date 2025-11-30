@@ -7,20 +7,108 @@ The Performability Engine is an ergonomics-driven optimization system for perfor
 
 It analyzes MIDI performances, evaluates the physical difficulty of pad layouts, and uses a modular cost engine (movement, simultaneity, gesture naturalness, cognitive grouping, and muscle-memory stability) to recommend musician-adaptive remappings.
 
-The project includes a Drum Rack Remapping Workbench, a visual interface for:
-- Previewing and editing layouts
-- Drag-and-drop remapping of samples
-- Automatically regenerating performance MIDI
-- Viewing playability analytics (heatmaps, gesture timelines, transition graphs)
-- Running controlled “performability test scenarios” to validate ergonomics models
+System Inputs
+  Performance object (MIDI → NoteEvent[]) from existing services
+  Initial grid mapping (random or default layout)
+  Tempo / BPM
 
-This repo showcases:
-- Applied optimization algorithms
-- Interactive UI/UX for complex data
-- MIDI parsing & transformation
-- Human-centric ergonomics modeling
-- Music performance engineering
-- Future extensions into ML preference learning and real-time adaptive layouts
+System Outputs
+  Optimized results include:
+  Sound → Pad map
+  Hand assignment
+  Fingering assignment
+  Full cost breakdown (static, transition, drumming costs)
+  Charts and metrics for visualization
+
+
+**Cost Metrics** 
+The cost function combines multiple ergonomics and performance factors:
+
+C_total = C_static + C_transition + C_special + C_home + C_pattern
+
+**Static Cost — “Grip Cost”**
+
+Evaluated per event cluster (simultaneous notes / chords).
+
+  A. Stretch
+  
+    Exponential penalty for finger span beyond neutral shape:
+    
+    C_stretch = exp( k * (d_max - d_0))
+
+  B. Collisions
+  
+    Infinite cost if left/right hands overlap.
+    Infinite cost if finger topology (x-ordering rules) is violated.
+
+  C. Finger Strength
+  
+    Finger weights:
+    
+    index / middle → low cost
+    ring / pinky → higher cost
+    thumb → special constraints (restricted vertical range)
+    4.2 Transition Cost — “Movement Cost”
+
+  A. Hand Travel
+  
+    Distance between hand centroids from event → event.
+    
+    B. Micro-movement
+    
+    Finger-level movement weighted by finger strength.
+    
+    C. Fitts’s Law
+    
+    Used to determine speed feasibility:
+    
+    T = a + b * log2(D/W + 1)
+    If required movement time T exceeds the allowable time (derived from BPM), the event becomes infeasible (infinite cost).
+
+**Special Drumming Costs**
+
+  A. Hand Alternation
+    
+    Reward alternating hands (L→R→L→R) for fast streams.
+    
+  B. Finger Alternation
+    
+    Reward Index→Middle for repeats; penalize repeated use of the same finger (Index→Index).
+
+**Home Position “Attractor” Model**
+[TODO = Update to use the per finger model]
+
+  Define home positions:
+    Left hand: (2, 2)
+    Right hand: (5, 2)
+    Penalty for drift from home:
+  
+    C_home = α * || H_t - H_home ||²
+    Where α is a tunable stiffness parameter.
+
+**Pattern-Memory Standardization**
+
+    For patterns identified via relative encoding:
+
+    If the same geometric pattern appears later, encourage reusing the same fingering.
+    Pattern reward:
+    
+    C_pattern = -β * matchScore
+    5. Search-Space Pruning (CLP Concepts)
+
+Grip Dictionary
+
+    Precompute for all 2, 3, and 4-note combinations:
+    
+    Valid finger assignments
+    Valid hand assignments
+    Reachability mask (respecting anatomical limits)
+    5.2 Constraints Applied Before Optimization
+    
+    Topological ordering (no finger crossover)
+    Maximum hand span limits
+    Natural anatomical variance (relative finger heights, y-ordering rules)
+    These constraints dramatically reduce the search space for the optimizer.
 
 
 V0
