@@ -6,12 +6,12 @@ import { songService } from '../services/SongService';
 export const Dashboard: React.FC = () => {
     const [songs, setSongs] = useState<SongMetadata[]>([]);
     const [songsWithMidi, setSongsWithMidi] = useState<Set<string>>(new Set());
-    const [linkingMidiForSongId, setLinkingMidiForSongId] = useState<string | null>(null);
 
     const refreshSongs = () => {
-        setSongs(songService.getAllSongs());
-        // Check which songs have MIDI data
         const allSongs = songService.getAllSongs();
+        setSongs(allSongs);
+
+        // Check which songs have MIDI data
         const withMidi = new Set<string>();
         allSongs.forEach(song => {
             if (songService.hasMidiData(song.id)) {
@@ -26,10 +26,43 @@ export const Dashboard: React.FC = () => {
         songService.seedMockData();
         // Load songs
         refreshSongs();
+        
+        // Debug: Log songs loaded in Dashboard
+        const allSongs = songService.getAllSongs();
+        console.log("[LinkMIDI Debug] Songs loaded in Dashboard:", allSongs.map(s => ({ 
+            id: s.id, 
+            title: s.title, 
+            hasProject: !!s.projectStateId, 
+            hasMidi: songService.hasMidiData(s.id) 
+        })));
+    }, []);
+
+    // Global file input change listener for diagnostics
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const target = event.target as HTMLInputElement | null;
+            if (!target || target.type !== "file") return;
+
+            const file = target.files?.[0];
+
+            console.log("[FileDebug] Native change event on <input type='file'>", {
+                id: target.id || null,
+                name: target.name || null,
+                className: target.className || null,
+                hasFiles: !!target.files && target.files.length > 0,
+                filesCount: target.files?.length ?? 0,
+                fileName: file?.name ?? null,
+            });
+        };
+
+        document.addEventListener("change", handler, true);
+
+        return () => {
+            document.removeEventListener("change", handler, true);
+        };
     }, []);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const linkMidiInputRef = useRef<HTMLInputElement>(null);
 
     const handleImportClick = () => {
         fileInputRef.current?.click();
@@ -54,28 +87,34 @@ export const Dashboard: React.FC = () => {
         }
     };
 
-    const handleLinkMidiClick = (songId: string) => {
-        setLinkingMidiForSongId(songId);
-        linkMidiInputRef.current?.click();
-    };
-
-    const handleLinkMidiFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file || !linkingMidiForSongId) return;
+    const handleMidiLinked = async (songId: string, file: File) => {
+        console.log("[LinkMIDI Debug] handleMidiLinked called:", {
+            songId,
+            fileName: file.name,
+            fileSize: file.size,
+        });
 
         try {
-            await songService.linkMidiToSong(linkingMidiForSongId, file);
-            // Refresh list
+            const updatedSong = await songService.linkMidiToSong(songId, file);
+
+            console.log("[LinkMIDI Debug] songService.linkMidiToSong success:", {
+                songId,
+                updatedSong: updatedSong
+                    ? {
+                        id: updatedSong.id ?? updatedSong.metadata?.id ?? songId,
+                        title: updatedSong.metadata?.title,
+                    }
+                    : null,
+            });
+
+            // Refresh songs so UI picks up hasMidiLinked changes
             refreshSongs();
         } catch (error) {
-            console.error("Failed to link MIDI:", error);
+            console.error("[LinkMIDI Debug] songService.linkMidiToSong error:", {
+                songId,
+                error,
+            });
             alert("Failed to link MIDI file. See console for details.");
-        } finally {
-            // Reset
-            setLinkingMidiForSongId(null);
-            if (linkMidiInputRef.current) {
-                linkMidiInputRef.current.value = '';
-            }
         }
     };
 
@@ -98,7 +137,7 @@ export const Dashboard: React.FC = () => {
 
     return (
         <div className="h-screen w-screen bg-slate-950 text-slate-200 flex flex-col overflow-hidden font-sans selection:bg-blue-500/30">
-            {/* Hidden File Inputs */}
+            {/* Hidden File Input for Import MIDI (new song) */}
             <input
                 type="file"
                 ref={fileInputRef}
@@ -107,15 +146,6 @@ export const Dashboard: React.FC = () => {
                 className="hidden"
                 id="import-midi-input"
                 name="import-midi"
-            />
-            <input
-                type="file"
-                ref={linkMidiInputRef}
-                onChange={handleLinkMidiFileChange}
-                accept=".mid,.midi"
-                className="hidden"
-                id="link-midi-input"
-                name="link-midi"
             />
 
             {/* Header */}
@@ -159,7 +189,7 @@ export const Dashboard: React.FC = () => {
                                 key={song.id} 
                                 song={song} 
                                 onDelete={handleDeleteSong}
-                                onLinkMidi={handleLinkMidiClick}
+                                onLinkMidi={handleMidiLinked}
                                 onUpdate={handleUpdateSong}
                                 hasMidiLinked={songsWithMidi.has(song.id)}
                             />
@@ -206,6 +236,23 @@ export const Dashboard: React.FC = () => {
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                     Last Sync: 2 minutes ago
                 </div>
+            </div>
+
+            {/* DEBUG: Global file input diagnostics */}
+            <div className="fixed bottom-2 left-2 z-50 bg-slate-900/90 border border-amber-500/50 text-amber-200 text-[10px] px-2 py-1 rounded">
+                <div className="font-mono mb-1">FileInput Debug</div>
+                <input
+                    type="file"
+                    accept=".mid,.midi"
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        console.log("[FileDebug] DEBUG direct input onChange fired", {
+                            hasFiles: !!e.target.files && e.target.files.length > 0,
+                            fileName: file?.name ?? null,
+                        });
+                    }}
+                    className="text-[10px] text-slate-100"
+                />
             </div>
         </div>
     );
