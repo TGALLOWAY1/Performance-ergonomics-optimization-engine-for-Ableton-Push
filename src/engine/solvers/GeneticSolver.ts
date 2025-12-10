@@ -10,7 +10,7 @@ import { Performance, NoteEvent, HandPose, EngineConfiguration } from '../../typ
 import { InstrumentConfig } from '../../types/performance';
 import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
-import { GridMapping } from '../../types/layout';
+import { GridMapping, cellKey } from '../../types/layout';
 import { generateValidGripsWithTier, Pad, GripResult } from '../feasibility';
 import {
   calculateTransitionCost,
@@ -501,7 +501,18 @@ export class GeneticSolver implements SolverStrategy {
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
+          costBreakdown: {
+            movement: 0,
+            stretch: 0,
+            drift: 0,
+            bounce: 0,
+            fatigue: 0,
+            crossover: 0,
+            total: Infinity,
+          },
           difficulty: 'Unplayable',
+          eventIndex: i,
+          // padId undefined for unmapped notes
         });
         continue;
       }
@@ -515,7 +526,18 @@ export class GeneticSolver implements SolverStrategy {
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
+          costBreakdown: {
+            movement: 0,
+            stretch: 0,
+            drift: 0,
+            bounce: 0,
+            fatigue: 0,
+            crossover: 0,
+            total: Infinity,
+          },
           difficulty: 'Unplayable',
+          eventIndex: i,
+          // padId undefined for unplayable events
         });
         continue;
       }
@@ -545,13 +567,15 @@ export class GeneticSolver implements SolverStrategy {
       driftCount++;
 
       // Cost breakdown
+      // Note: Some components are approximated (movement, fatigue) as genetic solver
+      // doesn't track individual component costs during evolution, only total cost
       const costBreakdown: CostBreakdown = {
-        movement: geneCost * 0.4,
-        stretch: staticCost,
-        drift: attractorCost,
-        bounce: 0,
-        fatigue: geneCost * 0.1,
-        crossover: 0,
+        movement: geneCost * 0.4,  // Approximate: movement typically 40% of total
+        stretch: staticCost,         // Actual: calculated from grip stretch
+        drift: attractorCost,         // Actual: calculated from attractor cost
+        bounce: 0,                   // Not tracked in genetic solver
+        fatigue: geneCost * 0.1,     // Approximate: fatigue typically 10% of total
+        crossover: 0,                // Not tracked in genetic solver
         total: geneCost,
       };
 
@@ -560,6 +584,9 @@ export class GeneticSolver implements SolverStrategy {
       totalMetrics.drift += costBreakdown.drift;
       totalMetrics.fatigue += costBreakdown.fatigue;
       totalMetrics.total += costBreakdown.total;
+
+      // Derive padId from row/col
+      const padId = cellKey(gene.position.row, gene.position.col);
 
       debugEvents.push({
         noteNumber: gene.noteNumber,
@@ -571,6 +598,8 @@ export class GeneticSolver implements SolverStrategy {
         difficulty,
         row: gene.position.row,
         col: gene.position.col,
+        eventIndex: gene.eventIndex,
+        padId,
       });
     }
 

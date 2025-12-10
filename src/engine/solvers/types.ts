@@ -30,6 +30,9 @@ export interface CostBreakdown {
 
 /**
  * Engine debug event with assignment details.
+ * 
+ * Used for cost debugging and visualization. All solvers populate this structure
+ * to provide consistent debug information across different optimization algorithms.
  */
 export interface EngineDebugEvent {
   noteNumber: number;
@@ -37,10 +40,24 @@ export interface EngineDebugEvent {
   assignedHand: 'left' | 'right' | 'Unplayable';
   finger: FingerType | null;
   cost: number;
+  /** 
+   * Cost breakdown by component. Always present for playable events.
+   * For Unplayable events, may be undefined or have all components set to 0.
+   */
   costBreakdown?: CostBreakdown;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
   row?: number;
   col?: number;
+  /** 
+   * Original event index in the performance.events array.
+   * Used to link back to the source event for debugging.
+   */
+  eventIndex?: number;
+  /** 
+   * Pad identifier in format "row,col" (e.g., "0,0" for bottom-left pad).
+   * Derived from row/col when available. Undefined for Unplayable events.
+   */
+  padId?: string;
 }
 
 /**
@@ -74,6 +91,49 @@ export interface EvolutionLogEntry {
 }
 
 /**
+ * Snapshot of annealing state at a single iteration.
+ * Captures cost evolution, temperature, and acceptance decisions.
+ */
+export interface AnnealingIterationSnapshot {
+  /** Iteration number (0-indexed, matches step in current telemetry) */
+  iteration: number;
+  
+  /** Current temperature at this iteration */
+  temperature: number;
+  
+  /** Cost of the current accepted solution (post-move if accepted, or previous if rejected) */
+  currentCost: number;
+  
+  /** Best cost found so far (across all iterations) */
+  bestCost: number;
+  
+  /** Whether this candidate was accepted */
+  accepted: boolean;
+  
+  /** Cost difference: candidateCost - oldCost (negative = improvement) */
+  deltaCost: number;
+  
+  /** Acceptance probability (only present if deltaCost > 0) */
+  acceptanceProbability?: number;
+  
+  /** Per-metric sums over the whole mapping at this iteration (unweighted totals) */
+  movementSum: number;
+  stretchSum: number;
+  driftSum: number;
+  bounceSum: number;
+  fatigueSum: number;
+  crossoverSum: number;
+  
+  /** Optional: Shares of total cost (0-1), computed as sum / totalCostSum when totalCostSum > 0 */
+  movementShare?: number;
+  stretchShare?: number;
+  driftShare?: number;
+  bounceShare?: number;
+  fatigueShare?: number;
+  crossoverShare?: number;
+}
+
+/**
  * Engine result containing score and debug events.
  * This is the standardized output contract that all solvers must produce.
  */
@@ -100,8 +160,15 @@ export interface EngineResult {
    * Optimization log for simulated annealing solver.
    * Contains step-by-step telemetry (step, temp, cost) for visualization.
    * Only populated by AnnealingSolver; undefined for other solvers.
+   * @deprecated Use annealingTrace for detailed trace data. This field is kept for backward compatibility.
    */
   optimizationLog?: Array<{ step: number; temp: number; cost: number; accepted: boolean }>;
+  /**
+   * Detailed annealing trace for simulated annealing solver.
+   * Contains comprehensive iteration snapshots with cost breakdown and acceptance details.
+   * Only populated by AnnealingSolver; undefined for other solvers.
+   */
+  annealingTrace?: AnnealingIterationSnapshot[];
 }
 
 // ============================================================================
