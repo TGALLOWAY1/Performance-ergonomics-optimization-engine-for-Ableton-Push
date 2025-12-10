@@ -10,7 +10,7 @@ import { Performance, NoteEvent, HandPose, EngineConfiguration } from '../../typ
 import { InstrumentConfig } from '../../types/performance';
 import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
-import { GridMapping } from '../../types/layout';
+import { GridMapping, cellKey } from '../../types/layout';
 import { generateValidGripsWithTier, Pad } from '../feasibility';
 import {
   calculateAttractorCost,
@@ -19,6 +19,7 @@ import {
   FALLBACK_GRIP_PENALTY,
 } from '../costFunction';
 import { GridPosition } from '../gridMath';
+import { getNeutralHandCenters, NeutralHandCenters } from '../handPose';
 import {
   SolverStrategy,
   SolverType,
@@ -229,7 +230,8 @@ export class BeamSolver implements SolverStrategy {
     node: BeamNode,
     group: PerformanceGroup,
     prevTimestamp: number,
-    config: EngineConfiguration
+    config: EngineConfiguration,
+    neutralHandCenters?: NeutralHandCenters | null
   ): BeamNode[] {
     const children: BeamNode[] = [];
     
@@ -266,7 +268,7 @@ export class BeamSolver implements SolverStrategy {
         const effectiveTransitionCost = transitionCost === Infinity ? 0 : transitionCost;
 
         const attractorCost = calculateAttractorCost(grip, restPose, stiffness);
-        const staticCost = calculateGripStretchCost(grip);
+        const staticCost = calculateGripStretchCost(grip, hand, undefined, undefined, neutralHandCenters);
         
         // Apply fallback penalty if this is a fallback grip
         const fallbackPenalty = isFallback ? FALLBACK_GRIP_PENALTY : 0;
@@ -334,7 +336,8 @@ export class BeamSolver implements SolverStrategy {
     node: BeamNode,
     group: PerformanceGroup,
     prevTimestamp: number,
-    config: EngineConfiguration
+    config: EngineConfiguration,
+    neutralHandCenters?: NeutralHandCenters | null
   ): BeamNode[] {
     const children: BeamNode[] = [];
     const pads = group.activePads;
@@ -375,8 +378,8 @@ export class BeamSolver implements SolverStrategy {
         
         const leftAttractor = calculateAttractorCost(leftResult.pose, restingPose.left, stiffness);
         const rightAttractor = calculateAttractorCost(rightResult.pose, restingPose.right, stiffness);
-        const leftStatic = calculateGripStretchCost(leftResult.pose);
-        const rightStatic = calculateGripStretchCost(rightResult.pose);
+        const leftStatic = calculateGripStretchCost(leftResult.pose, 'left', undefined, undefined, neutralHandCenters);
+        const rightStatic = calculateGripStretchCost(rightResult.pose, 'right', undefined, undefined, neutralHandCenters);
         
         // Apply fallback penalties
         const leftFallbackPenalty = leftResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
@@ -512,7 +515,18 @@ export class BeamSolver implements SolverStrategy {
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
+          costBreakdown: {
+            movement: 0,
+            stretch: 0,
+            drift: 0,
+            bounce: 0,
+            fatigue: 0,
+            crossover: 0,
+            total: Infinity,
+          },
           difficulty: 'Unplayable',
+          eventIndex: i,
+          // padId undefined for unmapped notes
         });
         continue;
       }
@@ -526,7 +540,18 @@ export class BeamSolver implements SolverStrategy {
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
+          costBreakdown: {
+            movement: 0,
+            stretch: 0,
+            drift: 0,
+            bounce: 0,
+            fatigue: 0,
+            crossover: 0,
+            total: Infinity,
+          },
           difficulty: 'Unplayable',
+          eventIndex: i,
+          // padId undefined for unplayable events
         });
         continue;
       }
@@ -551,14 +576,15 @@ export class BeamSolver implements SolverStrategy {
       totalDrift += drift;
       driftCount++;
 
-      // Cost breakdown (simplified for beam search)
+      // Cost breakdown (approximated for beam search - actual component costs
+      // are not tracked during beam search, so we use percentage estimates)
       const costBreakdown: CostBreakdown = {
-        movement: assignment.cost * 0.4, // Approximate breakdown
-        stretch: assignment.cost * 0.2,
-        drift: assignment.cost * 0.2,
-        bounce: 0,
-        fatigue: assignment.cost * 0.1,
-        crossover: assignment.cost * 0.1,
+        movement: assignment.cost * 0.4, // Approximate: movement typically 40% of total
+        stretch: assignment.cost * 0.2,  // Approximate: stretch typically 20% of total
+        drift: assignment.cost * 0.2,     // Approximate: drift typically 20% of total
+        bounce: 0,                         // Not tracked in beam search
+        fatigue: assignment.cost * 0.1,   // Approximate: fatigue typically 10% of total
+        crossover: assignment.cost * 0.1, // Approximate: crossover typically 10% of total
         total: assignment.cost,
       };
 
@@ -571,6 +597,9 @@ export class BeamSolver implements SolverStrategy {
 
       totalCost += assignment.cost;
 
+      // Derive padId from row/col
+      const padId = cellKey(assignment.row, assignment.col);
+
       debugEvents.push({
         noteNumber: assignment.noteNumber,
         startTime: assignment.startTime,
@@ -581,6 +610,8 @@ export class BeamSolver implements SolverStrategy {
         difficulty,
         row: assignment.row,
         col: assignment.col,
+        eventIndex: assignment.eventIndex,
+        padId,
       });
     }
 
@@ -655,6 +686,17 @@ export class BeamSolver implements SolverStrategy {
     config: EngineConfiguration,
     manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
   ): EngineResult {
+    // Compute neutral hand centers from the current layout
+    let neutralHandCenters: NeutralHandCenters | null = null;
+    if (this.gridMapping) {
+      try {
+        neutralHandCenters = getNeutralHandCenters(this.gridMapping, this.instrumentConfig);
+      } catch (error) {
+        console.warn('[BeamSolver] Failed to compute neutral hand centers:', error);
+        // Continue without neutral centers (graceful degradation)
+      }
+    }
+
     // Sort events by time
     const sortedEvents = [...performance.events]
       .map((event, originalIndex) => ({ event, originalIndex }))
@@ -710,7 +752,7 @@ export class BeamSolver implements SolverStrategy {
 
               const transitionCost = calculateTransitionCost(prevPose, matchingResult.pose, timeDelta);
               const attractorCost = calculateAttractorCost(matchingResult.pose, restPose, config.stiffness);
-              const staticCost = calculateGripStretchCost(matchingResult.pose);
+              const staticCost = calculateGripStretchCost(matchingResult.pose, override.hand, undefined, undefined, neutralHandCenters);
               const fallbackPenalty = matchingResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
               const effectiveTransition = transitionCost === Infinity ? 100 : transitionCost;
               const stepCost = effectiveTransition + attractorCost + staticCost + fallbackPenalty;
@@ -748,12 +790,12 @@ export class BeamSolver implements SolverStrategy {
         }
         
         // Standard expansion using group-based approach
-        const children = this.expandNodeForGroup(node, group, prevTimestamp, config);
+        const children = this.expandNodeForGroup(node, group, prevTimestamp, config, neutralHandCenters);
         newBeam.push(...children);
         
         // For multi-note chords, also try split-hand approach
         if (group.activePads.length >= 2) {
-          const splitChildren = this.expandNodeForSplitChord(node, group, prevTimestamp, config);
+          const splitChildren = this.expandNodeForSplitChord(node, group, prevTimestamp, config, neutralHandCenters);
           newBeam.push(...splitChildren);
         }
       }

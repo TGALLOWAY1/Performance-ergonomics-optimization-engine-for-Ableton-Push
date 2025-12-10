@@ -7,6 +7,7 @@ import { InstrumentConfig } from '../types/performance';
 import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
+import { mapToQuadrants } from '../utils/autoLayout';
 import { BiomechanicalSolver, SolverType } from '../engine/core';
 import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
@@ -14,6 +15,10 @@ import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
 
+// Dev-only flag: only show Cost Debug in development builds
+// This is a developer-facing diagnostic view that relies on EngineResult.debugEvents
+// and costBreakdown data. Safe to disable in production builds.
+const SHOW_COST_DEBUG = import.meta.env.MODE === 'development';
 
 export const Workbench: React.FC = () => {
   const {
@@ -29,6 +34,7 @@ export const Workbench: React.FC = () => {
     setActiveSolverId,
     getSolverResult,
     optimizeLayout,
+    setInitialStateFromNeutralPose,
   } = useProject();
 
   const [searchParams] = useSearchParams();
@@ -242,6 +248,24 @@ export const Workbench: React.FC = () => {
   const [showNoteLabels, setShowNoteLabels] = useState(false);
   const [showPositionLabels, setShowPositionLabels] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close settings menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
+        setSettingsMenuOpen(false);
+      }
+    };
+
+    if (settingsMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [settingsMenuOpen]);
 
   // Solver control state
   const [selectedSolver, setSelectedSolver] = useState<SolverType>('beam');
@@ -250,6 +274,9 @@ export const Workbench: React.FC = () => {
   
   // Layout optimization state
   const [isOptimizingLayout, setIsOptimizingLayout] = useState(false);
+  
+  // Neutral pose state
+  const [isSettingNeutralPose, setIsSettingNeutralPose] = useState(false);
 
   // Engine state
 
@@ -752,7 +779,72 @@ export const Workbench: React.FC = () => {
     });
   };
 
+  // Handle map to quadrants (for settings menu)
+  const handleMapToQuadrants = () => {
+    if (!projectState.instrumentConfig) {
+      alert('No instrument configuration available. Cannot perform auto-layout.');
+      return;
+    }
 
+    // Collect all sounds that have originalMidiNote set
+    const soundsWithNotes = projectState.parkedSounds.filter(s => s.originalMidiNote !== null);
+    
+    // Also include sounds from active mapping
+    if (activeMapping) {
+      Object.values(activeMapping.cells).forEach(sound => {
+        if (sound.originalMidiNote !== null && !soundsWithNotes.find(s => s.id === sound.id)) {
+          soundsWithNotes.push(sound);
+        }
+      });
+    }
+
+    if (soundsWithNotes.length === 0) {
+      alert('No sounds with MIDI note information found. Sounds need originalMidiNote to be auto-laid out.');
+      return;
+    }
+
+    // Map sounds to quadrants
+    const assignments = mapToQuadrants(soundsWithNotes, projectState.instrumentConfig.bottomLeftNote);
+
+    if (Object.keys(assignments).length === 0) {
+      alert('No sounds could be mapped to quadrants. Check that sounds have valid MIDI note numbers.');
+      return;
+    }
+
+    // Apply the assignments
+    if (!activeMapping) {
+      // Create a new mapping
+      const newMapping: GridMapping = {
+        id: `mapping-${Date.now()}`,
+        name: 'Quadrant Layout',
+        cells: assignments,
+        fingerConstraints: {},
+        scoreCache: null,
+        notes: 'Auto-laid out to 4x4 quadrants',
+        layoutMode: 'auto',
+      };
+      setProjectState({
+        ...projectState,
+        mappings: [...projectState.mappings, newMapping],
+      });
+      setActiveMappingId(newMapping.id);
+    } else {
+      // Update existing mapping
+      setProjectState({
+        ...projectState,
+        mappings: projectState.mappings.map(m => {
+          if (m.id !== activeMapping.id) return m;
+          return {
+            ...m,
+            cells: assignments,
+            name: 'Quadrant Layout',
+            notes: 'Auto-laid out to 4x4 quadrants',
+            layoutMode: 'auto',
+          };
+        }),
+      });
+    }
+  };
 
   const handleAddSound = (sound: Voice) => {
     setProjectState({
@@ -924,6 +1016,39 @@ export const Workbench: React.FC = () => {
     }
   }, [activeMapping, projectState, optimizeLayout]);
 
+  // Handler for setting neutral hand pose
+  const handleSetNeutralPose = useCallback(async () => {
+    if (!activeMapping) {
+      alert('No active mapping. Please assign some sounds first.');
+      return;
+    }
+
+    if (Object.keys(activeMapping.cells || {}).length === 0) {
+      alert('No sounds assigned to the grid. Please assign sounds first.');
+      return;
+    }
+
+    if (!filteredPerformance || filteredPerformance.events.length === 0) {
+      alert('No performance data available. Please load a MIDI file first.');
+      return;
+    }
+
+    setIsSettingNeutralPose(true);
+
+    try {
+      // Call the context method
+      await setInitialStateFromNeutralPose(activeMapping);
+      
+      // The context method already re-runs the solver, so we're done
+      console.log('[Workbench] Neutral hand pose set successfully');
+    } catch (error) {
+      console.error('[Workbench] Failed to set neutral hand pose:', error);
+      alert(`Failed to set neutral hand pose: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSettingNeutralPose(false);
+    }
+  }, [activeMapping, filteredPerformance, setInitialStateFromNeutralPose]);
+
   // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Save Layout Version
   // ============================================================================
@@ -1011,17 +1136,6 @@ export const Workbench: React.FC = () => {
             </div>
           )}
 
-          {/* Song Section Selector (Mockup Style) */}
-          <div className="flex items-center gap-2 bg-[var(--bg-input)] rounded-[var(--radius-sm)] p-1 border border-[var(--border-subtle)]">
-            <span className="text-xs text-[var(--text-secondary)] pl-2">Song Section:</span>
-            <select className="bg-transparent text-sm font-semibold text-[var(--text-primary)] focus:outline-none cursor-pointer py-1 pr-2">
-              <option>DROP A</option>
-              <option>DROP B</option>
-              <option>VERSE 1</option>
-              <option>CHORUS 1</option>
-            </select>
-          </div>
-
           <Link
             to="/"
             className="ml-4 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all flex items-center gap-2"
@@ -1049,20 +1163,111 @@ export const Workbench: React.FC = () => {
             </svg>
             Event Analysis
           </Link>
+
+          {/* Dev-only: Cost Debug diagnostic view */}
+          {SHOW_COST_DEBUG && (
+            <Link
+              to={songId ? `/cost-debug?songId=${songId}` : '/cost-debug'}
+              className="ml-2 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all flex items-center gap-1.5"
+              title="Open Cost Debug Page (Dev Only)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+              Cost Debug
+            </Link>
+          )}
         </div>
 
         {/* Right: Global Settings & Actions */}
         <div className="flex items-center gap-6">
-          {/* Status Indicators */}
-          <div className="flex items-center gap-4 text-xs font-medium text-[var(--text-secondary)]">
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-              <span>Auto-Map Enabled</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-              <span>Ergonomic Scoring: ON</span>
-            </div>
+          {/* Divider */}
+          <div className="h-6 w-px bg-[var(--border-subtle)]" />
+
+          {/* Settings Menu */}
+          <div className="relative" ref={settingsMenuRef}>
+            <button
+              onClick={() => setSettingsMenuOpen(!settingsMenuOpen)}
+              className={`p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors rounded-[var(--radius-sm)] ${
+                settingsMenuOpen ? 'bg-[var(--bg-input)] text-[var(--text-primary)]' : ''
+              }`}
+              title="View Settings"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </button>
+
+            {/* Settings Dropdown Menu */}
+            {settingsMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] shadow-lg z-50 py-2">
+                <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+                  <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">View Options</h3>
+                </div>
+                <div className="py-1">
+                  <label className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--bg-input)] cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showNoteLabels}
+                      onChange={(e) => setShowNoteLabels(e.target.checked)}
+                      className="w-4 h-4 rounded border-[var(--border-subtle)] bg-[var(--bg-input)] text-[var(--finger-L1)] focus:ring-[var(--finger-L1)] focus:ring-offset-0"
+                    />
+                    <span className="text-sm text-[var(--text-primary)]">Show Note Labels</span>
+                  </label>
+                  <label className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--bg-input)] cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showPositionLabels}
+                      onChange={(e) => setShowPositionLabels(e.target.checked)}
+                      className="w-4 h-4 rounded border-[var(--border-subtle)] bg-[var(--bg-input)] text-[var(--finger-L1)] focus:ring-[var(--finger-L1)] focus:ring-offset-0"
+                    />
+                    <span className="text-sm text-[var(--text-primary)]">Show Position Labels</span>
+                  </label>
+                  <label className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--bg-input)] cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showHeatmap}
+                      onChange={(e) => setShowHeatmap(e.target.checked)}
+                      className="w-4 h-4 rounded border-[var(--border-subtle)] bg-[var(--bg-input)] text-[var(--finger-L1)] focus:ring-[var(--finger-L1)] focus:ring-offset-0"
+                    />
+                    <span className="text-sm text-[var(--text-primary)]">Show Finger Assignment</span>
+                  </label>
+                </div>
+                <div className="border-t border-[var(--border-subtle)] my-1" />
+                <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+                  <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Layout Options</h3>
+                </div>
+                <div className="py-1">
+                  <button
+                    onClick={() => {
+                      handleMapToQuadrants();
+                      setSettingsMenuOpen(false);
+                    }}
+                    disabled={!projectState.instrumentConfig}
+                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-input)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed transition-colors"
+                  >
+                    Organize by 4x4 Banks
+                  </button>
+                  <button
+                    disabled
+                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] cursor-not-allowed"
+                  >
+                    Suggest Ergonomic Layout (Soon)
+                  </button>
+                  <div className="border-t border-[var(--border-subtle)] my-1" />
+                  <button
+                    onClick={() => {
+                      handleDuplicateMapping();
+                      setSettingsMenuOpen(false);
+                    }}
+                    disabled={!activeMapping}
+                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-input)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed transition-colors"
+                  >
+                    Duplicate Layout
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Divider */}
@@ -1133,6 +1338,31 @@ export const Workbench: React.FC = () => {
 
             {/* Solver Controls */}
             <div className="flex items-center gap-3">
+              {/* Set to Natural Hand Pose Button */}
+              <button
+                onClick={handleSetNeutralPose}
+                disabled={isSettingNeutralPose || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
+                className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
+                title="Set initial finger assignments using neutral hand pose (greedy heuristic)"
+              >
+                {isSettingNeutralPose ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Setting Neutral Pose...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                    </svg>
+                    Set to Natural Hand Pose
+                  </>
+                )}
+              </button>
+
               {/* Auto-Arrange Grid Button (Simulated Annealing) */}
               <button
                 onClick={handleOptimizeLayout}
@@ -1226,27 +1456,6 @@ export const Workbench: React.FC = () => {
               )}
             </div>
 
-            {/* View Toggles */}
-            <div className="flex items-center gap-3 bg-slate-800/30 rounded-full px-1 py-1 border border-slate-700/30">
-              <button
-                onClick={() => setShowNoteLabels(!showNoteLabels)}
-                className={`px-3 py-1 text-xs rounded-full transition-all ${showNoteLabels ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Notes
-              </button>
-              <button
-                onClick={() => setShowPositionLabels(!showPositionLabels)}
-                className={`px-3 py-1 text-xs rounded-full transition-all ${showPositionLabels ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Pos
-              </button>
-              <button
-                onClick={() => setShowHeatmap(!showHeatmap)}
-                className={`px-3 py-1 text-xs rounded-full transition-all ${showHeatmap ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Finger Assignment
-              </button>
-            </div>
           </div>
 
           {/* Grid Container */}
@@ -1336,6 +1545,7 @@ export const Workbench: React.FC = () => {
                 // Explicit layout control callbacks
                 onOptimizeLayout={handleOptimizeLayout}
                 onSaveLayoutVersion={handleSaveLayoutVersion}
+                onRequestMapToQuadrants={handleMapToQuadrants}
               />
             </div>
           </div>

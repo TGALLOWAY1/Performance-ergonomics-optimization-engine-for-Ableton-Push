@@ -107,6 +107,8 @@ interface LayoutDesignerProps {
   onOptimizeLayout?: () => void;
   /** Callback to save the current layout as a new version */
   onSaveLayoutVersion?: () => void;
+  /** Callback to trigger map to quadrants (exposed for Workbench settings menu) */
+  onRequestMapToQuadrants?: () => void;
 }
 
 // Droppable Pad Component (represents a Pad on the 8x8 grid)
@@ -454,6 +456,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Explicit layout control callbacks
   onOptimizeLayout,
   onSaveLayoutVersion,
+  onRequestMapToQuadrants,
 }) => {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -531,8 +534,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     return map;
   }, [engineResult, projectState]);
   const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
-  const [autoLayoutDropdownOpen, setAutoLayoutDropdownOpen] = useState(false);
-  const autoLayoutDropdownRef = useRef<HTMLDivElement>(null);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -829,6 +830,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   // Handle auto-layout to quadrants
   const handleMapToQuadrants = () => {
+    // If callback provided, use it (for external control from Workbench settings)
+    if (onRequestMapToQuadrants) {
+      onRequestMapToQuadrants();
+      return;
+    }
     if (!instrumentConfig) {
       alert('No instrument configuration available. Cannot perform auto-layout.');
       return;
@@ -1112,19 +1118,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Engine execution moved to Workbench.tsx (reactive solver loop)
   // Engine result is now passed as a prop from Workbench
 
-  // Close auto-layout dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (autoLayoutDropdownRef.current && !autoLayoutDropdownRef.current.contains(event.target as Node)) {
-        setAutoLayoutDropdownOpen(false);
-      }
-    };
-
-    if (autoLayoutDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [autoLayoutDropdownOpen]);
 
   return (
     <DndContext
@@ -1139,54 +1132,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         {/* Minimal Toolbar - Root Note and Auto-Layout only (Save/Load moved to main Workbench header) */}
         <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] px-4 py-2">
           <div className="flex items-center gap-4">
-
-
-            {/* Auto-Layout & Options Menu (Relocated) */}
-            <div className="relative" ref={autoLayoutDropdownRef}>
-              <button
-                onClick={() => setAutoLayoutDropdownOpen(!autoLayoutDropdownOpen)}
-                className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel)] rounded transition-colors"
-                title="Layout Options"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                </svg>
-              </button>
-              {autoLayoutDropdownOpen && (
-                <div className="absolute top-full left-0 mt-1 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-md shadow-xl z-50 min-w-[200px]">
-                  <div className="px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] uppercase border-b border-[var(--border-subtle)]">
-                    Auto-Layout
-                  </div>
-                  <button
-                    onClick={() => {
-                      handleMapToQuadrants();
-                      setAutoLayoutDropdownOpen(false);
-                    }}
-                    disabled={!instrumentConfig}
-                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-card)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed transition-colors"
-                  >
-                    Organize by 4x4 Banks
-                  </button>
-                  <button
-                    disabled
-                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] cursor-not-allowed"
-                  >
-                    Suggest Ergonomic Layout (Soon)
-                  </button>
-                  <div className="border-t border-[var(--border-subtle)] my-1" />
-                  <button
-                    onClick={() => {
-                      onDuplicateMapping();
-                      setAutoLayoutDropdownOpen(false);
-                    }}
-                    disabled={!activeMapping}
-                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-card)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed transition-colors"
-                  >
-                    Duplicate Layout
-                  </button>
-                </div>
-              )}
-            </div>
 
           </div>
         </div>

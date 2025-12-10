@@ -11,6 +11,7 @@
 import { FingerType, HandState, DEFAULT_ENGINE_CONSTANTS } from './models';
 import { GridPosition, calculateGridDistance } from './gridMath';
 import { FingerCoordinate, HandPose } from '../types/performance';
+import { NeutralHandCenters, NeutralPadPositions } from './handPose';
 
 // ============================================================================
 // Constants for Beam Search Solver (Attractor Model)
@@ -54,21 +55,46 @@ function calculateDistance(from: GridPosition, to: GridPosition): number {
 }
 
 /**
+ * Maps FingerType to finger key ("L1", "L2", etc.) for neutral pad lookup.
+ * This is a helper to convert from FingerType to the neutral pose key format.
+ */
+function fingerTypeToKey(finger: FingerType, hand: 'left' | 'right'): string {
+  const handPrefix = hand === 'left' ? 'L' : 'R';
+  const fingerNum = {
+    thumb: 1,
+    index: 2,
+    middle: 3,
+    ring: 4,
+    pinky: 5,
+  }[finger];
+  return `${handPrefix}${fingerNum}`;
+}
+
+/**
  * Calculates movement cost for a finger moving from one position to another.
  * Cost = Euclidean distance * finger strength weight.
  * Pinky moves are expensive (weight = 2.5), index moves are baseline (weight = 1.0).
+ * 
+ * Optionally includes a small "neutral bias" term that nudges solutions toward
+ * staying near the finger's neutral pad position.
  * 
  * @param from - Starting position (object-based), or null if finger is not placed
  * @param to - Target position (object-based)
  * @param finger - The finger type making the movement
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
- * @returns The movement cost (distance * finger weight)
+ * @param neutralHandCenters - Optional neutral hand centers for neutral bias
+ * @param hand - Optional hand side for neutral bias calculation
+ * @param neutralBiasWeight - Weight for neutral bias term (default: 0.1, i.e. 10% of movement weight)
+ * @returns The movement cost (distance * finger weight + optional neutral bias)
  */
 export function calculateMovementCost(
   from: GridPosition | null,
   to: GridPosition,
   finger: FingerType,
-  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS,
+  neutralHandCenters?: NeutralHandCenters | null,
+  hand?: 'left' | 'right',
+  neutralBiasWeight: number = 0.1
 ): number {
   // If finger is not placed, apply activation cost
   if (from === null) {
@@ -77,8 +103,24 @@ export function calculateMovementCost(
 
   const distance = calculateDistance(from, to);
   const fingerWeight = constants.fingerStrengthWeights[finger];
+  let movementCost = distance * fingerWeight;
 
-  return distance * fingerWeight;
+  // Optional neutral bias: add small penalty for moving away from neutral pad
+  if (neutralHandCenters && hand) {
+    const fingerKey = fingerTypeToKey(finger, hand);
+    const neutralPad = neutralHandCenters.neutralPads[fingerKey];
+    
+    if (neutralPad) {
+      const neutralDistance = calculateDistance(
+        to,
+        { row: neutralPad.row, col: neutralPad.col }
+      );
+      // Small bias term: encourages staying near neutral position
+      movementCost += neutralBiasWeight * fingerWeight * neutralDistance;
+    }
+  }
+
+  return movementCost;
 }
 
 /**
@@ -130,20 +172,63 @@ function calculateSpanWidth(handState: HandState): number {
 }
 
 /**
+ * Gets the comfortable spread between two fingers based on their neutral pad positions.
+ * 
+ * @param fingerA - First finger type
+ * @param fingerB - Second finger type
+ * @param hand - Hand side ('left' or 'right')
+ * @param neutralPads - Neutral pad positions
+ * @param defaultSpread - Default spread if neutral pads are not available (default: 2.0)
+ * @param slack - Additional slack beyond neutral distance (default: 0.5 cells)
+ * @returns Comfortable spread distance in grid units
+ */
+function getComfortableSpread(
+  fingerA: FingerType,
+  fingerB: FingerType,
+  hand: 'left' | 'right',
+  neutralPads: NeutralPadPositions,
+  defaultSpread: number = 2.0,
+  slack: number = 0.5
+): number {
+  const keyA = fingerTypeToKey(fingerA, hand);
+  const keyB = fingerTypeToKey(fingerB, hand);
+  
+  const padA = neutralPads[keyA];
+  const padB = neutralPads[keyB];
+  
+  if (!padA || !padB) {
+    return defaultSpread;
+  }
+  
+  const baseDist = calculateDistance(
+    { row: padA.row, col: padA.col },
+    { row: padB.row, col: padB.col }
+  );
+  
+  return baseDist + slack;
+}
+
+/**
  * Calculates stretch penalty if the move expands the hand's total span beyond comfort zone.
  * Uses a non-linear penalty function that increases exponentially as span exceeds idealReach.
+ * 
+ * Now uses neutral finger spacing to define "comfortable spread" instead of a fixed threshold.
  * 
  * @param handState - Current hand state
  * @param newPos - New position being considered (object-based)
  * @param finger - The finger type being assigned to newPos
+ * @param handSide - Which hand (left or right)
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
+ * @param neutralHandCenters - Optional neutral hand centers for comfortable spread calculation
  * @returns The stretch penalty (0 if within comfort zone, non-linear penalty if beyond)
  */
 export function calculateStretchPenalty(
   handState: HandState,
   newPos: GridPosition,
   finger: FingerType,
-  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+  handSide: 'left' | 'right',
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS,
+  neutralHandCenters?: NeutralHandCenters | null
 ): number {
   // Create a temporary hand state with the new assignment
   const tempHandState: HandState = {
@@ -160,17 +245,42 @@ export function calculateStretchPenalty(
   // Calculate the new span width
   const newSpan = calculateSpanWidth(tempHandState);
 
-  // If span is within comfort zone (idealReach), no penalty
-  if (newSpan <= constants.idealReach) {
+  // Determine comfortable span based on neutral pose or use default
+  let comfortableSpan: number;
+  if (neutralHandCenters) {
+    // Use maximum comfortable spread from neutral finger pairs
+    const fingerTypes: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+    let maxComfortable = 0;
+    
+    for (let i = 0; i < fingerTypes.length; i++) {
+      for (let j = i + 1; j < fingerTypes.length; j++) {
+        const spread = getComfortableSpread(
+          fingerTypes[i],
+          fingerTypes[j],
+          handSide,
+          neutralHandCenters.neutralPads
+        );
+        maxComfortable = Math.max(maxComfortable, spread);
+      }
+    }
+    
+    comfortableSpan = maxComfortable > 0 ? maxComfortable : constants.idealReach;
+  } else {
+    // Fallback to default idealReach
+    comfortableSpan = constants.idealReach;
+  }
+
+  // If span is within comfortable zone, no penalty
+  if (newSpan <= comfortableSpan) {
     return 0;
   }
 
-  // Non-linear penalty: exponential increase as span exceeds comfort zone
-  const excessSpan = newSpan - constants.idealReach;
-  const maxExcess = constants.maxSpan - constants.idealReach;
+  // Non-linear penalty: exponential increase as span exceeds comfortable zone
+  const excessSpan = newSpan - comfortableSpan;
+  const maxExcess = constants.maxSpan - comfortableSpan;
 
   // Normalize excess (0 to 1)
-  const normalizedExcess = Math.min(excessSpan / maxExcess, 1.0);
+  const normalizedExcess = maxExcess > 0 ? Math.min(excessSpan / maxExcess, 1.0) : 1.0;
 
   // Exponential penalty: penalty = excess^2 * 10
   // This makes larger spans exponentially more expensive
@@ -181,17 +291,25 @@ export function calculateStretchPenalty(
 
 /**
  * Calculates drift penalty based on distance of the hand's Center of Gravity
- * from the section's home position (e.g., bottomLeftNote or defined home position).
+ * from the neutral hand center (derived from DEFAULT_HAND_POSE).
+ * 
+ * The neutral hand center is the "zero-cost" home position for drift calculations.
  * 
  * @param handState - Current hand state
- * @param homePos - Home position (object-based) (e.g., position of bottomLeftNote)
+ * @param handSide - Which hand (left or right)
  * @param constants - Engine constants (defaults to DEFAULT_ENGINE_CONSTANTS)
- * @returns The drift penalty (0 if CoG is at home, increasing with distance)
+ * @param neutralHandCenters - Optional neutral hand centers (if null, falls back to homePos)
+ * @param homePos - Fallback home position if neutralHandCenters is not available (for backward compatibility)
+ * @param driftMultiplier - Multiplier for drift cost (default: 0.5)
+ * @returns The drift penalty (0 if CoG is at neutral center, increasing with distance)
  */
 export function calculateDriftPenalty(
   handState: HandState,
-  homePos: GridPosition,
-  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
+  handSide: 'left' | 'right',
+  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS,
+  neutralHandCenters?: NeutralHandCenters | null,
+  homePos?: GridPosition,
+  driftMultiplier: number = 0.5
 ): number {
   // Calculate current center of gravity
   const cog = calculateCenterOfGravity(handState);
@@ -201,12 +319,36 @@ export function calculateDriftPenalty(
     return 0;
   }
 
-  // Calculate distance from CoG to home position
-  const distance = calculateDistance(cog, homePos);
+  // Determine target position (neutral center or fallback homePos)
+  let targetPos: GridPosition | null = null;
+  
+  if (neutralHandCenters) {
+    const neutralCenter = handSide === 'left' 
+      ? neutralHandCenters.leftCenter 
+      : neutralHandCenters.rightCenter;
+    
+    if (neutralCenter) {
+      targetPos = {
+        row: neutralCenter.y,
+        col: neutralCenter.x,
+      };
+    }
+  }
+  
+  // Fallback to homePos if neutral center is not available
+  if (!targetPos && homePos) {
+    targetPos = homePos;
+  }
+  
+  // If no target position available, return 0 (graceful degradation)
+  if (!targetPos) {
+    return 0;
+  }
+
+  // Calculate distance from CoG to neutral center
+  const distance = calculateDistance(cog, targetPos);
 
   // Linear penalty: drift penalty increases linearly with distance
-  // Penalty = distance * 0.5 (adjustable multiplier)
-  const driftMultiplier = 0.5;
   return distance * driftMultiplier;
 }
 
@@ -506,17 +648,22 @@ export function calculateTransitionCost(
  * Calculates the static grip cost for a HandPose based on finger spread.
  * 
  * Evaluates the ergonomic difficulty of maintaining a hand shape by
- * measuring how far fingers are spread apart. Large spreads are uncomfortable.
+ * measuring how far fingers are spread apart compared to their neutral spacing.
+ * Large spreads beyond the comfortable neutral spacing are uncomfortable.
  * 
  * @param pose - The hand pose to evaluate
- * @param idealSpan - The ideal/comfortable span distance (default: 2.0 grid units)
+ * @param handSide - Which hand (left or right) for neutral pad lookup
+ * @param idealSpan - The ideal/comfortable span distance (default: 2.0 grid units, used as fallback)
  * @param maxSpan - The maximum possible span (default: 5.5 grid units)
+ * @param neutralHandCenters - Optional neutral hand centers for comfortable spread calculation
  * @returns The grip difficulty cost (0 for comfortable, higher for stretched)
  */
 export function calculateGripStretchCost(
   pose: HandPose,
+  handSide: 'left' | 'right',
   idealSpan: number = 2.0,
-  maxSpan: number = 5.5
+  maxSpan: number = 5.5,
+  neutralHandCenters?: NeutralHandCenters | null
 ): number {
   const fingerEntries = Object.entries(pose.fingers) as [FingerType, FingerCoordinate][];
   
@@ -527,26 +674,47 @@ export function calculateGripStretchCost(
   
   // Find maximum distance between any two fingers
   let maxDistance = 0;
+  let maxPair: [FingerType, FingerType] | null = null;
+  
   for (let i = 0; i < fingerEntries.length; i++) {
     for (let j = i + 1; j < fingerEntries.length; j++) {
-      const [, posA] = fingerEntries[i];
-      const [, posB] = fingerEntries[j];
+      const [fingerA, posA] = fingerEntries[i];
+      const [fingerB, posB] = fingerEntries[j];
       const dist = fingerCoordinateDistance(posA, posB);
-      maxDistance = Math.max(maxDistance, dist);
+      if (dist > maxDistance) {
+        maxDistance = dist;
+        maxPair = [fingerA, fingerB];
+      }
     }
   }
   
-  // If within ideal span, no penalty
-  if (maxDistance <= idealSpan) {
+  // Determine comfortable span based on neutral pose or use default
+  let comfortableSpan: number;
+  if (neutralHandCenters && maxPair) {
+    const spread = getComfortableSpread(
+      maxPair[0],
+      maxPair[1],
+      handSide,
+      neutralHandCenters.neutralPads,
+      idealSpan,
+      0.5 // slack
+    );
+    comfortableSpan = spread;
+  } else {
+    comfortableSpan = idealSpan;
+  }
+  
+  // If within comfortable span, no penalty
+  if (maxDistance <= comfortableSpan) {
     return 0;
   }
   
   // Non-linear penalty for excessive spread
-  const excessSpan = maxDistance - idealSpan;
-  const maxExcess = maxSpan - idealSpan;
+  const excessSpan = maxDistance - comfortableSpan;
+  const maxExcess = maxSpan - comfortableSpan;
   
   // Normalize and apply quadratic penalty
-  const normalizedExcess = Math.min(excessSpan / maxExcess, 1.0);
+  const normalizedExcess = maxExcess > 0 ? Math.min(excessSpan / maxExcess, 1.0) : 1.0;
   const penalty = Math.pow(normalizedExcess, 2) * 10;
   
   return penalty;

@@ -41,6 +41,10 @@ export type { GridPosition } from './gridMath';
 export type { FingerType, HandState, EngineConstants } from './models';
 export { DEFAULT_ENGINE_CONSTANTS } from './models';
 
+// Hand pose configuration
+export type { Hand, FingerId, NeutralFingerPose, NeutralHandPose, NeutralPadPosition, NeutralPadPositions, NeutralHandCenters } from './handPose';
+export { DEFAULT_HAND_POSE, resolveNeutralPadPositions, getNeutralHandCenters, computeNeutralHandCenters } from './handPose';
+
 // Feasibility checking
 export { 
   isReachPossible, 

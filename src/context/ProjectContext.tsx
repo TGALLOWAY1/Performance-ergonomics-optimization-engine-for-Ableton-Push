@@ -7,6 +7,7 @@ import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
 import { GridMapping, LayoutMode } from '../types/layout';
 import { createAnnealingSolver } from '../engine/solvers/AnnealingSolver';
+import { buildNeutralGreedyInitialAssignment } from '../engine/solvers/greedyInitialAssignment';
 
 // Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -99,6 +100,14 @@ interface ProjectContextType {
      * @returns Promise that resolves when optimization completes
      */
     optimizeLayout: (activeMapping?: GridMapping | null) => Promise<void>;
+    /**
+     * Sets initial finger assignments using a greedy heuristic seeded from the neutral hand pose.
+     * This creates a reasonable starting point for solvers instead of random initialization.
+     * 
+     * @param activeMapping - The mapping to use (defaults to first mapping)
+     * @returns Promise that resolves when assignments are set
+     */
+    setInitialStateFromNeutralPose: (activeMapping?: GridMapping | null) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
@@ -324,6 +333,77 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
 
     /**
+     * Sets initial finger assignments using a greedy heuristic seeded from the neutral hand pose.
+     */
+    const setInitialStateFromNeutralPose = async (activeMapping?: GridMapping | null): Promise<void> => {
+        // Get filtered performance
+        const filteredPerformance = getActivePerformance(projectState);
+        if (!filteredPerformance) {
+            console.warn('[ProjectContext] Cannot set neutral pose: no active performance');
+            throw new Error('No performance data available. Please load a MIDI file first.');
+        }
+
+        // Get active mapping (use provided or find first)
+        const mapping = activeMapping ?? 
+            (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
+
+        if (!mapping) {
+            throw new Error('No mapping available. Please assign some sounds to the grid first.');
+        }
+
+        if (Object.keys(mapping.cells).length === 0) {
+            throw new Error('No sounds assigned to the grid. Please assign sounds first.');
+        }
+
+        try {
+            // Build greedy initial assignment
+            const assignments = buildNeutralGreedyInitialAssignment({
+                layout: mapping,
+                instrumentConfig: projectState.instrumentConfig,
+                events: filteredPerformance.events,
+            });
+
+            // Convert to string keys for storage (matching ProjectState format)
+            const assignmentsWithStringKeys: Record<string, { hand: 'left' | 'right'; finger: FingerType }> = {};
+            for (const [eventIndex, assignment] of Object.entries(assignments)) {
+                assignmentsWithStringKeys[eventIndex] = assignment;
+            }
+
+            // Get current layout ID
+            const currentLayoutId = projectState.activeLayoutId;
+            if (!currentLayoutId) {
+                throw new Error('No active layout. Please select a layout first.');
+            }
+
+            // Update manual assignments in project state
+            setProjectState(prev => ({
+                ...prev,
+                manualAssignments: {
+                    ...(prev.manualAssignments || {}),
+                    [currentLayoutId]: assignmentsWithStringKeys,
+                },
+            }));
+
+            console.log('[ProjectContext] Neutral pose assignments set:', {
+                eventCount: Object.keys(assignments).length,
+                layoutId: currentLayoutId,
+            });
+
+            // Optionally: re-run the solver to compute costs for visualization
+            // This will use the new manual assignments
+            try {
+                await runSolver('beam', mapping);
+            } catch (solverError) {
+                // Log but don't fail - the assignments are set even if solver fails
+                console.warn('[ProjectContext] Failed to re-run solver after setting neutral pose:', solverError);
+            }
+        } catch (error) {
+            console.error('[ProjectContext] Failed to set neutral pose:', error);
+            throw error;
+        }
+    };
+
+    /**
      * Legacy setEngineResult for backwards compatibility.
      * This directly sets the legacy state but doesn't update the results map.
      */
@@ -345,6 +425,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             setActiveSolverId,
             getSolverResult,
             optimizeLayout,
+            setInitialStateFromNeutralPose,
         }}>
             {children}
         </ProjectContext.Provider>

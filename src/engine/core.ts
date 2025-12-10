@@ -25,6 +25,7 @@ export type {
   SolverStrategy,
   SolverType,
   SolverConfig,
+  AnnealingIterationSnapshot,
 } from './solvers/types';
 
 // Import solver implementations
