@@ -186,7 +186,7 @@ export async function parseMidiProject(
   // - "Optimize Layout" button (biomechanical optimization)
   // ============================================================================
   const cells: Record<string, Voice> = {};
-  
+
   console.log('[parseMidiProject] Grid starts EMPTY - all voices go to parkedSounds (staging area)');
   console.log(`[parseMidiProject] Total voices for staging: ${voices.length}`);
 
@@ -232,10 +232,10 @@ export async function fetchMidiProject(
 ): Promise<MidiProjectData> {
   // Try multiple possible paths for the test MIDI file
   const possiblePaths = [
-    `/TEST DATA/Scenario 1 Tests/${url}`,
+    `/test-data/Scenario 1 Tests/${url}`,
     `/${url}`,
     url,
-    `./TEST DATA/Scenario 1 Tests/${url}`,
+    `./test-data/Scenario 1 Tests/${url}`,
   ];
 
   let response: Response | null = null;
