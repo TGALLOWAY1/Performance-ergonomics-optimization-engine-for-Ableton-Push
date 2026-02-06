@@ -111,8 +111,8 @@ export class BiomechanicalSolver {
     };
     
     this.strategy = resolveSolver(solverType, solverConfig);
-        }
-        
+  }
+
   /**
    * Gets the current solver strategy name.
    */
@@ -246,4 +246,4 @@ export function createBiomechanicalSolverWithStrategy(
     engineConfig,
     solverType
   );
-  }
+}

@@ -74,3 +74,16 @@ export {
   SPEED_COST_WEIGHT,
   FALLBACK_GRIP_PENALTY,
 } from './costFunction';
+
+// Rudiment generation and evaluation
+export {
+  RUDIMENT_LIBRARY,
+  generateRudimentPerformance,
+  evaluateRudimentWithBiomechanics,
+} from './rudiments';
+export type {
+  RudimentToken,
+  RudimentDefinition,
+  RudimentGenerationOptions,
+  RudimentEvaluation,
+} from './rudiments';

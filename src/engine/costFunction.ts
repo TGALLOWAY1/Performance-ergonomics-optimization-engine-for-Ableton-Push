@@ -660,7 +660,7 @@ export function calculateTransitionCost(
  */
 export function calculateGripStretchCost(
   pose: HandPose,
-  handSide: 'left' | 'right',
+  handSide: 'left' | 'right' = 'right',
   idealSpan: number = 2.0,
   maxSpan: number = 5.5,
   neutralHandCenters?: NeutralHandCenters | null
@@ -751,7 +751,7 @@ export function calculateTotalGripCost(
   }
   
   const attractorCost = calculateAttractorCost(curr, resting, stiffness);
-  const stretchCost = calculateGripStretchCost(curr);
+  const stretchCost = calculateGripStretchCost(curr, 'right');
   
   // Combine costs with equal weighting
   // Could be extended with configurable weights
@@ -803,4 +803,3 @@ export function handStateToHandPose(handState: HandState): HandPose {
   
   return { centroid, fingers };
 }
-

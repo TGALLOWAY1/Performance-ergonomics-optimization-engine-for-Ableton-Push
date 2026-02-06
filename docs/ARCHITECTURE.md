@@ -191,3 +191,24 @@ System iterates original MIDI.
 Lookup: Note 36 $\rightarrow$ Asset "Kick" $\rightarrow$ Grid [0,1] $\rightarrow$ New Note 37.
 
 Browser downloads Song_Remapped.mid.
+7. Current Codebase Organization (2026 update)
+
+- `src/engine/`: core biomechanics, cost model, feasibility checks, and pluggable solver strategies (`beam`, `genetic`, `annealing`).
+- `src/context/ProjectContext.tsx`: orchestration layer that runs solvers and stores per-solver results.
+- `src/workbench/` + `src/components/`: UI surfaces for layout, analysis, and timeline inspection.
+- `src/utils/`: adapters and converters for MIDI, grid patterns, persistence, and formatting.
+- `docs/`: architecture notes, milestone history, and roadmap artifacts.
+
+8. Redundancy Cleanup Notes
+
+- Beam solver cost reporting previously reconstructed synthetic percentages in `buildResult` instead of using true tracked costs.
+- Cost breakdown is now captured at assignment generation time and propagated directly into debug events.
+- `core.ts` facade formatting had stray brace/indent artifacts; class and factory boundaries were normalized for readability.
+
+9. Pivot Readiness: Rudiment Generation via Biomechanics
+
+- Added an engine-native rudiment module (`src/engine/rudiments.ts`) with:
+  - reusable rudiment library definitions,
+  - rudiment-to-performance generation,
+  - direct evaluation through `BiomechanicalSolver`.
+- This creates a clean pathway for skill-building content where generated rudiments are scored by the same biomechanical cost engine used for layout optimization.
