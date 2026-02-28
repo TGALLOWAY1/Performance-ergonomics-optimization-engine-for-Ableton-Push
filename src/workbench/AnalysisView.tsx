@@ -4,7 +4,7 @@ import { GridArea } from './GridArea';
 
 import { EngineResultsPanel } from './EngineResultsPanel';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
-import { InstrumentConfig } from '../types/performance';
+import { SectionMap } from '../types/performance';
 import { GridPattern } from '../types/gridPattern';
 import { createEmptyPattern, toggleStepPad } from '../utils/gridPatternUtils';
 import { gridPatternToPerformance, performanceToGridPattern } from '../utils/gridPatternToPerformance';
@@ -54,8 +54,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     return patterns;
   });
 
-  const [currentStep, setCurrentStep] = useState(0);
-  const [showDebugLabels, setShowDebugLabels] = useState(false);
+  const [currentStep] = useState(0);
+  const [showDebugLabels] = useState(false);
   const [viewAllSteps, setViewAllSteps] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false); // ADD THIS LINE
   const [showNoteLabels, setShowNoteLabels] = useState(false); // ADD THIS LINE (if separate from debug labels)
@@ -504,6 +504,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           layouts={projectState.layouts}
           activeLayoutId={projectState.activeLayoutId}
           sectionMaps={projectState.sectionMaps}
+          instrumentConfigs={projectState.instrumentConfigs}
           onSelectLayout={handleSelectLayout}
           onCreateLayout={handleCreateLayout}
           onDeleteLayout={handleDeleteLayout}
@@ -622,7 +623,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               value={activeSection?.instrumentConfig.bottomLeftNote ?? 0}
               onChange={(e) => {
                 if (activeSection) {
-                  handleUpdateSection(activeSection.id, 'bottomLeftNote', parseInt(e.target.value) || 0);
+                  handleUpdateSection(activeSection.id, { field: 'bottomLeftNote', value: parseInt(e.target.value) || 0 });
                 }
               }}
               className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"

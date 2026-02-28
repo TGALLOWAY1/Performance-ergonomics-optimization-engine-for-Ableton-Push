@@ -20,22 +20,11 @@ const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
 };
 
 const INITIAL_PROJECT_STATE: ProjectState = {
-    layouts: [
-        {
-            id: 'layout-1',
-            name: 'My First Layout',
-            createdAt: new Date().toISOString(),
-            performance: {
-                events: [],
-                tempo: 120,
-                name: 'Demo Performance'
-            }
-        }
-    ],
+    layouts: [],
     instrumentConfigs: [INITIAL_INSTRUMENT_CONFIG],
     sectionMaps: [], // Initialize empty
     instrumentConfig: INITIAL_INSTRUMENT_CONFIG,
-    activeLayoutId: 'layout-1',
+    activeLayoutId: null,
     projectTempo: 120,
     parkedSounds: [],
     mappings: [],
@@ -128,12 +117,12 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
     // Derive active result from solverResults map
     const activeResult = useMemo(() => {
         const { solverResults, activeSolverId } = projectState;
-        
+
         // If activeSolverId is set and exists in results, use it
         if (activeSolverId && solverResults && solverResults[activeSolverId]) {
             return solverResults[activeSolverId];
         }
-        
+
         // Fallback to legacy state for backwards compatibility
         return legacyEngineResult;
     }, [projectState.solverResults, projectState.activeSolverId, legacyEngineResult]);
@@ -150,7 +139,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         // Get manual assignments for current layout
@@ -250,7 +239,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         if (!mapping) {
@@ -344,7 +333,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         if (!mapping) {

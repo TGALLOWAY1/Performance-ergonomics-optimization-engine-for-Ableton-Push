@@ -42,7 +42,7 @@ export const FINGER_WEIGHTS: Record<FingerID, number> = {
  */
 export function decayFatigue(currentFatigue: number, timeDelta: number): number {
   if (timeDelta <= 0) return currentFatigue;
-  
+
   const decay = FATIGUE_DECAY_RATE * timeDelta;
   return Math.max(0, currentFatigue - decay);
 }
@@ -72,7 +72,7 @@ export interface CostModel {
 
 export const defaultCostModel: CostModel = {
   calculateBioCost: (
-    hand: Hand,
+    _hand: Hand,
     finger: FingerID,
     currentFingerPos: GridPosition | null,
     targetPos: GridPosition,
@@ -129,7 +129,7 @@ export const defaultCostModel: CostModel = {
     return cost;
   },
 
-  handSwitchCost: (currentHand: Hand): number => {
+  handSwitchCost: (_currentHand: Hand): number => {
     // Basic implementation: small constant cost for switching mental context
     // This represents the cognitive load of switching hands, which is usually low
     // but non-zero compared to continuing with the same hand if easy.

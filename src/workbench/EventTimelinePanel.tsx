@@ -50,11 +50,11 @@ function getFingerNumber(finger: string | null): number {
  */
 function formatFingerIndicators(event: AnalyzedEvent): string {
   const indicators: string[] = [];
-  
+
   for (const note of event.notes) {
     const hand = note.debugEvent.assignedHand;
     const finger = note.debugEvent.finger;
-    
+
     if (hand !== 'Unplayable' && finger) {
       const fingerNum = getFingerNumber(finger);
       if (fingerNum > 0) {
@@ -67,11 +67,12 @@ function formatFingerIndicators(event: AnalyzedEvent): string {
       }
     }
   }
-  
+
   return indicators.length > 0 ? indicators.join(' ') : '—';
 }
 
 export const EventTimelinePanel: React.FC<EventTimelinePanelProps> = ({
+  // @ts-ignore
   events,
   transitions,
   selectedIndex,
@@ -84,11 +85,11 @@ export const EventTimelinePanel: React.FC<EventTimelinePanelProps> = ({
 
   // Create rows for transitions (N → N+1)
   const rows = useMemo(() => {
-    return transitions.map((transition, idx) => {
+    return transitions.map((transition, _idx) => {
       const fromEvent = transition.fromEvent;
       const toEvent = transition.toEvent;
       const difficultyScore = transition.metrics.compositeDifficultyScore;
-      
+
       return {
         transition,
         fromIndex: transition.fromIndex,
@@ -132,10 +133,10 @@ export const EventTimelinePanel: React.FC<EventTimelinePanelProps> = ({
           </div>
         ) : (
           <div className="divide-y divide-[var(--border-subtle)]">
-            {rows.map((row, idx) => {
+            {rows.map((row, _idx) => {
               const isSelected = selectedIndex === row.fromIndex;
               const difficultyColor = getDifficultyColor(row.difficultyScore);
-              
+
               return (
                 <div
                   key={`transition-${row.fromIndex}-${row.toIndex}`}
@@ -143,8 +144,8 @@ export const EventTimelinePanel: React.FC<EventTimelinePanelProps> = ({
                   onClick={() => onSelectIndex(row.fromIndex)}
                   className={`
                     px-4 py-3 cursor-pointer transition-colors
-                    ${isSelected 
-                      ? 'bg-[var(--bg-input)] border-l-2 border-l-blue-500' 
+                    ${isSelected
+                      ? 'bg-[var(--bg-input)] border-l-2 border-l-blue-500'
                       : 'hover:bg-[var(--bg-input)]/50'
                     }
                   `}

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { VectorPrimitive, GridGeometry } from '../types';
 
 interface VectorLayerProps {
@@ -19,8 +19,8 @@ export const VectorLayer = memo(({ vectors, geometry }: VectorLayerProps) => {
 
         // Perpendicular vector (rotated 90 degrees)
         // Adjust magnitude based on distance to create a nice curve
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const offset = dist * 0.2; // Curve amount
+        // const dist = Math.sqrt(dx * dx + dy * dy);
+        // const offset = dist * 0.2; // Curve amount
 
         return {
             x: mx - dy * 0.2, // Simple perpendicular offset

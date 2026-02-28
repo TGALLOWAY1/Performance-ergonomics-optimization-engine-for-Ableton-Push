@@ -37,6 +37,8 @@ export interface MidiProjectData {
   minNoteNumber: number | null;
   /** Count of notes that were out of bounds before root note adjustment */
   unmappedNoteCount: number;
+  /** Initial section maps (empty by default) */
+  sectionMaps: import('../types/performance').SectionMap[];
 }
 
 /**
@@ -216,6 +218,7 @@ export async function parseMidiProject(
     gridMapping,
     minNoteNumber: minNote,
     unmappedNoteCount,
+    sectionMaps: [],
   };
 }
 

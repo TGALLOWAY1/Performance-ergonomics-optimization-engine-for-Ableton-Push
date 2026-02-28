@@ -7,7 +7,7 @@ interface OverlayLayerProps {
 }
 
 export const OverlayLayer = memo(({ overlays, geometry }: OverlayLayerProps) => {
-    const { padSize } = geometry;
+    // const { padSize } = geometry;
 
     return (
         <div className="overlay-layer absolute inset-0 pointer-events-none">

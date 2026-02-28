@@ -39,7 +39,7 @@ export interface Voice {
  * Layout origin mode - tracks how the layout was created/modified.
  * Used for UI display and to understand the layout's history.
  */
-export type LayoutMode = 'manual' | 'optimized' | 'random' | 'none';
+export type LayoutMode = 'manual' | 'optimized' | 'random' | 'auto' | 'none';
 
 /**
  * GridMapping: Represents a grid mapping configuration.
@@ -146,7 +146,7 @@ export const STANDARD_KIT_TEMPLATE: LayoutTemplate = {
     { row: 0, col: 5, label: 'Ride', suggestedNote: 51 },
     { row: 0, col: 6, label: 'Tom 1', suggestedNote: 48 },
     { row: 0, col: 7, label: 'Tom 2', suggestedNote: 47 },
-    
+
     // Row 1 - Additional percussion
     { row: 1, col: 0, label: 'Clap', suggestedNote: 39 },
     { row: 1, col: 1, label: 'Rim', suggestedNote: 37 },

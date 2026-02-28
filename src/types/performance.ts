@@ -138,4 +138,13 @@ export interface InstrumentConfig {
   layoutMode?: 'drum_64';
 }
 
-
+/**
+ * SectionMap: Defines a musical section (e.g., Verse, Chorus) and its associated instrument configuration.
+ */
+export interface SectionMap {
+  id: string;
+  name: string;
+  startMeasure: number;
+  lengthInMeasures: number;
+  instrumentConfig: InstrumentConfig;
+}

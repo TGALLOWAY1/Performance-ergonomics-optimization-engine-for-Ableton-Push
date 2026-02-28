@@ -1,4 +1,4 @@
-import { EngineResult, EngineDebugEvent } from '../../engine/core';
+import { EngineResult } from '../../engine/core';
 import { FingerType } from '../../engine/models';
 import { PadActivation, VectorPrimitive, FingerId, HandId } from './types';
 

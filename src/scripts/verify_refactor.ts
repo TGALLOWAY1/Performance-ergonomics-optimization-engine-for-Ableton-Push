@@ -33,7 +33,9 @@ const mockMapping: GridMapping = {
         '0,1': { id: 'v2', name: 'Snare', originalMidiNote: 37, sourceType: 'midi_track', sourceFile: '', color: '#000' },
         '1,0': { id: 'v3', name: 'HiHat', originalMidiNote: 44, sourceType: 'midi_track', sourceFile: '', color: '#000' }
     },
-    fingerConstraints: {}
+    fingerConstraints: {},
+    scoreCache: null,
+    notes: ''
 };
 
 async function runVerification() {
@@ -42,12 +44,12 @@ async function runVerification() {
     try {
         // 1. Instantiate Solver
         console.log('Instantiating BiomechanicalSolver...');
-        const solver = new BiomechanicalSolver(mockInstrumentConfig);
+        const solver = new BiomechanicalSolver(mockInstrumentConfig, mockMapping);
         console.log('Solver instantiated successfully.');
 
         // 2. Run Solve
         console.log('Running solve()...');
-        const result = await solver.solve(mockPerformance, mockMapping);
+        const result = await solver.solve(mockPerformance);
         console.log('Solve completed.');
 
         // 3. Analyze Results

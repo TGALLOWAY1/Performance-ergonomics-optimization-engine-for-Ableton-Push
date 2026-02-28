@@ -14,8 +14,8 @@ interface TimelineProps {
 }
 
 const HEADER_WIDTH = 150;
-const LANE_HEIGHT = 40;
-const RULER_HEIGHT = 30;
+const MIN_LANE_HEIGHT = 40;
+const MAX_LANE_HEIGHT = 120;
 
 export const Timeline: React.FC<TimelineProps> = ({
   performance,
@@ -28,10 +28,42 @@ export const Timeline: React.FC<TimelineProps> = ({
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerHeight, setContainerHeight] = React.useState(0);
+
+  // Measure container height for auto-fitting
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentBoxSize) {
+          setContainerHeight(entry.contentBoxSize[0].blockSize);
+        } else {
+          setContainerHeight(entry.contentRect.height);
+        }
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   const sortedVoices = useMemo(() => {
     return [...voices].sort((a, b) => (a.originalMidiNote || 0) - (b.originalMidiNote || 0));
   }, [voices]);
+
+  // Calculate dynamic lane height
+  const laneHeight = useMemo(() => {
+    if (sortedVoices.length === 0) return MIN_LANE_HEIGHT;
+    // Calculate height needed to fit all lanes in the visible area
+    // Subtract a small buffer for scrollbar/borders if needed
+    const availableHeight = containerHeight;
+    const fittedHeight = availableHeight / sortedVoices.length;
+
+    // Clamp between min and max
+    return Math.min(MAX_LANE_HEIGHT, Math.max(MIN_LANE_HEIGHT, fittedHeight));
+  }, [containerHeight, sortedVoices.length]);
 
   const duration = useMemo(() => {
     if (!performance?.events.length) return 10;
@@ -110,7 +142,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative" ref={containerRef}>
         {/* Left Header (Voice Names) */}
         <div className="flex-none w-[150px] bg-[var(--bg-panel)] border-r border-[var(--border-subtle)] z-10 overflow-hidden shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]">
           <div style={{ transform: `translateY(-${scrollContainerRef.current?.scrollTop || 0}px)` }}>
@@ -118,7 +150,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               <div
                 key={voice.id}
                 className={`flex items-center px-4 border-b border-[var(--border-subtle)] ${idx % 2 === 0 ? 'bg-[var(--bg-card)]' : 'bg-transparent'}`}
-                style={{ height: LANE_HEIGHT }}
+                style={{ height: laneHeight }}
               >
                 <div
                   className="w-2 h-8 rounded-full mr-3 shadow-sm"
@@ -135,20 +167,20 @@ export const Timeline: React.FC<TimelineProps> = ({
         {/* Timeline Area */}
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-auto relative bg-[var(--bg-input)]"
+          className="flex-1 overflow-auto relative bg-[var(--bg-input)] scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent"
           onClick={handleTimelineClick}
         >
           <div
             ref={contentRef}
             className="relative"
-            style={{ width: totalWidth, height: sortedVoices.length * LANE_HEIGHT }}
+            style={{ width: totalWidth, height: sortedVoices.length * laneHeight }}
           >
             {/* Grid Lines (Lanes) */}
             {sortedVoices.map((voice, i) => (
               <div
                 key={`lane-${voice.id}`}
                 className={`absolute left-0 right-0 border-b border-[var(--border-subtle)] ${i % 2 === 0 ? 'bg-[var(--bg-card)] opacity-50' : ''}`}
-                style={{ top: i * LANE_HEIGHT, height: LANE_HEIGHT }}
+                style={{ top: i * laneHeight, height: laneHeight }}
               />
             ))}
 
@@ -169,8 +201,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
               const left = event.startTime * zoom;
               const width = Math.max(4, (event.duration || 0.1) * zoom);
-              const top = voiceIndex * LANE_HEIGHT + 6;
-              const height = LANE_HEIGHT - 12;
+              const top = voiceIndex * laneHeight + 6;
+              const height = laneHeight - 12;
               const voice = sortedVoices[voiceIndex];
               const finger = fingerAssignments && fingerAssignments[i] ? fingerAssignments[i] : '';
 
@@ -190,7 +222,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                   {/* Glass shine effect */}
                   <div className="absolute top-0 left-0 right-0 h-[40%] bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
 
-                  {finger && width > 15 && (
+                  {finger && width > 15 && height > 16 && (
                     <span className="text-[10px] font-bold text-white drop-shadow-md z-10">
                       {finger}
                     </span>
@@ -220,4 +252,4 @@ export const Timeline: React.FC<TimelineProps> = ({
       </div>
     </div>
   );
-};
+};;

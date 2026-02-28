@@ -42,8 +42,8 @@ export interface UsePracticeLoopReturn {
  * Steps the selected index back and forth on a timer.
  */
 export function usePracticeLoop(options: UsePracticeLoopOptions): UsePracticeLoopReturn {
-  const { performance, events, transitions, selectedIndex, onIndexChange } = options;
-  
+  const { events, transitions, selectedIndex, onIndexChange } = options;
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);

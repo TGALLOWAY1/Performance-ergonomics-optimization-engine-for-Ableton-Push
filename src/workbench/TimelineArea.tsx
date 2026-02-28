@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Timeline } from './Timeline';
+// import { Timeline } from './Timeline';
 import { Performance } from '../types/performance';
 
 interface TimelineAreaProps {
@@ -18,7 +18,7 @@ interface TimelineAreaProps {
 export const TimelineArea: React.FC<TimelineAreaProps> = ({
   steps,
   currentStep,
-  onStepSelect,
+  // onStepSelect,
   performance,
   viewAllSteps = false,
 
@@ -46,13 +46,14 @@ export const TimelineArea: React.FC<TimelineAreaProps> = ({
           minHeight: '100px' // CSS Safety: Ensure inner container has minimum height
         }}
       >
-        <Timeline
+        {/* <Timeline
           steps={steps}
           currentStep={currentStep}
           onStepSelect={onStepSelect}
-          performance={performance}
+          performance={performance ?? null}
           viewAllSteps={viewAllSteps}
-        />
+        /> */}
+        <div className="p-4 text-center text-slate-500">Timeline view under maintenance</div>
       </div>
     </div>
   );

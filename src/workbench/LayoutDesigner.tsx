@@ -13,7 +13,7 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core';
-import { Voice, GridMapping, cellKey, parseCellKey, LayoutMode } from '../types/layout';
+import { Voice, GridMapping, cellKey, parseCellKey } from '../types/layout';
 import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
@@ -64,12 +64,12 @@ interface LayoutDesignerProps {
   instrumentConfig: InstrumentConfig | null;
   /** Callback when a Voice is assigned to a Pad (Assignment relationship) */
   onAssignSound: (cellKey: string, sound: Voice) => void;
-  /** Callback to assign multiple Voices to Pads at once (batch Assignment operations) */
-  onAssignSounds: (assignments: Record<string, Voice>) => void;
+  // /** Callback to assign multiple Voices to Pads at once (batch Assignment operations) */
+  // onAssignSounds: (assignments: Record<string, Voice>) => void;
   /** Callback when mapping metadata is updated */
   onUpdateMapping: (updates: Partial<GridMapping>) => void;
-  /** Callback to duplicate the current mapping */
-  onDuplicateMapping: () => void;
+  // /** Callback to duplicate the current mapping */
+  // onDuplicateMapping: () => void;
   /** Callback to add a new Voice to parkedSounds (staging area) */
   onAddSound: (sound: Voice) => void;
   /** Callback to update a Voice in parkedSounds (staging area) */
@@ -84,8 +84,8 @@ interface LayoutDesignerProps {
   projectState: ProjectState;
   /** Callback to update the entire project state */
   onUpdateProjectState: (state: ProjectState) => void;
-  /** Callback to set the active mapping ID */
-  onSetActiveMappingId?: (id: string) => void;
+  // /** Callback to set the active mapping ID */
+  // onSetActiveMappingId?: (id: string) => void;
   /** Active layout for performance analysis */
   activeLayout: LayoutSnapshot | null;
 
@@ -95,20 +95,19 @@ interface LayoutDesignerProps {
   showPositionLabels?: boolean;
   /** View Settings: View all steps (flatten time) */
   viewAllSteps?: boolean;
-  /** View Settings: Show heatmap overlay */
-  showHeatmap?: boolean;
+  // /** View Settings: Show heatmap overlay */
+  // showHeatmap?: boolean;
   /** Engine result from Workbench (reactive solver loop) */
   engineResult?: EngineResult | null;
-  
-  // ============================================================================
+
   // Explicit Layout Control Callbacks (new for user-driven layout model)
   // ============================================================================
-  /** Callback to run biomechanical optimization on the current layout */
-  onOptimizeLayout?: () => void;
-  /** Callback to save the current layout as a new version */
-  onSaveLayoutVersion?: () => void;
-  /** Callback to trigger map to quadrants (exposed for Workbench settings menu) */
-  onRequestMapToQuadrants?: () => void;
+  // /** Callback to run biomechanical optimization on the current layout */
+  // onOptimizeLayout?: () => void;
+  // /** Callback to save the current layout as a new version */
+  // onSaveLayoutVersion?: () => void;
+  // /** Callback to trigger map to quadrants (exposed for Workbench settings menu) */
+  // onRequestMapToQuadrants?: () => void;
 }
 
 // Droppable Pad Component (represents a Pad on the 8x8 grid)
@@ -242,7 +241,7 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
         const fingerVarDark = `var(--finger-${heatmapHand === 'LH' ? 'L' : 'R'}${Math.max(1, heatmapFinger - 1)})`;
         return `linear-gradient(135deg, ${fingerVar} 0%, ${fingerVarDark} 100%)`;
       }
-      
+
       // PRIORITY 2: Fallback to difficulty colors ONLY if we have difficulty but no finger assignment
       // This handles cases where the engine couldn't assign a finger (e.g., truly unplayable)
       if (heatmapDifficulty) {
@@ -253,7 +252,7 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
           default: return 'linear-gradient(135deg, var(--finger-L1) 0%, var(--finger-L2) 100%)'; // Blue (Easy)
         }
       }
-      
+
       // PRIORITY 3: Default: neutral color for cells without engine data yet
       return 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-panel) 100%)';
     }
@@ -277,10 +276,10 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
   const fingerColor = getFingerColor();
 
   // Helper to darken color for gradient
-  const adjustColorBrightness = (hex: string, _percent: number) => {
-    // Simple placeholder - in real app use a proper color lib
-    return hex;
-  }
+  // const adjustColorBrightness = (hex: string, _percent: number) => {
+  //   // Simple placeholder - in real app use a proper color lib
+  //   return hex;
+  // }
 
   return (
     <div
@@ -434,9 +433,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   activeMapping,
   instrumentConfig,
   onAssignSound,
-  onAssignSounds,
+  // onAssignSounds,
   onUpdateMapping,
-  onDuplicateMapping,
+  // onDuplicateMapping,
   onAddSound,
   onUpdateSound,
   onUpdateMappingSound,
@@ -444,19 +443,19 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   onDeleteSound,
   projectState,
   onUpdateProjectState,
-  onSetActiveMappingId,
+  // onSetActiveMappingId,
   activeLayout,
 
   showNoteLabels = false,
   showPositionLabels = false,
   // viewAllSteps = false,
-  showHeatmap = false,
+  // showHeatmap = false,
   engineResult: engineResultProp = null,
-  
+
   // Explicit layout control callbacks
-  onOptimizeLayout,
-  onSaveLayoutVersion,
-  onRequestMapToQuadrants,
+  // onOptimizeLayout,
+  // onSaveLayoutVersion,
+  // onRequestMapToQuadrants,
 }) => {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -471,30 +470,30 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Engine result is now passed from Workbench (reactive solver loop)
   // Use prop if provided, otherwise fall back to null
   const engineResult = engineResultProp;
-  
+
   // Build a lookup map from noteNumber -> finger assignment for efficient cell coloring
   // This is computed once when engineResult changes, then used for all cells
   // Uses the LAST occurrence of each note, so manual assignment changes are reflected
   const fingerAssignmentMap = useMemo(() => {
     const map = new Map<number, { finger: FingerID | null; hand: 'LH' | 'RH' | null; difficulty: string }>();
-    
+
     if (!engineResult) return map;
-    
+
     // Get manual assignments for current layout (these take priority over engine results)
     const currentLayoutId = projectState.activeLayoutId;
     const manualAssignments = currentLayoutId && projectState.manualAssignments
       ? projectState.manualAssignments[currentLayoutId]
       : undefined;
-    
+
     // Get filtered performance to map event indices to note numbers
     const filteredPerformance = getActivePerformance(projectState);
-    
+
     // First, process manual assignments (they override engine results)
     if (manualAssignments && filteredPerformance) {
       filteredPerformance.events.forEach((event, eventIndex) => {
         const eventIndexStr = String(eventIndex);
         const manualAssignment = manualAssignments[eventIndexStr];
-        
+
         if (manualAssignment) {
           // Manual assignment takes priority - use it even if engine says Unplayable
           map.set(event.noteNumber, {
@@ -506,7 +505,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         }
       });
     }
-    
+
     // Then, process engine results for notes without manual assignments
     // For each note, store the LAST finger assignment (so manual changes show up)
     engineResult.debugEvents.forEach((event, eventIndex) => {
@@ -517,7 +516,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
           return; // Skip - manual assignment already handled
         }
       }
-      
+
       // Only add if we have a valid finger assignment
       if (event.assignedHand !== 'Unplayable' && event.finger) {
         // Only set if not already set by manual assignment
@@ -530,10 +529,10 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         }
       }
     });
-    
+
     return map;
   }, [engineResult, projectState]);
-  const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
+  // const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -818,7 +817,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
       });
       setSelectedCellKey(null);
       setReachabilityConfig(null);
-      
+
       console.log('[LayoutDesigner] Clear Grid: all sounds moved to staging. Layout mode set to "none".');
     }
   };
@@ -829,6 +828,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
   // Note: Ctrl+S keyboard shortcut removed - Save Project is handled by main Workbench header
 
   // Handle auto-layout to quadrants
+  // @ts-ignore
   const handleMapToQuadrants = () => {
     // If callback provided, use it (for external control from Workbench settings)
     if (onRequestMapToQuadrants) {
@@ -1065,12 +1065,12 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         ...activeMapping.cells,
         ...assignments,
       };
-      
+
       onUpdateMapping({
         cells: mergedCells,
         layoutMode: 'random',
       });
-      
+
       console.log(`[LayoutDesigner] Assign Manually: placed ${Object.keys(assignments).length} voices randomly. Layout mode set to 'random'.`);
     }
   };
@@ -1111,6 +1111,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
   // Get filtered performance using selector (excludes ignored notes)
   // This is the computed performance that should be used everywhere instead of raw activeLayout.performance
+  // @ts-ignore
   const filteredPerformance = useMemo(() => {
     return getActivePerformance(projectState);
   }, [projectState]);
@@ -1180,85 +1181,25 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               style={{ containerType: 'size' } as React.CSSProperties}
             >
               {/* ============================================================================ */}
-              {/* EXPLICIT LAYOUT CONTROLS TOOLBAR */}
-              {/* User-driven layout model: All layout changes require explicit user action */}
+              {/* EXPLICIT LAYOUT CONTROLS TOOLBAR REMOVED - Moved to Workbench Header */}
               {/* ============================================================================ */}
-              <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
+              <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10 pointer-events-none">
                 {/* Layout Mode Indicator */}
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg">
-                  <div className={`w-2 h-2 rounded-full ${
-                    activeMapping?.layoutMode === 'optimized' ? 'bg-emerald-500' :
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-lg pointer-events-auto shadow-lg backdrop-blur-md">
+                  <div className={`w-2 h-2 rounded-full ${activeMapping?.layoutMode === 'optimized' ? 'bg-emerald-500' :
                     activeMapping?.layoutMode === 'random' ? 'bg-amber-500' :
-                    activeMapping?.layoutMode === 'manual' ? 'bg-blue-500' :
-                    'bg-slate-500'
-                  }`} />
+                      activeMapping?.layoutMode === 'manual' ? 'bg-blue-500' :
+                        'bg-slate-500'
+                    }`} />
                   <span className="text-xs text-[var(--text-secondary)] font-medium">
                     {activeMapping?.layoutMode === 'optimized' ? 'Optimized Layout' :
-                     activeMapping?.layoutMode === 'random' ? 'Random Layout' :
-                     activeMapping?.layoutMode === 'manual' ? 'Manual Layout' :
-                     'No Layout'}
+                      activeMapping?.layoutMode === 'random' ? 'Random Layout' :
+                        activeMapping?.layoutMode === 'manual' ? 'Manual Layout' :
+                          'No Layout'}
                   </span>
                   {activeMapping?.version && (
                     <span className="text-[10px] text-[var(--text-secondary)] opacity-60">v{activeMapping.version}</span>
                   )}
-                </div>
-
-                {/* Explicit Layout Control Buttons */}
-                <div className="flex items-center gap-2">
-                  {/* Assign Manually - Random Placement */}
-                  <button
-                    onClick={handleAutoAssignRandom}
-                    disabled={!activeMapping || stagingAssets.length === 0}
-                    className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
-                    title="Randomly assign all unassigned sounds to empty pads"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Assign Manually
-                  </button>
-
-                  {/* Optimize Layout - Biomechanical Optimization */}
-                  <button
-                    onClick={onOptimizeLayout}
-                    disabled={!activeMapping || !onOptimizeLayout || Object.keys(activeMapping?.cells || {}).length === 0}
-                    className="px-3 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
-                    title="Run biomechanical optimization to find the best layout (overwrites current layout)"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    Optimize Layout
-                  </button>
-
-                  {/* Clear Grid */}
-                  <button
-                    onClick={handleClearGrid}
-                    disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
-                    className="px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
-                    title="Clear all sounds from the grid (moves to staging)"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    Clear Grid
-                  </button>
-
-                  {/* Divider */}
-                  <div className="w-px h-6 bg-[var(--border-subtle)] mx-1" />
-
-                  {/* Save Layout Version */}
-                  <button
-                    onClick={onSaveLayoutVersion}
-                    disabled={!activeMapping || !onSaveLayoutVersion || Object.keys(activeMapping?.cells || {}).length === 0}
-                    className="px-3 py-1.5 text-xs font-medium bg-[var(--bg-card)] hover:bg-[var(--bg-panel)] border border-[var(--border-subtle)] disabled:opacity-50 text-[var(--text-primary)] rounded-lg transition-all flex items-center gap-1.5 shadow-sm disabled:cursor-not-allowed"
-                    title="Save current layout as a new version"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                    </svg>
-                    Save Layout
-                  </button>
                 </div>
               </div>
               <div
@@ -1327,7 +1268,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                   </React.Fragment>
                 ))}
               </div>
-              
+
               {/* Finger Legend - Centered below grid */}
               <FingerLegend />
             </div>
@@ -1537,7 +1478,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
         </DragOverlay>
       </div>
 
-    </DndContext >
+    </DndContext>
   );
 };
-

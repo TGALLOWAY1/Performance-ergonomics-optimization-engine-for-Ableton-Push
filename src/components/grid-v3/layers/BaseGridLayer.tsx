@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { GridGeometry, GridTheme } from '../types';
 
 interface BaseGridLayerProps {
@@ -9,7 +9,7 @@ interface BaseGridLayerProps {
 }
 
 export const BaseGridLayer = memo(({ rows, cols, geometry, theme }: BaseGridLayerProps) => {
-    const { padSize, padGap } = geometry;
+    const { padSize } = geometry;
     const { padIdleColor } = theme;
 
     const gridItems = [];

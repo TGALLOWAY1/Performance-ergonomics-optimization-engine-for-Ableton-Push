@@ -90,7 +90,7 @@ export function isSpanValid(
     // If wrist is floating, assume valid (hand can start anywhere)
     return true;
   }
-  
+
   const distance = calculateGridDistance(wristPosition, targetPosition);
   return distance <= MAX_HAND_SPAN;
 }
@@ -119,7 +119,7 @@ export function isFingerOrderingValid(
   if (thumbPos === null || pinkyPos === null) {
     return true;
   }
-  
+
   if (hand === 'RH') {
     // Right Hand: Thumb should be left (lower col) OR bottom (lower row) of Pinky
     return thumbPos.col < pinkyPos.col || thumbPos.row < pinkyPos.row;
@@ -144,7 +144,7 @@ export function isCollision(
   if (pos1 === null || pos2 === null) {
     return false;
   }
-  
+
   // Collision if both positions are identical
   return pos1.row === pos2.row && pos1.col === pos2.col;
 }
@@ -163,16 +163,16 @@ export function hasFingerCollision(
   allFingers: Record<FingerID, { pos: GridPosition | null; fatigue: number }>
 ): boolean {
   const allFingerIds: FingerID[] = [1, 2, 3, 4, 5];
-  
+
   for (const fid of allFingerIds) {
     // Skip the finger we're checking
     if (fid === fingerId) continue;
-    
+
     if (isCollision(fingerPos, allFingers[fid].pos)) {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -200,16 +200,16 @@ export function getReachabilityMap(
   _targetFinger: FingerID
 ): Record<string, ReachabilityLevel> {
   const map: Record<string, ReachabilityLevel> = {};
-  
+
   // Generate all 64 cells (8x8 grid)
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const cellKey = `${row},${col}`;
       const targetPos: GridPosition = { row, col };
-      
+
       // Calculate distance from anchor to target
       const distance = calculateGridDistance(anchorPos, targetPos);
-      
+
       // Determine reachability level
       if (distance <= 3.0) {
         map[cellKey] = 'green';
@@ -220,7 +220,7 @@ export function getReachabilityMap(
       }
     }
   }
-  
+
   return map;
 }
 
@@ -249,11 +249,11 @@ function calculateDistance(start: GridPosition, end: GridPosition): number {
 export function isReachPossible(
   start: GridPosition,
   end: GridPosition,
-  finger: FingerType,
+  _finger: FingerType,
   constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS
 ): boolean {
   const distance = calculateGridDistance(start, end);
-  
+
   // Use maxReach as the maximum reach distance
   // All fingers use the same max reach for now, but this could be finger-specific
   return distance <= constants.maxReach;
@@ -275,7 +275,7 @@ export function isValidFingerOrder(
   handSide: 'left' | 'right'
 ): boolean {
   const { finger: newFinger, pos: newPos } = newAssignment;
-  
+
   // Create a temporary hand state with the new assignment
   const tempFingers: Record<FingerType, FingerState> = {
     ...handState.fingers,
@@ -289,7 +289,7 @@ export function isValidFingerOrder(
   const thumbPos = tempFingers.thumb.currentGridPos;
   const indexPos = tempFingers.index.currentGridPos;
   const middlePos = tempFingers.middle.currentGridPos;
-  const ringPos = tempFingers.ring.currentGridPos;
+  // const ringPos = tempFingers.ring.currentGridPos;
   const pinkyPos = tempFingers.pinky.currentGridPos;
 
   // Rule 1: Thumb and Pinky ordering
@@ -335,7 +335,7 @@ export function isValidFingerOrder(
   // Rule 4: Finger sequence ordering (index < middle < ring < pinky in column for right hand)
   // For right hand: fingers should be in order left to right (index, middle, ring, pinky)
   // For left hand: fingers should be in order right to left (pinky, ring, middle, index)
-  const fingerSequence: FingerType[] = handSide === 'right' 
+  const fingerSequence: FingerType[] = handSide === 'right'
     ? ['index', 'middle', 'ring', 'pinky']
     : ['pinky', 'ring', 'middle', 'index'];
 
@@ -417,7 +417,7 @@ export function checkChordFeasibility(
     for (let i = 0; i < remainingFingers.length; i++) {
       const finger = remainingFingers[i];
       const note = remainingNotes[0];
-      
+
       const newAssignment: ChordFingerAssignment[] = [
         ...currentAssignment,
         { finger, pos: note }
@@ -531,20 +531,20 @@ function satisfiesSpanConstraint(
   maxSpan: number = MAX_FINGER_SPAN_STRICT
 ): boolean {
   const entries = Object.entries(fingerPositions) as [FingerType, FingerCoordinate][];
-  
+
   // Check all pairs of fingers
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
       const [, posA] = entries[i];
       const [, posB] = entries[j];
-      
+
       const distance = fingerDistance(posA, posB);
       if (distance > maxSpan) {
         return false;
       }
     }
   }
-  
+
   return true;
 }
 
@@ -566,24 +566,24 @@ function satisfiesLeftHandTopology(
 ): boolean {
   // Get X positions for each finger that is assigned
   const xPositions: { finger: FingerType; x: number }[] = [];
-  
+
   for (const finger of FINGER_ORDER) {
     const pos = fingerPositions[finger];
     if (pos !== undefined) {
       xPositions.push({ finger, x: pos.x });
     }
   }
-  
+
   // Check ordering: for left hand, fingers should be ordered left-to-right
   // in the sequence: pinky, ring, middle, index, thumb
   for (let i = 0; i < xPositions.length - 1; i++) {
     const current = xPositions[i];
     const next = xPositions[i + 1];
-    
+
     // Get the expected order indices
     const currentOrderIndex = FINGER_ORDER.indexOf(current.finger);
     const nextOrderIndex = FINGER_ORDER.indexOf(next.finger);
-    
+
     // If current finger should be "before" next in the ordering
     if (currentOrderIndex < nextOrderIndex) {
       // For left hand: earlier fingers (pinky side) should have x <= later fingers (thumb side)
@@ -600,7 +600,7 @@ function satisfiesLeftHandTopology(
       }
     }
   }
-  
+
   return true;
 }
 
@@ -622,25 +622,25 @@ function satisfiesRightHandTopology(
 ): boolean {
   // Get X positions for each finger that is assigned
   const xPositions: { finger: FingerType; x: number }[] = [];
-  
+
   for (const finger of FINGER_ORDER) {
     const pos = fingerPositions[finger];
     if (pos !== undefined) {
       xPositions.push({ finger, x: pos.x });
     }
   }
-  
+
   // Check ordering: for right hand, fingers should be ordered right-to-left
   // in the sequence: pinky, ring, middle, index, thumb
   // i.e., pinky has highest x, thumb has lowest x
   for (let i = 0; i < xPositions.length - 1; i++) {
     const current = xPositions[i];
     const next = xPositions[i + 1];
-    
+
     // Get the expected order indices
     const currentOrderIndex = FINGER_ORDER.indexOf(current.finger);
     const nextOrderIndex = FINGER_ORDER.indexOf(next.finger);
-    
+
     // For right hand: earlier fingers (pinky side) should have x >= later fingers (thumb side)
     if (currentOrderIndex < nextOrderIndex) {
       // Current is "before" next in ordering (pinky side)
@@ -656,7 +656,7 @@ function satisfiesRightHandTopology(
       }
     }
   }
-  
+
   return true;
 }
 
@@ -670,14 +670,14 @@ function calculateCentroid(
   fingerPositions: Partial<Record<FingerType, FingerCoordinate>>
 ): FingerCoordinate {
   const positions = Object.values(fingerPositions);
-  
+
   if (positions.length === 0) {
     return { x: 3.5, y: 3.5 }; // Center of grid as default
   }
-  
+
   const sumX = positions.reduce((sum, pos) => sum + pos.x, 0);
   const sumY = positions.reduce((sum, pos) => sum + pos.y, 0);
-  
+
   return {
     x: sumX / positions.length,
     y: sumY / positions.length,
@@ -704,18 +704,18 @@ function generateGripsWithConstraints(
   if (activePads.length === 0) {
     return [];
   }
-  
+
   // Cannot play more than 5 pads with one hand (5 fingers max)
   if (activePads.length > 5) {
     return [];
   }
-  
+
   const validGrips: HandPose[] = [];
   const availableFingers: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-  
+
   // Convert pads to finger coordinates
   const padCoords = activePads.map(padToFingerCoordinate);
-  
+
   function generatePermutations(
     padIndex: number,
     remainingFingers: FingerType[],
@@ -727,38 +727,38 @@ function generateGripsWithConstraints(
       if (!satisfiesSpanConstraint(currentAssignment, maxSpan)) {
         return; // Span constraint violated
       }
-      
+
       const topologyValid = hand === 'left'
         ? satisfiesLeftHandTopology(currentAssignment, thumbDelta, allowOverlap)
         : satisfiesRightHandTopology(currentAssignment, thumbDelta, allowOverlap);
-      
+
       if (!topologyValid) {
         return; // Topological constraint violated
       }
-      
+
       // All constraints satisfied - create HandPose
       const centroid = calculateCentroid(currentAssignment);
       const handPose: HandPose = {
         centroid,
         fingers: { ...currentAssignment },
       };
-      
+
       validGrips.push(handPose);
       return;
     }
-    
+
     // Recursive case: try assigning each remaining finger to current pad
     const currentPadCoord = padCoords[padIndex];
-    
+
     for (let i = 0; i < remainingFingers.length; i++) {
       const finger = remainingFingers[i];
-      
+
       // Create new assignment with this finger
       const newAssignment: Partial<Record<FingerType, FingerCoordinate>> = {
         ...currentAssignment,
         [finger]: currentPadCoord,
       };
-      
+
       // Early pruning: check span constraint incrementally
       let valid = true;
       for (const [, existingPos] of Object.entries(currentAssignment)) {
@@ -767,25 +767,25 @@ function generateGripsWithConstraints(
           break;
         }
       }
-      
+
       if (!valid) {
         continue; // Skip this branch - span already violated
       }
-      
+
       // Remove this finger from available fingers for next level
       const newRemainingFingers = [
         ...remainingFingers.slice(0, i),
         ...remainingFingers.slice(i + 1),
       ];
-      
+
       // Recurse
       generatePermutations(padIndex + 1, newRemainingFingers, newAssignment);
     }
   }
-  
+
   // Start the recursive generation
   generatePermutations(0, availableFingers, {});
-  
+
   return validGrips;
 }
 
@@ -808,20 +808,20 @@ function createFallbackGrip(
     // For right hand: assign from right to left (pinky on right, thumb on left)
     return hand === 'left' ? a.col - b.col : b.col - a.col;
   });
-  
+
   // Available fingers in order: prefer strong fingers first
   const fingerPriority: FingerType[] = ['index', 'middle', 'ring', 'thumb', 'pinky'];
-  
+
   const fingers: Partial<Record<FingerType, FingerCoordinate>> = {};
-  
+
   for (let i = 0; i < sortedPads.length && i < fingerPriority.length; i++) {
     const pad = sortedPads[i];
     const finger = fingerPriority[i];
     fingers[finger] = padToFingerCoordinate(pad);
   }
-  
+
   const centroid = calculateCentroid(fingers);
-  
+
   return {
     centroid,
     fingers,
@@ -849,7 +849,7 @@ export function generateValidGrips(
   if (activePads.length === 0) {
     return [];
   }
-  
+
   // Tier 1: Strict constraints
   const tier1Results = generateGripsWithConstraints(
     activePads,
@@ -858,11 +858,11 @@ export function generateValidGrips(
     THUMB_DELTA,
     false
   );
-  
+
   if (tier1Results.length > 0) {
     return tier1Results;
   }
-  
+
   // Tier 2: Relaxed constraints
   const tier2Results = generateGripsWithConstraints(
     activePads,
@@ -871,11 +871,11 @@ export function generateValidGrips(
     THUMB_DELTA_RELAXED,
     true
   );
-  
+
   if (tier2Results.length > 0) {
     return tier2Results;
   }
-  
+
   // Tier 3: Fallback - create a best-effort grip
   const fallbackGrip = createFallbackGrip(activePads, hand);
   return [fallbackGrip];
@@ -897,7 +897,7 @@ export function generateValidGripsWithTier(
   if (activePads.length === 0) {
     return [];
   }
-  
+
   // Tier 1: Strict constraints
   const tier1Results = generateGripsWithConstraints(
     activePads,
@@ -906,7 +906,7 @@ export function generateValidGripsWithTier(
     THUMB_DELTA,
     false
   );
-  
+
   if (tier1Results.length > 0) {
     return tier1Results.map(pose => ({
       pose,
@@ -914,7 +914,7 @@ export function generateValidGripsWithTier(
       isFallback: false,
     }));
   }
-  
+
   // Tier 2: Relaxed constraints
   const tier2Results = generateGripsWithConstraints(
     activePads,
@@ -923,7 +923,7 @@ export function generateValidGripsWithTier(
     THUMB_DELTA_RELAXED,
     true
   );
-  
+
   if (tier2Results.length > 0) {
     return tier2Results.map(pose => ({
       pose,
@@ -931,7 +931,7 @@ export function generateValidGripsWithTier(
       isFallback: false,
     }));
   }
-  
+
   // Tier 3: Fallback
   const fallbackGrip = createFallbackGrip(activePads, hand);
   return [{
@@ -958,7 +958,7 @@ export function generateValidGripsFromPositions(
     row: pos.row,
     col: pos.col,
   }));
-  
+
   return generateValidGrips(pads, hand);
 }
 

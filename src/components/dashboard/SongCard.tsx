@@ -25,6 +25,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
     }, [song.title, song.bpm, isEditing]);
 
     const handleDeleteClick = (e: React.MouseEvent) => {
+        e.preventDefault();
         e.stopPropagation(); // Prevent card click navigation
         if (onDelete) {
             onDelete(song.id, song.title);
@@ -79,7 +80,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
     const handleSaveEdit = () => {
         const trimmedTitle = editedTitle.trim();
         const bpmValue = Math.max(1, Math.min(999, editedBpm)); // Clamp BPM between 1-999
-        
+
         // Only update if values changed
         if (trimmedTitle !== song.title || bpmValue !== song.bpm) {
             if (onUpdate) {
@@ -139,11 +140,10 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                 {/* Link/Re-link MIDI: label wraps input and button so browser handles the click → file dialog */}
                 {onLinkMidi && (
                     <label
-                        className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer relative z-30 ${
-                            hasMidiLinked
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer relative z-30 ${hasMidiLinked
                                 ? "bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30"
                                 : "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30"
-                        }`}
+                            }`}
                         title={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
                         aria-label={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
                         onClick={(e) => {
@@ -191,7 +191,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
             </div>
 
             {/* Icon / Cover Art Placeholder */}
-            <div 
+            <div
                 onDoubleClick={handleDoubleClick}
                 className="relative w-16 h-16 mb-4 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center shadow-inner border border-white/5 group-hover:scale-105 transition-transform cursor-pointer"
                 title="Double-click to edit"
@@ -263,7 +263,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                     </div>
                 </div>
             ) : (
-                <h3 
+                <h3
                     onDoubleClick={handleDoubleClick}
                     className="text-lg font-bold text-slate-200 mb-4 truncate group-hover:text-white transition-colors cursor-pointer"
                     title="Double-click to edit"
@@ -296,7 +296,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
 
             {/* Action Buttons */}
             <div className="flex items-center justify-center gap-2 pt-3 border-t border-slate-700/50">
-                <button 
+                <button
                     onClick={handleWorkbenchClick}
                     className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-full font-medium shadow-lg shadow-blue-900/30 flex items-center gap-1 transition-colors"
                     title="Open in Editor"
@@ -306,7 +306,7 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                     </svg>
                     Editor
                 </button>
-                <button 
+                <button
                     onClick={handleAnalyzeEventsClick}
                     className="px-2.5 py-1 text-xs bg-purple-600 hover:bg-purple-500 text-white rounded-full font-medium shadow-lg shadow-purple-900/30 flex items-center gap-1 transition-colors"
                     title="Analyze Events"

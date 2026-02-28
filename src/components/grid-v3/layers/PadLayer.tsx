@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { PadActivation, GridGeometry, GridTheme } from '../types';
 
 interface PadLayerProps {
@@ -75,7 +75,7 @@ export const PadLayer = memo(({ pads, variant, geometry, theme, onPadClick, onPa
                         onClick={isGhost ? undefined : () => onPadClick?.(pad.id, pad.row, pad.col)}
                         onMouseEnter={isGhost ? undefined : () => onPadHover?.(pad.id)}
                         onMouseLeave={isGhost ? undefined : () => onPadHover?.(null)}
-                        style={{ 
+                        style={{
                             cursor: isGhost ? 'default' : (onPadClick ? 'pointer' : 'default'),
                             pointerEvents,
                         }}

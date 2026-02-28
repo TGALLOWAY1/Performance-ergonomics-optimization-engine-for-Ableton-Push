@@ -133,7 +133,7 @@ export const DEFAULT_HAND_POSE: NeutralHandPose = {
   L3: { noteName: 'D0', noteNumber: noteNameToMidi('D0')! },
   L4: { noteName: 'C#0', noteNumber: noteNameToMidi('C#0')! },
   L5: { noteName: 'C0', noteNumber: noteNameToMidi('C0')! },
-  
+
   R1: { noteName: 'E-2', noteNumber: noteNameToMidi('E-2')! },
   R2: { noteName: 'G#-1', noteNumber: noteNameToMidi('G#-1')! },
   R3: { noteName: 'F0', noteNumber: noteNameToMidi('F0')! },
@@ -183,7 +183,7 @@ export type NeutralPadPositions = Record<string, NeutralPadPosition>;
  * @returns Record of finger keys ("L1", ..., "R5") to their pad positions, or empty if layout is invalid
  */
 export function resolveNeutralPadPositions(
-  layout: GridMapping,
+  _layout: GridMapping,
   instrumentConfig: InstrumentConfig
 ): NeutralPadPositions {
   const result: NeutralPadPositions = {};
@@ -191,7 +191,7 @@ export function resolveNeutralPadPositions(
   for (const [fingerKey, pose] of Object.entries(DEFAULT_HAND_POSE)) {
     // Get pad position for this note number using GridMapService
     const padPosition = GridMapService.noteToGrid(pose.noteNumber, instrumentConfig);
-    
+
     // Skip if the note doesn't exist in this layout (outside the 8x8 grid)
     if (!padPosition) {
       continue;
@@ -249,12 +249,12 @@ export function computeNeutralHandCenters(
       leftPads.push(neutralPads[key]);
     }
   }
-  
+
   const leftCenter = leftPads.length > 0
     ? {
-        x: leftPads.reduce((sum, p) => sum + p.col, 0) / leftPads.length,
-        y: leftPads.reduce((sum, p) => sum + p.row, 0) / leftPads.length,
-      }
+      x: leftPads.reduce((sum, p) => sum + p.col, 0) / leftPads.length,
+      y: leftPads.reduce((sum, p) => sum + p.row, 0) / leftPads.length,
+    }
     : null;
 
   // Compute right hand center (from R1-R5)
@@ -265,12 +265,12 @@ export function computeNeutralHandCenters(
       rightPads.push(neutralPads[key]);
     }
   }
-  
+
   const rightCenter = rightPads.length > 0
     ? {
-        x: rightPads.reduce((sum, p) => sum + p.col, 0) / rightPads.length,
-        y: rightPads.reduce((sum, p) => sum + p.row, 0) / rightPads.length,
-      }
+      x: rightPads.reduce((sum, p) => sum + p.col, 0) / rightPads.length,
+      y: rightPads.reduce((sum, p) => sum + p.row, 0) / rightPads.length,
+    }
     : null;
 
   return {

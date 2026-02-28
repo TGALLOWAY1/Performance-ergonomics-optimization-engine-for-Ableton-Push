@@ -17,17 +17,19 @@ import { FingerType } from '../engine/models';
 export const EventAnalysisPage: React.FC = () => {
   const {
     projectState,
-    setProjectState,
     engineResult,
     setEngineResult,
+    setProjectState,
   } = useProject();
 
   const [searchParams] = useSearchParams();
   const songId = searchParams.get('songId');
+  // @ts-ignore
   const [songName, setSongName] = useState<string | null>(null);
   const [hasLoadedSong, setHasLoadedSong] = useState(false);
 
   // Get active layout and performance
+  // @ts-ignore
   const activeLayout = useMemo(() =>
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
     [projectState.layouts, projectState.activeLayoutId]
@@ -132,7 +134,29 @@ export const EventAnalysisPage: React.FC = () => {
     projectState,
     hasLoadedSong,
     setEngineResult,
+    setEngineResult,
   ]);
+
+  // Handler for manual assignment changes (from Event Log)
+  const handleAssignmentChange = React.useCallback((index: number, hand: 'left' | 'right', finger: FingerType) => {
+    if (!projectState.activeLayoutId) return;
+
+    setProjectState(prev => {
+      const currentLayoutId = prev.activeLayoutId!;
+      const existingAssignments = prev.manualAssignments?.[currentLayoutId] || {};
+
+      return {
+        ...prev,
+        manualAssignments: {
+          ...prev.manualAssignments,
+          [currentLayoutId]: {
+            ...existingAssignments,
+            [index]: { hand, finger }
+          }
+        }
+      };
+    });
+  }, [projectState.activeLayoutId, setProjectState]);
 
   // Build workbench link with songId if present
   const workbenchLink = songId ? `/workbench?songId=${songId}` : '/workbench';
@@ -166,8 +190,8 @@ export const EventAnalysisPage: React.FC = () => {
             {!performance || performance.events.length === 0
               ? 'No performance data available. Open a song in the Workbench and import MIDI data.'
               : !engineResult
-              ? 'Engine analysis not available. The solver needs to run first.'
-              : 'No events to analyze.'}
+                ? 'Engine analysis not available. The solver needs to run first.'
+                : 'No events to analyze.'}
           </p>
           <div className="flex items-center justify-center gap-4 pt-4">
             <Link
@@ -255,6 +279,7 @@ export const EventAnalysisPage: React.FC = () => {
         <EventAnalysisPanel
           engineResult={engineResult}
           performance={performance}
+          onAssignmentChange={handleAssignmentChange}
         />
       </div>
     </div>

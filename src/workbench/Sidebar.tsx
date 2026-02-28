@@ -2,12 +2,13 @@ import React, { useRef } from 'react';
 import { LayoutList } from './LayoutList';
 import { SectionMapList } from './SectionMapList';
 import { LayoutSnapshot } from '../types/projectState';
-import { SectionMap } from '../types/performance';
+import { InstrumentConfig, SectionMap } from '../types/performance';
 
 interface SidebarProps {
   layouts: LayoutSnapshot[];
   activeLayoutId: string | null;
   sectionMaps: SectionMap[];
+  instrumentConfigs: InstrumentConfig[];
   onSelectLayout: (id: string) => void;
   onCreateLayout: () => void;
   onDeleteLayout: (id: string) => void;
@@ -23,6 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   layouts,
   activeLayoutId,
   sectionMaps,
+  instrumentConfigs,
   onSelectLayout,
   onCreateLayout,
   onDeleteLayout,
@@ -38,7 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div id="sidebar" className="w-64 border-r border-border bg-slate-900 p-4 flex flex-col gap-4 overflow-y-auto">
+    <div id="sidebar" className="w-64 border-r border-border bg-slate-900 p-4 flex flex-col gap-4 overflow-y-auto flex-1 min-h-0">
       <div className="flex flex-col gap-2">
         <h2 className="text-xl font-bold text-slate-100">Push 3 Optimizer</h2>
         <div className="flex gap-2">
@@ -107,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
-      
+
       <div className="flex-1 flex flex-col gap-6">
         <LayoutList
           layouts={layouts}
@@ -119,6 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="border-t border-slate-800" />
         <SectionMapList
           sectionMaps={sectionMaps}
+          instrumentConfigs={instrumentConfigs}
           onUpdateSection={onUpdateSection}
         />
       </div>
