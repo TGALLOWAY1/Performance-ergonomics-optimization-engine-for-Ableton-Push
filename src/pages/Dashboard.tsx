@@ -112,13 +112,6 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar */}
-                <div className="w-64 flex-none bg-slate-900 border-r border-slate-800/50 flex flex-col p-4 space-y-6">
-                    <div className="space-y-1">
-                        <button className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 text-slate-200 font-medium text-sm">All Songs</button>
-                    </div>
-                </div>
-
                 {/* Main Grid */}
                 <div className="flex-1 overflow-y-auto p-8 bg-gradient-to-br from-slate-900 to-slate-950">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-7xl mx-auto">

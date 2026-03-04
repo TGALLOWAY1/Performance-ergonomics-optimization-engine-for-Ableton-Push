@@ -141,8 +141,8 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                 {onLinkMidi && (
                     <label
                         className={`px-2.5 py-1 text-xs rounded-full font-medium shadow-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer relative z-30 ${hasMidiLinked
-                                ? "bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30"
-                                : "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30"
+                            ? "bg-slate-600 hover:bg-slate-500 text-white shadow-slate-900/30"
+                            : "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30"
                             }`}
                         title={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
                         aria-label={hasMidiLinked ? "Re-link MIDI file" : "Link MIDI file"}
@@ -280,18 +280,6 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                         {song.bpm}
                     </div>
                 </div>
-                <div>
-                    <div className="text-slate-500 mb-0.5">Rating</div>
-                    <div className="font-mono font-medium text-slate-300">
-                        {song.performanceRating}<span className="text-slate-600">/100</span>
-                    </div>
-                </div>
-                <div>
-                    <div className="text-slate-500 mb-0.5">Practiced</div>
-                    <div className="font-medium text-slate-300">
-                        {Math.round(song.totalPracticeTime / 60)}h {song.totalPracticeTime % 60}m
-                    </div>
-                </div>
             </div>
 
             {/* Action Buttons */}
@@ -315,13 +303,6 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onDelete, onLinkMidi, 
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                     Analyze
-                </button>
-                <button className="px-2.5 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded-full font-medium shadow-lg shadow-green-900/30 flex items-center gap-1 transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Practice
                 </button>
             </div>
         </div>
