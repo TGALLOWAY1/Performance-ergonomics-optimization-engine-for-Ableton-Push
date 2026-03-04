@@ -112,6 +112,7 @@ class SongService {
             sectionMaps: projectData.sectionMaps || [],
             instrumentConfig: projectData.instrumentConfig,
             activeLayoutId: layoutId,
+            activeMappingId: gridMappingWithMode.id,
             projectTempo: projectData.performance.tempo || 120,
             parkedSounds: projectData.voices, // All voices in staging area
             mappings: [gridMappingWithMode], // Empty grid with layoutMode: 'none'

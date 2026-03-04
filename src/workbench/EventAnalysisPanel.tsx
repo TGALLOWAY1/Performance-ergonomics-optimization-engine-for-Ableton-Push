@@ -33,7 +33,7 @@ interface EventAnalysisPanelProps {
   /** Performance data (for tempo) */
   performance: Performance | null;
   /** Callback for manual finger assignment changes */
-  onAssignmentChange?: (index: number, hand: 'left' | 'right', finger: FingerType) => void;
+  onAssignmentChange?: (eventKey: string, hand: 'left' | 'right', finger: FingerType) => void;
 }
 
 export const EventAnalysisPanel: React.FC<EventAnalysisPanelProps> = ({
@@ -269,11 +269,9 @@ export const EventAnalysisPanel: React.FC<EventAnalysisPanelProps> = ({
               <div className="absolute inset-0 overflow-hidden">
                 <EventLogTable
                   events={engineResult.debugEvents}
-                  onAssignmentChange={(index, hand, finger) => {
-                    // Update selection to the edited event
-                    setSelectedEventIndex(index);
+                  onAssignmentChange={(eventKey, hand, finger) => {
                     if (onAssignmentChange) {
-                      onAssignmentChange(index, hand, finger);
+                      onAssignmentChange(eventKey, hand, finger);
                     }
                   }}
                 />

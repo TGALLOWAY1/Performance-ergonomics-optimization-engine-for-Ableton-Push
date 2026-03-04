@@ -3,7 +3,6 @@
  */
 
 import { ProjectState } from '../types/projectState';
-import { GridMapping, Voice } from '../types/layout';
 
 /**
  * Saves the full project state to a JSON file.
@@ -24,6 +23,33 @@ export function saveProject(state: ProjectState): void {
 }
 
 /**
+ * Validates and sanitizes a parsed JSON object into a safe ProjectState.
+ * Prevents undefined-reference crashes by supplying robust fallback values.
+ */
+export function validateProjectState(parsed: any): ProjectState {
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid project state data structure.');
+  }
+
+  return {
+    layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
+    sectionMaps: Array.isArray(parsed.sectionMaps) ? parsed.sectionMaps : [],
+    activeLayoutId: parsed.activeLayoutId || null,
+    activeMappingId: parsed.activeMappingId || null,
+    projectTempo: parsed.projectTempo || 120,
+    parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
+    mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
+    instrumentConfigs: Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs : [],
+    instrumentConfig: parsed.instrumentConfig || (Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs[0] : null) || null,
+    ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : [],
+    manualAssignments: parsed.manualAssignments || {},
+    engineConfiguration: parsed.engineConfiguration || { beamWidth: 50, stiffness: 1.0, restingPose: 'standard' },
+    solverResults: parsed.solverResults || {},
+    activeSolverId: parsed.activeSolverId || undefined,
+  };
+}
+
+/**
  * Loads a project state from a JSON file.
  * 
  * @param file - The JSON file to load
@@ -32,122 +58,13 @@ export function saveProject(state: ProjectState): void {
 export async function loadProject(file: File): Promise<ProjectState> {
   const text = await file.text();
   const parsed = JSON.parse(text);
-
-  // Validate and ensure all required fields exist
-  const state: ProjectState = {
-    layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
-    sectionMaps: Array.isArray(parsed.sectionMaps) ? parsed.sectionMaps : [],
-    activeLayoutId: parsed.activeLayoutId || null,
-    projectTempo: parsed.projectTempo || 120,
-    parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-    mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
-    instrumentConfigs: Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs : [],
-    instrumentConfig: parsed.instrumentConfig || parsed.instrumentConfigs?.[0] || null,
-    ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : [],
-    manualAssignments: parsed.manualAssignments || {},
-  };
-
-  return state;
+  return validateProjectState(parsed);
 }
 
 /**
- * Exports a single layout mapping with all referenced Voices.
- * This ensures the layout can be imported independently without broken references.
+ * Saves a project state to localStorage using a specific ID.
  * 
- * @param mapping - The GridMapping to export
- * @param allParkedSounds - All available Voices (to find referenced ones)
- */
-export function exportLayout(mapping: GridMapping, allParkedSounds: Voice[]): void {
-  // Collect all unique Voices referenced by this mapping
-  const referencedAssetIds = new Set<string>();
-  Object.values(mapping.cells).forEach(sound => {
-    referencedAssetIds.add(sound.id);
-  });
-
-  // Find all referenced assets from parkedSounds
-  const referencedAssets: Voice[] = [];
-  referencedAssetIds.forEach(id => {
-    const asset = allParkedSounds.find(s => s.id === id);
-    if (asset) {
-      referencedAssets.push(asset);
-    }
-  });
-
-  // Also include any assets that are in the mapping but not in parkedSounds
-  // (in case they were only in the mapping)
-  Object.values(mapping.cells).forEach(sound => {
-    if (!referencedAssets.find(a => a.id === sound.id)) {
-      referencedAssets.push(sound);
-    }
-  });
-
-  const exportData = {
-    mapping,
-    referencedAssets,
-  };
-
-  const json = JSON.stringify(exportData, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  // Sanitize filename - remove invalid characters
-  const safeName = mapping.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-  link.download = `${safeName}.layout.json`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-/**
- * Imports a layout file into the current project.
- * Adds the mapping and referenced assets without overwriting existing data.
- * 
- * @param file - The layout JSON file to import
- * @param currentProject - The current ProjectState to merge into
- * @returns Updated ProjectState with the imported layout and assets
- */
-export async function importLayout(
-  file: File,
-  currentProject: ProjectState
-): Promise<ProjectState> {
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-
-  // Validate structure
-  if (!parsed.mapping || !parsed.referencedAssets) {
-    throw new Error('Invalid layout file format. Expected { mapping, referencedAssets }');
-  }
-
-  const importedMapping: GridMapping = parsed.mapping;
-  const importedAssets: Voice[] = Array.isArray(parsed.referencedAssets)
-    ? parsed.referencedAssets
-    : [];
-
-  // Deduplicate assets by ID - only add if not already in parkedSounds
-  const existingAssetIds = new Set(currentProject.parkedSounds.map(s => s.id));
-  const newAssets = importedAssets.filter(asset => !existingAssetIds.has(asset.id));
-
-  // Generate new ID for the mapping to avoid conflicts
-  const newMapping: GridMapping = {
-    ...importedMapping,
-    id: `mapping-${Date.now()}`,
-    name: importedMapping.name ? `${importedMapping.name} (Imported)` : 'Imported Layout',
-  };
-
-  return {
-    ...currentProject,
-    mappings: [...currentProject.mappings, newMapping],
-    parkedSounds: [...currentProject.parkedSounds, ...newAssets],
-  };
-}
-
-
-/**
- * Saves the project state to local storage.
- * 
- * @param id - The unique ID for this project state (usually song.projectStateId)
+ * @param id - The unique ID for this project/song
  * @param state - The ProjectState to save
  */
 export function saveProjectStateToStorage(id: string, state: ProjectState): void {
@@ -167,7 +84,6 @@ export function saveProjectStateToStorage(id: string, state: ProjectState): void
     // Handle quota exceeded or other errors
   }
 }
-
 /**
  * Loads the project state from local storage.
  * 
@@ -184,14 +100,16 @@ export function loadProjectStateFromStorage(id: string): ProjectState | null {
     }
 
     const parsed = JSON.parse(json);
+    const validatedState = validateProjectState(parsed);
+
     console.log('[projectPersistence] Loaded state from localStorage:', {
       key,
-      parkedSoundsCount: parsed.parkedSounds?.length || 0,
-      voiceNames: parsed.parkedSounds?.map((v: { name: string }) => v.name) || [],
-      mappingsCount: parsed.mappings?.length || 0,
-      mappingCells: parsed.mappings?.map((m: { cells: Record<string, unknown> }) => Object.keys(m.cells).length) || [],
+      parkedSoundsCount: validatedState.parkedSounds.length,
+      voiceNames: validatedState.parkedSounds.map(v => v.name),
+      mappingsCount: validatedState.mappings.length,
+      mappingCells: validatedState.mappings.map(m => Object.keys(m.cells).length),
     });
-    return parsed as ProjectState;
+    return validatedState;
   } catch (err) {
     console.error('Failed to load project state from storage:', err);
     return null;

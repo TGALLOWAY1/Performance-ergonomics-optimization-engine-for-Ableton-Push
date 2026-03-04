@@ -59,6 +59,12 @@ export interface ProjectState {
    * Must correspond to a key in `solverResults`.
    */
   activeSolverId?: string;
+
+  /**
+   * The ID of the currently active GridMapping being viewed/edited.
+   * Centralizes this state so Workbench, Timeline, and EventAnalysis remain in sync.
+   */
+  activeMappingId: string | null;
 }
 
 // ============================================================================
@@ -203,4 +209,5 @@ export const createInitialProjectState = (): ProjectState => ({
   engineConfiguration: DEFAULT_ENGINE_CONFIGURATION,
   solverResults: {},
   activeSolverId: undefined,
+  activeMappingId: null,
 });

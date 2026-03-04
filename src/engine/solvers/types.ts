@@ -58,6 +58,11 @@ export interface EngineDebugEvent {
    * Derived from row/col when available. Undefined for Unplayable events.
    */
   padId?: string;
+  /**
+   * Deterministic event key from the original performance event.
+   * Used to link back to the source event unconditionally.
+   */
+  eventKey?: string;
 }
 
 /**
@@ -97,25 +102,25 @@ export interface EvolutionLogEntry {
 export interface AnnealingIterationSnapshot {
   /** Iteration number (0-indexed, matches step in current telemetry) */
   iteration: number;
-  
+
   /** Current temperature at this iteration */
   temperature: number;
-  
+
   /** Cost of the current accepted solution (post-move if accepted, or previous if rejected) */
   currentCost: number;
-  
+
   /** Best cost found so far (across all iterations) */
   bestCost: number;
-  
+
   /** Whether this candidate was accepted */
   accepted: boolean;
-  
+
   /** Cost difference: candidateCost - oldCost (negative = improvement) */
   deltaCost: number;
-  
+
   /** Acceptance probability (only present if deltaCost > 0) */
   acceptanceProbability?: number;
-  
+
   /** Per-metric sums over the whole mapping at this iteration (unweighted totals) */
   movementSum: number;
   stretchSum: number;
@@ -123,7 +128,7 @@ export interface AnnealingIterationSnapshot {
   bounceSum: number;
   fatigueSum: number;
   crossoverSum: number;
-  
+
   /** Optional: Shares of total cost (0-1), computed as sum / totalCostSum when totalCostSum > 0 */
   movementShare?: number;
   stretchShare?: number;
@@ -185,43 +190,43 @@ export interface EngineResult {
 export interface SolverStrategy {
   /** Human-readable name of the solver algorithm */
   readonly name: string;
-  
+
   /** Unique identifier for the solver type */
   readonly type: SolverType;
-  
+
   /** 
    * Whether this solver supports synchronous execution.
    * If true, solveSync() must be implemented.
    */
   readonly isSynchronous: boolean;
-  
+
   /**
    * Solves the performance optimization problem asynchronously.
    * 
    * @param performance - The performance data to analyze (sorted events)
    * @param config - Engine configuration (beam width, stiffness, resting pose)
-   * @param manualAssignments - Optional map of event index to forced finger assignment
+   * @param manualAssignments - Optional map of eventKey to forced finger assignment
    * @returns Promise resolving to EngineResult with score and debug events
    */
   solve(
     performance: Performance,
     config: EngineConfiguration,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): Promise<EngineResult>;
-  
+
   /**
    * Solves the performance optimization problem synchronously.
    * Only available if `isSynchronous` is true.
    * 
    * @param performance - The performance data to analyze (sorted events)
    * @param config - Engine configuration (beam width, stiffness, resting pose)
-   * @param manualAssignments - Optional map of event index to forced finger assignment
+   * @param manualAssignments - Optional map of eventKey to forced finger assignment
    * @returns EngineResult with score and debug events
    */
   solveSync?(
     performance: Performance,
     config: EngineConfiguration,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): EngineResult;
 }
 

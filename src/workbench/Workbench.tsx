@@ -5,7 +5,6 @@ import { Button } from '../components/ui/Button';
 import { LayoutDesigner } from './LayoutDesigner';
 import { GridMapping, Voice, cellKey } from '../types/layout';
 import { InstrumentConfig } from '../types/performance';
-import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
 import { mapToQuadrants } from '../utils/autoLayout';
@@ -15,6 +14,8 @@ import { getActivePerformance } from '../utils/performanceSelectors';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
+import { useSongStateHydration } from '../hooks/useSongStateHydration';
+import { saveProject, loadProject } from '../utils/projectPersistence';
 
 // Dev-only flag: only show Cost Debug in development builds
 // This is a developer-facing diagnostic view that relies on EngineResult.debugEvents
@@ -37,15 +38,21 @@ export const Workbench: React.FC = () => {
 
   const [searchParams] = useSearchParams();
   const songId = searchParams.get('songId');
-  const [currentSongId, setCurrentSongId] = useState<string | null>(null);
-  const [songName, setSongName] = useState<string | null>(null);
-  const [hasLoadedSong, setHasLoadedSong] = useState(false);
+  const [currentSongId, setCurrentSongId] = useState<string | null>(songId);
+
+  useEffect(() => {
+    setCurrentSongId(songId);
+  }, [songId]);
+
+  const { hasLoadedSong, songName } = useSongStateHydration(currentSongId);
+
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Derive activeSolverId from projectState
   // const activeSolverId = projectState.activeSolverId;
 
-  const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
+  // Derive activeMappingId from projectState
+  const activeMappingId = projectState.activeMappingId;
 
   const activeLayout = useMemo(() =>
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -87,103 +94,20 @@ export const Workbench: React.FC = () => {
       const mappingExists = mappings.find(m => m.id === currentId);
       if (!currentId || !mappingExists) {
         // Select first mapping only if current is invalid
-        setActiveMappingId(mappings[0].id);
+        setProjectState(prev => ({
+          ...prev,
+          activeMappingId: mappings[0].id
+        }));
       }
     } else if (currentId !== null) {
       // Clear selection if no mappings
-      setActiveMappingId(null);
+      setProjectState(prev => ({
+        ...prev,
+        activeMappingId: null
+      }));
     }
-  }, [projectState.mappings]);
+  }, [projectState.mappings, setProjectState]);
 
-  // Track if we've already attempted to load this session to prevent double-loading
-  const hasAttemptedLoadRef = useRef(false);
-  const loadedSongIdRef = useRef<string | null>(null);
-
-  // Load song state when navigating from Dashboard with a songId
-  // This effect runs on mount and when songId changes
-  useEffect(() => {
-    if (!songId) return;
-
-    // Prevent double-loading the same song in the same session
-    if (hasAttemptedLoadRef.current && loadedSongIdRef.current === songId) {
-      console.log('[Workbench] Already loaded this song in session, skipping');
-      return;
-    }
-
-    // Get song metadata for display
-    const song = songService.getSong(songId);
-    if (song) {
-      setSongName(song.metadata.title);
-    }
-
-    // Check which song was last loaded (persists across page refresh)
-    const lastLoadedSongId = localStorage.getItem('workbench_current_song_id');
-    const isSameSong = lastLoadedSongId === songId;
-
-    // Check if the current projectState has MEANINGFUL data (not just the default initial state)
-    // Check for performance events (MIDI data), voices, AND mapping cells
-    const hasPerformanceEvents = projectState.layouts.some(l => l.performance?.events?.length > 0);
-    const hasVoices = projectState.parkedSounds.length > 0;
-    const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-    const hasRealData = hasPerformanceEvents || hasVoices || hasMappingCells;
-
-    // ALWAYS load from storage when:
-    // 1. Different song than last time (user switched songs), OR
-    // 2. Same song but no real data in context (page refresh / initial load)
-    const shouldLoad = !isSameSong || !hasRealData;
-
-    console.log('[Workbench] Song load check:', {
-      songId,
-      lastLoadedSongId,
-      isSameSong,
-      hasPerformanceEvents,
-      hasVoices,
-      hasMappingCells,
-      hasRealData,
-      shouldLoad,
-      hasAttemptedLoad: hasAttemptedLoadRef.current,
-    });
-
-    // Mark that we've attempted to load
-    hasAttemptedLoadRef.current = true;
-    loadedSongIdRef.current = songId;
-
-    if (shouldLoad) {
-      console.log('[Workbench] Loading song state for:', songId);
-
-      // Save the current song ID to localStorage
-      localStorage.setItem('workbench_current_song_id', songId);
-      setCurrentSongId(songId);
-
-      const savedState = songService.loadSongState(songId);
-      if (savedState) {
-        console.log('[Workbench] Loaded saved project state:', {
-          layoutsCount: savedState.layouts.length,
-          parkedSoundsCount: savedState.parkedSounds.length,
-          mappingsCount: savedState.mappings.length,
-          mappingCells: savedState.mappings.map(m => Object.keys(m.cells).length),
-          voiceNames: savedState.parkedSounds.map(v => v.name),
-          performanceEventsCount: savedState.layouts[0]?.performance?.events?.length || 0,
-        });
-
-        // Set the project state from the saved state
-        setProjectState(savedState, true); // Skip history for initial load
-
-        // Set active mapping if available
-        if (savedState.mappings.length > 0) {
-          setActiveMappingId(savedState.mappings[0].id);
-        }
-      } else {
-        console.log('[Workbench] No saved state found for song:', songId);
-      }
-
-      setHasLoadedSong(true);
-    } else {
-      console.log('[Workbench] Using existing data in context (navigation back from Timeline)');
-      setCurrentSongId(songId);
-      setHasLoadedSong(true);
-    }
-  }, [songId, setProjectState, projectState]); // Added projectState to properly track when data is loaded
 
   // Auto-save project state changes back to the song (debounced)
   useEffect(() => {
@@ -419,6 +343,7 @@ export const Workbench: React.FC = () => {
           parkedSounds: projectData.voices, // REPLACE, don't merge - ALL voices go here
           projectTempo: projectData.performance.tempo || prevState.projectTempo,
           ignoredNoteNumbers: [], // Reset to empty on new import
+          activeMappingId: projectData.gridMapping.id,
         };
 
         console.log('[Workbench] handleProjectLoad - Setting state:', {
@@ -443,8 +368,8 @@ export const Workbench: React.FC = () => {
       // DEBUG: Log after state update (but state might not be updated yet due to async nature)
       console.log('[Workbench] handleProjectLoad - State update queued, waiting for next render...');
 
-      // Always set active mapping ID to the new mapping (hard reset)
-      setActiveMappingId(projectData.gridMapping.id);
+      // activeMappingId was already set directly via activeMappingId: projectData.gridMapping.id in the state update queuing
+
 
       // DEBUG: Log mapping ID being set
       console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
@@ -470,7 +395,7 @@ export const Workbench: React.FC = () => {
       console.error('Failed to load MIDI project:', err);
       throw err; // Re-throw so caller can handle
     }
-  }, [setProjectState, activeMappingId, setActiveMappingId]);
+  }, [setProjectState, activeMappingId]);
 
   // DISABLED: Auto-load default test MIDI file
   // User wants to start with blank screen and manually drag/drop files
@@ -502,55 +427,29 @@ export const Workbench: React.FC = () => {
 
 
   const handleSaveProject = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectState, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "push3_project.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    saveProject(projectState);
   };
 
-  const handleLoadProject = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLoadProject = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const parsed = JSON.parse(content);
+    try {
+      const loadedState = await loadProject(file);
 
-        // Basic validation
-        if (
-          parsed &&
-          Array.isArray(parsed.layouts) &&
-          typeof parsed.projectTempo === 'number'
-        ) {
-          // Ensure new fields are initialized if missing (for backward compatibility)
-          const loadedState: ProjectState = {
-            ...parsed,
-            parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-            mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
-            // Safety Check: Default ignoredNoteNumbers to empty array if undefined
-            ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : []
-          };
-          setProjectState(loadedState, true); // Skip history on load
-          // Initialize activeMappingId if mappings exist
-          if (loadedState.mappings.length > 0) {
-            setActiveMappingId(loadedState.mappings[0].id);
-          }
-        } else {
-          alert("Invalid project file structure");
-        }
-      } catch (err) {
-        console.error(err);
-        alert("Failed to parse project file");
+      // Initialize activeMappingId if mappings exist
+      if (loadedState.mappings.length > 0 && !loadedState.activeMappingId) {
+        loadedState.activeMappingId = loadedState.mappings[0].id;
       }
-      // Reset input value so same file can be loaded again if needed
-      event.target.value = '';
-    };
-    reader.readAsText(file);
+
+      setProjectState(loadedState, true); // Skip history on load
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse project file");
+    }
+
+    // Reset input value so same file can be loaded again if needed
+    event.target.value = '';
   };
 
   // LayoutDesigner handlers
@@ -570,9 +469,8 @@ export const Workbench: React.FC = () => {
       setProjectState({
         ...projectState,
         mappings: [...projectState.mappings, newMapping],
+        activeMappingId: newMapping.id,
       });
-      // Set activeMappingId immediately to ensure it's available
-      setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping, set layoutMode to 'manual' (user modified the layout)
       setProjectState({
@@ -619,8 +517,8 @@ export const Workbench: React.FC = () => {
     setProjectState({
       ...projectState,
       mappings: [...projectState.mappings, newMapping],
+      activeMappingId: newMapping.id,
     });
-    setActiveMappingId(newMapping.id);
   };
 
   const handleAssignmentChange = (index: number, hand: 'left' | 'right', finger: FingerType) => {
@@ -690,8 +588,8 @@ export const Workbench: React.FC = () => {
       setProjectState({
         ...projectState,
         mappings: [...projectState.mappings, newMapping],
+        activeMappingId: newMapping.id,
       });
-      // setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping
       setProjectState({
@@ -903,9 +801,9 @@ export const Workbench: React.FC = () => {
         setProjectState({
           ...projectState,
           mappings: [...projectState.mappings, newMapping],
+          activeMappingId: newMapping.id,
         });
         // Set activeMappingId immediately to ensure it's available
-        setActiveMappingId(newMapping.id);
       } else {
         // Update existing mapping with all assignments AND layoutMode atomically
         setProjectState({

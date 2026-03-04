@@ -2,18 +2,14 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { Timeline } from '../workbench/Timeline';
+import { useSongStateHydration } from '../hooks/useSongStateHydration';
 import { Button } from '../components/ui/Button';
 import { Voice } from '../types/layout';
-import { songService } from '../services/SongService';
 
 export const TimelinePage: React.FC = () => {
-    const { projectState, setProjectState, engineResult } = useProject();
+    const { projectState, engineResult } = useProject();
     const [searchParams] = useSearchParams();
     const songId = searchParams.get('songId');
-
-    // Song loading state
-    const [hasLoadedSong, setHasLoadedSong] = useState(false);
-    const [songName, setSongName] = useState<string | null>(null);
 
     // Build the workbench link with songId if present
     const workbenchLink = songId ? `/workbench?songId=${songId}` : '/workbench';
@@ -24,44 +20,8 @@ export const TimelinePage: React.FC = () => {
     const lastFrameTimeRef = useRef<number>(0);
     const requestRef = useRef<number>();
 
-    // Load song state when page is loaded/refreshed with a songId
-    useEffect(() => {
-        if (!songId) return;
-
-        // Get song metadata for display
-        const song = songService.getSong(songId);
-        if (song) {
-            setSongName(song.metadata.title);
-        }
-
-        // Check if the current projectState has MEANINGFUL data
-        const hasVoices = projectState.parkedSounds.length > 0;
-        const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-        const hasRealData = hasVoices || hasMappingCells;
-
-        // Load from storage if no real data (page refresh scenario)
-        if (!hasRealData) {
-            console.log('[TimelinePage] No data in context, loading from storage for song:', songId);
-
-            const savedState = songService.loadSongState(songId);
-            if (savedState) {
-                console.log('[TimelinePage] Loaded saved project state:', {
-                    layoutsCount: savedState.layouts.length,
-                    parkedSoundsCount: savedState.parkedSounds.length,
-                    mappingsCount: savedState.mappings.length,
-                    voiceNames: savedState.parkedSounds.map(v => v.name),
-                });
-
-                setProjectState(savedState, true); // Skip history for initial load
-            } else {
-                console.log('[TimelinePage] No saved state found for song:', songId);
-            }
-        } else {
-            console.log('[TimelinePage] Using existing data in context');
-        }
-
-        setHasLoadedSong(true);
-    }, [songId, setProjectState]);
+    // Use the shared hydration hook to load the song state
+    const { hasLoadedSong, songName } = useSongStateHydration(songId);
 
     const activeLayout = useMemo(() =>
         projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,

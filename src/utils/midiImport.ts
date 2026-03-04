@@ -68,14 +68,29 @@ export async function parseMidiProject(
   // Extract all note events
   midiData.tracks.forEach((track, trackIndex) => {
     console.log(`[parseMidiProject] Track ${trackIndex}: ${track.notes.length} notes`);
+
+    // Map to keep track of identical ticks/times to append ordinal
+    const timeTally = new Map<string, number>();
+
     track.notes.forEach((note) => {
       const noteNumber = note.midi;
+      const channelLabel = track.channel + 1;
+
+      // Determine nominal time hash for deduplication
+      const nominalTime = note.ticks !== undefined ? note.ticks : Math.round(note.time * 10000);
+      const hashKey = `${nominalTime}:${noteNumber}:${channelLabel}`;
+      const ordinal = (timeTally.get(hashKey) || 0) + 1;
+      timeTally.set(hashKey, ordinal);
+
+      const eventKey = `${hashKey}:${ordinal}`;
+
       events.push({
         noteNumber: noteNumber,
         startTime: note.time,
         duration: note.duration,
         velocity: Math.round(note.velocity * 127),
-        channel: track.channel + 1
+        channel: channelLabel,
+        eventKey
       });
     });
   });
@@ -292,54 +307,3 @@ export async function parseMidiFileToProject(
     reader.readAsArrayBuffer(file);
   });
 }
-
-// Legacy exports for backward compatibility
-export const parseMidiFile = async (
-  file: File,
-  config: InstrumentConfig
-): Promise<MidiImportResult> => {
-  const projectData = await parseMidiFileToProject(file, config);
-  return {
-    performance: projectData.performance,
-    unmappedNoteCount: projectData.unmappedNoteCount,
-    minNoteNumber: projectData.minNoteNumber,
-  };
-};
-
-export const fetchAndParseMidiFile = async (
-  url: string,
-  config: InstrumentConfig
-): Promise<MidiImportResult> => {
-  const projectData = await fetchMidiProject(url, config);
-  return {
-    performance: projectData.performance,
-    unmappedNoteCount: projectData.unmappedNoteCount,
-    minNoteNumber: projectData.minNoteNumber,
-  };
-};
-
-/**
- * Processes multiple MIDI files and extracts unique Voices (one per unique MIDI pitch).
- * 
- * @param files Array of MIDI files to process
- * @returns Promise resolving to a flat array of Voice objects
- */
-export const processMidiFiles = async (files: File[]): Promise<Voice[]> => {
-  const allAssets: Voice[] = [];
-
-  for (const file of files) {
-    try {
-      const projectData = await parseMidiFileToProject(file);
-      // Merge voices, avoiding duplicates by originalMidiNote
-      projectData.voices.forEach(voice => {
-        if (!allAssets.find(v => v.originalMidiNote === voice.originalMidiNote)) {
-          allAssets.push(voice);
-        }
-      });
-    } catch (err) {
-      console.error(`Failed to process file ${file.name}:`, err);
-    }
-  }
-
-  return allAssets;
-};

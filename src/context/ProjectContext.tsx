@@ -25,6 +25,7 @@ const INITIAL_PROJECT_STATE: ProjectState = {
     sectionMaps: [], // Initialize empty
     instrumentConfig: INITIAL_INSTRUMENT_CONFIG,
     activeLayoutId: null,
+    activeMappingId: null,
     projectTempo: 120,
     parkedSounds: [],
     mappings: [],

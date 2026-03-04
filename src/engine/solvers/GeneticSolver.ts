@@ -85,6 +85,8 @@ interface Gene {
   position: GridPosition;
   /** Whether this is a fallback grip */
   isFallback: boolean;
+  /** Original event to maintain key */
+  event: NoteEvent;
 }
 
 /**
@@ -191,6 +193,7 @@ export class GeneticSolver implements SolverStrategy {
       finger,
       position,
       isFallback: selectedGrip.isFallback,
+      event,
     };
   }
 
@@ -599,6 +602,7 @@ export class GeneticSolver implements SolverStrategy {
         row: gene.position.row,
         col: gene.position.col,
         eventIndex: gene.eventIndex,
+        eventKey: gene.event.eventKey,
         padId,
       });
     }
@@ -653,7 +657,7 @@ export class GeneticSolver implements SolverStrategy {
   public async solve(
     performance: Performance,
     config: EngineConfiguration,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): Promise<EngineResult> {
     const { populationSize, generations } = this.geneticConfig;
 
@@ -702,24 +706,30 @@ export class GeneticSolver implements SolverStrategy {
     // Apply manual assignments as fixed genes
     const fixedGenes = new Map<number, Gene>();
     if (manualAssignments) {
-      for (const [indexStr, assignment] of Object.entries(manualAssignments)) {
-        const index = parseInt(indexStr, 10);
-        const context = eventContexts.find(ctx => ctx.originalIndex === index);
-        if (context) {
-          const grips = generateValidGripsWithTier([context.pad], assignment.hand);
+      for (const ctx of eventContexts) {
+        const indexStr = ctx.originalIndex.toString();
+        const key = ctx.event.eventKey;
+        const assignment = (key !== undefined && manualAssignments[key])
+          ? manualAssignments[key]
+          : manualAssignments[indexStr];
+
+        if (assignment) {
+          const grips = generateValidGripsWithTier([ctx.pad], assignment.hand);
           const grip = grips.find(g =>
             Object.keys(g.pose.fingers).includes(assignment.finger)
           ) || grips[0];
 
-          fixedGenes.set(index, {
-            eventIndex: index,
-            noteNumber: context.event.noteNumber,
-            startTime: context.event.startTime,
+          fixedGenes.set(ctx.originalIndex, {
+            eventIndex: ctx.originalIndex,
+            noteNumber: ctx.event.noteNumber,
+            startTime: ctx.event.startTime,
             hand: assignment.hand,
             pose: grip.pose,
             finger: assignment.finger,
-            position: context.position,
+            position: ctx.position,
             isFallback: grip.isFallback,
+            // Reattach full event to access eventKey later
+            event: ctx.event,
           });
         }
       }

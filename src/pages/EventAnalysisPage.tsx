@@ -77,7 +77,7 @@ export const EventAnalysisPage: React.FC = () => {
 
 
   // Handler for manual assignment changes (from Event Log)
-  const handleAssignmentChange = React.useCallback((index: number, hand: 'left' | 'right', finger: FingerType) => {
+  const handleAssignmentChange = React.useCallback((eventKey: string, hand: 'left' | 'right', finger: FingerType) => {
     if (!projectState.activeLayoutId) return;
 
     setProjectState(prev => {
@@ -90,7 +90,7 @@ export const EventAnalysisPage: React.FC = () => {
           ...prev.manualAssignments,
           [currentLayoutId]: {
             ...existingAssignments,
-            [index]: { hand, finger }
+            [eventKey]: { hand, finger }
           }
         }
       };

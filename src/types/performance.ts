@@ -93,6 +93,8 @@ export interface NoteEvent {
   velocity?: number;
   /** MIDI channel (1-16, optional) */
   channel?: number;
+  /** Deterministic unique identifier based on MIDI timing (e.g., tick:note:channel:ordinal) */
+  eventKey?: string;
 }
 
 /**

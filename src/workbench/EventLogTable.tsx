@@ -4,7 +4,7 @@ import { FingerType } from '../engine/models';
 
 interface EventLogTableProps {
     events: EngineDebugEvent[];
-    onAssignmentChange: (index: number, hand: 'left' | 'right', finger: FingerType) => void;
+    onAssignmentChange: (eventKey: string, hand: 'left' | 'right', finger: FingerType) => void;
 }
 
 const FINGER_OPTIONS: { label: string; value: FingerType }[] = [
@@ -47,7 +47,8 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({ events, onAssignme
                                     value={event.assignedHand === 'Unplayable' ? 'left' : event.assignedHand}
                                     onChange={(e) => {
                                         if (event.finger) {
-                                            onAssignmentChange(index, e.target.value as 'left' | 'right', event.finger);
+                                            const key = event.eventKey || (event.eventIndex !== undefined ? event.eventIndex.toString() : index.toString());
+                                            onAssignmentChange(key, e.target.value as 'left' | 'right', event.finger);
                                         }
                                     }}
                                 >
@@ -63,7 +64,8 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({ events, onAssignme
                                     value={event.finger || 'Index'}
                                     onChange={(e) => {
                                         const hand = event.assignedHand === 'Unplayable' ? 'left' : event.assignedHand;
-                                        onAssignmentChange(index, hand as 'left' | 'right', e.target.value as FingerType);
+                                        const key = event.eventKey || (event.eventIndex !== undefined ? event.eventIndex.toString() : index.toString());
+                                        onAssignmentChange(key, hand as 'left' | 'right', e.target.value as FingerType);
                                     }}
                                 >
                                     {FINGER_OPTIONS.map(opt => (
