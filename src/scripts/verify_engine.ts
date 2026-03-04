@@ -1,7 +1,7 @@
 
 import { BiomechanicalSolver } from '../engine/core';
-import { InstrumentConfig, Performance, NoteEvent } from '../types/performance';
-import { DEFAULT_ENGINE_CONSTANTS } from '../engine/models';
+import { InstrumentConfig, Performance } from '../types/performance';
+// import { DEFAULT_ENGINE_CONSTANTS } from '../engine/models';
 
 // Mock Instrument Config (Standard 8x8 Grid)
 const mockInstrumentConfig: InstrumentConfig = {

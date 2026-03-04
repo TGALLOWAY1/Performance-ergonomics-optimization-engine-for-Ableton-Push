@@ -58,7 +58,7 @@ function formatFingerIndicator(hand: 'left' | 'right' | 'Unplayable' | undefined
   if (!hand || hand === 'Unplayable' || !finger) {
     return undefined;
   }
-  
+
   const fingerNum = mapFingerTypeToId(finger);
   const handPrefix = hand === 'left' ? 'L' : 'R';
   return `${handPrefix}${fingerNum}`;
@@ -83,23 +83,23 @@ function getHandColor(hand: 'left' | 'right', variant: 'solid' | 'ghost'): strin
  */
 function modelToPadActivations(model: OnionSkinModel): PadActivation[] {
   const activations: PadActivation[] = [];
-  
+
   // Current event pads (solid, 100% opacity, bright)
   for (const padKey of model.currentEvent.pads) {
     const pos = parseCellKey(padKey);
     if (!pos) continue;
-    
+
     const isShared = model.sharedPads.includes(padKey);
-    
+
     // Find the note for this pad to get hand/finger info
     const note = model.currentEvent.notes.find((n) => n.pad === padKey);
-    const hand = note && note.debugEvent.assignedHand !== 'Unplayable' 
-      ? note.debugEvent.assignedHand 
+    const hand = note && note.debugEvent.assignedHand !== 'Unplayable'
+      ? note.debugEvent.assignedHand
       : undefined;
-    const finger = note && note.debugEvent.finger 
-      ? mapFingerTypeToId(note.debugEvent.finger) 
+    const finger = note && note.debugEvent.finger
+      ? mapFingerTypeToId(note.debugEvent.finger)
       : undefined;
-    
+
     const currentPad: PadActivation = {
       id: padKey,
       row: pos.row,
@@ -117,24 +117,24 @@ function modelToPadActivations(model: OnionSkinModel): PadActivation[] {
     };
     activations.push(currentPad);
   }
-  
+
   // Next event pads (ghost, 20-30% opacity, thin border)
   if (model.nextEvent) {
     for (const padKey of model.nextEvent.pads) {
       const pos = parseCellKey(padKey);
       if (!pos) continue;
-      
+
       const isShared = model.sharedPads.includes(padKey);
-      
+
       // Find the note for this pad to get hand/finger info
       const note = model.nextEvent.notes.find((n) => n.pad === padKey);
-      const hand = note && note.debugEvent.assignedHand !== 'Unplayable' 
-        ? note.debugEvent.assignedHand 
+      const hand = note && note.debugEvent.assignedHand !== 'Unplayable'
+        ? note.debugEvent.assignedHand
         : undefined;
-      const finger = note && note.debugEvent.finger 
-        ? mapFingerTypeToId(note.debugEvent.finger) 
+      const finger = note && note.debugEvent.finger
+        ? mapFingerTypeToId(note.debugEvent.finger)
         : undefined;
-      
+
       const nextPad: PadActivation = {
         id: padKey,
         row: pos.row,
@@ -153,25 +153,25 @@ function modelToPadActivations(model: OnionSkinModel): PadActivation[] {
       activations.push(nextPad);
     }
   }
-  
+
   // Previous event pads (ghost, very low opacity, for context)
   if (model.previousEvent) {
     for (const padKey of model.previousEvent.pads) {
       const pos = parseCellKey(padKey);
       if (!pos) continue;
-      
+
       // Skip if this pad is already shown in current or next event
-      if (model.currentEvent.pads.includes(padKey) || 
-          (model.nextEvent && model.nextEvent.pads.includes(padKey))) {
+      if (model.currentEvent.pads.includes(padKey) ||
+        (model.nextEvent && model.nextEvent.pads.includes(padKey))) {
         continue;
       }
-      
+
       // Find the note for this pad to get hand/finger info
       const note = model.previousEvent.notes.find((n) => n.pad === padKey);
-      const hand = note && note.debugEvent.assignedHand !== 'Unplayable' 
-        ? note.debugEvent.assignedHand 
+      const hand = note && note.debugEvent.assignedHand !== 'Unplayable'
+        ? note.debugEvent.assignedHand
         : undefined;
-      
+
       const prevPad: PadActivation = {
         id: padKey,
         row: pos.row,
@@ -185,7 +185,7 @@ function modelToPadActivations(model: OnionSkinModel): PadActivation[] {
       activations.push(prevPad);
     }
   }
-  
+
   return activations;
 }
 
@@ -199,24 +199,24 @@ function fingerMovesToVectors(
   fingerMoves: FingerMove[]
 ): VectorPrimitive[] {
   const vectors: VectorPrimitive[] = [];
-  
+
   for (const move of fingerMoves) {
     if (move.fromPad === null || move.toPad === null || move.isHold) {
       continue;
     }
-    
+
     const fromPos = parseCellKey(move.fromPad);
     const toPos = parseCellKey(move.toPad);
-    
+
     if (!fromPos || !toPos) {
       continue;
     }
-    
+
     // Determine vector color based on hand and impossibility
     let color: string;
     let opacity: number;
     let width: number;
-    
+
     if (move.isImpossible) {
       // Red warning for impossible moves
       color = '#FF0000';
@@ -228,7 +228,7 @@ function fingerMovesToVectors(
       opacity = 0.6;
       width = 2;
     }
-    
+
     vectors.push({
       id: `vec-${move.hand}-${move.finger}-${vectors.length}`,
       type: 'arrow' as const,
@@ -240,7 +240,7 @@ function fingerMovesToVectors(
       difficulty: move.anatomicalStretchScore,
     });
   }
-  
+
   return vectors;
 }
 
@@ -292,6 +292,7 @@ function createOnionSkinTheme(): Partial<GridTheme> {
 export const OnionSkinGrid: React.FC<OnionSkinGridProps> = memo(({
   model,
   onPadHover,
+  // @ts-ignore
   onVectorHover,
   className = '',
   style = {},
@@ -303,22 +304,22 @@ export const OnionSkinGrid: React.FC<OnionSkinGridProps> = memo(({
     model.previousEvent,
     model.sharedPads,
   ]);
-  
+
   // Convert finger moves to vectors (memoized)
   const vectors = useMemo(() => fingerMovesToVectors(model.fingerMoves), [
     model.fingerMoves,
   ]);
-  
+
   // Create custom theme (memoized)
   const theme = useMemo(() => createOnionSkinTheme(), []);
-  
+
   // Handle pad hover - map back to PadKey
   const handlePadHover = useCallback((id: string | null) => {
     if (onPadHover && id) {
       onPadHover(id);
     }
   }, [onPadHover]);
-  
+
   return (
     <div className={`onion-skin-grid ${className}`} style={style}>
       <GridVisContainer
@@ -332,7 +333,7 @@ export const OnionSkinGrid: React.FC<OnionSkinGridProps> = memo(({
         className={className}
         style={style}
       />
-      
+
       {/* CSS for visual polish: shared pad pulse, z-ordering, hover effects */}
       <style>{`
         /* Ensure current pads are always on top (higher z-index via SVG order) */

@@ -2,7 +2,7 @@
  * Performance selector utilities for filtering and processing Performance data.
  */
 
-import { ProjectState, LayoutSnapshot } from '../types/projectState';
+import { ProjectState } from '../types/projectState';
 import { Performance } from '../types/performance';
 
 /**
@@ -14,7 +14,7 @@ import { Performance } from '../types/performance';
  */
 export function getActivePerformance(state: ProjectState): Performance | null {
   const activeLayout = state.layouts.find(l => l.id === state.activeLayoutId);
-  
+
   if (!activeLayout || !activeLayout.performance) {
     return null;
   }
@@ -42,7 +42,7 @@ export function getActivePerformance(state: ProjectState): Performance | null {
  */
 export function getRawActivePerformance(state: ProjectState): Performance | null {
   const activeLayout = state.layouts.find(l => l.id === state.activeLayoutId);
-  
+
   // DEBUG: Log selector state
   if (!activeLayout) {
     console.warn('[getRawActivePerformance] No active layout found:', {
@@ -51,7 +51,7 @@ export function getRawActivePerformance(state: ProjectState): Performance | null
     });
     return null;
   }
-  
+
   if (!activeLayout.performance) {
     console.warn('[getRawActivePerformance] Active layout has no performance:', {
       layoutId: activeLayout.id,
@@ -67,7 +67,7 @@ export function getRawActivePerformance(state: ProjectState): Performance | null
     layoutName: activeLayout.name,
     eventsCount: eventsCount,
     hasEvents: eventsCount > 0,
-    performanceId: activeLayout.performance.id,
+    // performanceId: activeLayout.performance.id, // Performance interface doesn't have ID
     performanceName: activeLayout.performance.name,
   });
 

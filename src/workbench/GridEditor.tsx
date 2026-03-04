@@ -12,7 +12,7 @@
  * 
  * ⚠️ CRITICAL: Never confuse Voice (MIDI 36) with Pad ([0,0]). Voice is pitch; Pad is physical location.
  */
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LayoutSnapshot } from '../types/projectState';
 import { SectionMap } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
@@ -22,8 +22,8 @@ import { Pad } from '../components/Pad';
 import { FingerType } from '../engine/models';
 
 type DifficultyLabel = 'Easy' | 'Medium' | 'Hard' | 'Unplayable';
-import { formatFinger, normalizeHand } from '../utils/formatUtils';
-import { getReachabilityMap, ReachabilityLevel } from '../engine/feasibility';
+// import { formatFinger, normalizeHand } from '../utils/formatUtils';
+// import { getReachabilityMap } from '../engine/feasibility';
 import { GridPosition } from '../engine/gridMath';
 import { FingerID } from '../types/engine';
 import { GridMapping } from '../types/layout';
@@ -68,21 +68,6 @@ const DIFFICULTY_RANK: Record<DifficultyLabel, number> = {
   'Unplayable': 3
 };
 
-/**
- * Converts FingerID (1-5) to abbreviation (T, I, M, R, P)
- * 1 = Thumb (T), 2 = Index (I), 3 = Middle (M), 4 = Ring (R), 5 = Pinky (P)
- */
-const getFingerAbbreviation = (finger: FingerID): string => {
-  const map: Record<FingerID, string> = {
-    1: 'T',
-    2: 'I',
-    3: 'M',
-    4: 'R',
-    5: 'P',
-  };
-  return map[finger];
-};
-
 interface ReachabilityConfig {
   anchorPos: GridPosition;
   anchorFinger: FingerID;
@@ -96,7 +81,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   activeSection,
   gridPattern,
   onTogglePad,
-  showDebugLabels,
+  // showDebugLabels,
   viewAllSteps,
   engineResult,
   showBankGuides = false,
@@ -118,49 +103,28 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const cols = Array.from({ length: 8 }, (_, i) => i);
 
   // Compute reachability map if active
-  const reachabilityMap = reachabilityConfig
-    ? getReachabilityMap(
-      reachabilityConfig.anchorPos,
-      reachabilityConfig.anchorFinger,
-      reachabilityConfig.targetFinger
-    )
-    : null;
+  // const reachabilityMap = reachabilityConfig
+  //   ? getReachabilityMap(
+  //     reachabilityConfig.anchorPos,
+  //     reachabilityConfig.anchorFinger,
+  //     reachabilityConfig.targetFinger
+  //   )
+  //   : null;
 
   // W4: Calculate per-Pad Cell (MIDI note) count from activeLayout.performance
-  const padNoteCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-
-    if (!activeLayout || !activeLayout.performance || !activeSection) {
-      return counts;
-    }
-
-    activeLayout.performance.events.forEach(event => {
-      // Use activeMapping if available, otherwise use InstrumentConfig
-      let row: number | null = null;
-      let col: number | null = null;
-
-      if (activeMapping) {
-        const pos = getPositionForMidi(event.noteNumber, activeMapping);
-        if (pos) {
-          row = pos.row;
-          col = pos.col;
-        }
-      } else {
-        const pos = GridMapService.noteToGrid(event.noteNumber, activeSection.instrumentConfig);
-        if (pos) {
-          row = pos[0];
-          col = pos[1];
-        }
-      }
-
-      if (row !== null && col !== null) {
-        const key = `${row},${col}`;
-        counts[key] = (counts[key] || 0) + 1;
-      }
-    });
-
-    return counts;
-  }, [activeLayout, activeSection, activeMapping]);
+  // const padNoteCounts = useMemo(() => {
+  //   const counts: Record<string, number> = {};
+  //
+  //   if (!activeLayout || !activeLayout.performance || !activeSection) {
+  //     return counts;
+  //   }
+  //
+  //   activeLayout.performance.events.forEach(event => {
+  //     // ... calculation ...
+  //   });
+  //
+  //   return counts;
+  // }, [activeLayout, activeSection, activeMapping]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -297,12 +261,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   };
 
   // Determine bank number for a given row
-  const getBankNumber = (row: number): number => {
-    if (row <= 1) return 1; // Rows 0-1 = Bank 1
-    if (row <= 3) return 2; // Rows 2-3 = Bank 2
-    if (row <= 5) return 3; // Rows 4-5 = Bank 3
-    return 4; // Rows 6-7 = Bank 4
-  };
+  // const getBankNumber = (row: number): number => {
+  //   if (row <= 1) return 1; // Rows 0-1 = Bank 1
+  //   if (row <= 3) return 2; // Rows 2-3 = Bank 2
+  //   if (row <= 5) return 3; // Rows 4-5 = Bank 3
+  //   return 4; // Rows 6-7 = Bank 4
+  // };
 
   return (
     <div className="flex items-center justify-center p-8 relative" ref={gridContainerRef}>
@@ -351,12 +315,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               const isHighlighted = highlightedCell?.row === row && highlightedCell?.col === col;
 
               // Determine Finger/Hand for styling
-              let finger: FingerID | undefined;
+              let finger: FingerType | undefined;
               let hand: 'left' | 'right' | undefined;
 
               if (debugEvent && debugEvent.finger && debugEvent.assignedHand !== 'Unplayable') {
                 finger = debugEvent.finger;
-                hand = (debugEvent.assignedHand === 'LH' || debugEvent.assignedHand === 'left') ? 'left' : 'right';
+                hand = debugEvent.assignedHand === 'left' ? 'left' : 'right';
               }
 
               // Tooltip
@@ -374,12 +338,6 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 if (onCellClick) onCellClick(row, col);
               };
 
-              // Convert numeric FingerID to string type for Pad component
-              const fingerTypeMap: Record<number, FingerType> = {
-                1: 'thumb', 2: 'index', 3: 'middle', 4: 'ring', 5: 'pinky'
-              };
-              const fingerType = finger ? fingerTypeMap[finger] : undefined;
-
               return (
                 <div key={`pad-wrapper-${row}-${col}`} onContextMenu={readOnly ? undefined : (e) => handleContextMenu(e, row, col)}>
                   <Pad
@@ -387,7 +345,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                     col={col}
                     isActive={isActive}
                     label={displayName}
-                    finger={fingerType}
+                    finger={finger}
                     hand={hand}
                     onClick={handleCellClick}
                     className={`w-16 h-16 ${isHighlighted ? 'ring-4 ring-yellow-400 z-20' : ''}`}

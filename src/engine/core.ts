@@ -50,13 +50,13 @@ export function resolveSolver(type: SolverType, config: SolverConfig): SolverStr
   switch (type) {
     case 'beam':
       return createBeamSolver(config);
-    
+
     case 'genetic':
       return createGeneticSolver(config);
-    
+
     case 'annealing':
       return createAnnealingSolver(config);
-    
+
     default:
       throw new Error(`Unknown solver type: ${type}`);
   }
@@ -102,17 +102,17 @@ export class BiomechanicalSolver {
     this.instrumentConfig = instrumentConfig;
     this.gridMapping = gridMapping;
     this.engineConfig = engineConfig;
-    
+
     // Initialize the solver strategy
     const solverConfig: SolverConfig = {
       instrumentConfig,
       gridMapping,
       engineConstants: _constants,
     };
-    
+
     this.strategy = resolveSolver(solverType, solverConfig);
-        }
-        
+  }
+
   /**
    * Gets the current solver strategy name.
    */
@@ -137,7 +137,7 @@ export class BiomechanicalSolver {
       instrumentConfig: this.instrumentConfig,
       gridMapping: this.gridMapping,
     };
-    
+
     this.strategy = resolveSolver(type, solverConfig);
   }
 
@@ -148,12 +148,12 @@ export class BiomechanicalSolver {
    */
   public updateGridMapping(gridMapping: GridMapping | null): void {
     this.gridMapping = gridMapping;
-    
+
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: this.gridMapping,
     };
-    
+
     // Recreate strategy with new config
     this.strategy = resolveSolver(this.strategy.type, solverConfig);
   }
@@ -180,7 +180,7 @@ export class BiomechanicalSolver {
    */
   public solve(
     performance: Performance,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): EngineResult {
     // Check if solver supports synchronous execution
     if (!this.strategy.isSynchronous || !this.strategy.solveSync) {
@@ -188,7 +188,7 @@ export class BiomechanicalSolver {
         `Solver '${this.strategy.name}' does not support synchronous execution. Use solveAsync() instead.`
       );
     }
-    
+
     return this.strategy.solveSync(performance, this.engineConfig, manualAssignments);
   }
 
@@ -203,7 +203,7 @@ export class BiomechanicalSolver {
    */
   public async solveAsync(
     performance: Performance,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): Promise<EngineResult> {
     return this.strategy.solve(performance, this.engineConfig, manualAssignments);
   }
@@ -246,4 +246,4 @@ export function createBiomechanicalSolverWithStrategy(
     engineConfig,
     solverType
   );
-  }
+}

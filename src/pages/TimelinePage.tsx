@@ -1,66 +1,23 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { Timeline } from '../workbench/Timeline';
+import { useSongStateHydration } from '../hooks/useSongStateHydration';
 import { Voice } from '../types/layout';
-import { songService } from '../services/SongService';
 
 export const TimelinePage: React.FC = () => {
-    const { projectState, setProjectState, engineResult } = useProject();
+    const { projectState, engineResult } = useProject();
     const [searchParams] = useSearchParams();
     const songId = searchParams.get('songId');
-    
-    // Song loading state
-    const [hasLoadedSong, setHasLoadedSong] = useState(false);
-    const [songName, setSongName] = useState<string | null>(null);
-    
+
     // Build the workbench link with songId if present
     const workbenchLink = songId ? `/workbench?songId=${songId}` : '/workbench';
     const dashboardLink = '/';
-    const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [zoom, setZoom] = useState(100); // pixels per second
-    const lastFrameTimeRef = useRef<number>(0);
-    const requestRef = useRef<number>();
 
-    // Load song state when page is loaded/refreshed with a songId
-    useEffect(() => {
-        if (!songId) return;
-        
-        // Get song metadata for display
-        const song = songService.getSong(songId);
-        if (song) {
-            setSongName(song.metadata.title);
-        }
-        
-        // Check if the current projectState has MEANINGFUL data
-        const hasVoices = projectState.parkedSounds.length > 0;
-        const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-        const hasRealData = hasVoices || hasMappingCells;
-        
-        // Load from storage if no real data (page refresh scenario)
-        if (!hasRealData) {
-            console.log('[TimelinePage] No data in context, loading from storage for song:', songId);
-            
-            const savedState = songService.loadSongState(songId);
-            if (savedState) {
-                console.log('[TimelinePage] Loaded saved project state:', {
-                    layoutsCount: savedState.layouts.length,
-                    parkedSoundsCount: savedState.parkedSounds.length,
-                    mappingsCount: savedState.mappings.length,
-                    voiceNames: savedState.parkedSounds.map(v => v.name),
-                });
-                
-                setProjectState(savedState, true); // Skip history for initial load
-            } else {
-                console.log('[TimelinePage] No saved state found for song:', songId);
-            }
-        } else {
-            console.log('[TimelinePage] Using existing data in context');
-        }
-        
-        setHasLoadedSong(true);
-    }, [songId, setProjectState]);
+    // Use the shared hydration hook to load the song state
+    const { hasLoadedSong, songName } = useSongStateHydration(songId);
 
     const activeLayout = useMemo(() =>
         projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -138,49 +95,6 @@ export const TimelinePage: React.FC = () => {
 
         return assignments;
     }, [engineResult, activeLayout, voices]);
-
-    // Playback loop
-    const animate = (time: number) => {
-        if (lastFrameTimeRef.current !== undefined) {
-            const deltaTime = (time - lastFrameTimeRef.current) / 1000;
-            setCurrentTime(prev => {
-                const newTime = prev + deltaTime;
-                // Loop or stop at end? Let's stop at end + padding
-                // For now just run
-                return newTime;
-            });
-        }
-        lastFrameTimeRef.current = time;
-        if (isPlaying) {
-            requestRef.current = requestAnimationFrame(animate);
-        }
-    };
-
-    useEffect(() => {
-        if (isPlaying) {
-            lastFrameTimeRef.current = performance.now();
-            requestRef.current = requestAnimationFrame(animate);
-        } else {
-            if (requestRef.current) {
-                cancelAnimationFrame(requestRef.current);
-            }
-        }
-        return () => {
-            if (requestRef.current) {
-                cancelAnimationFrame(requestRef.current);
-            }
-        };
-    }, [isPlaying]);
-
-    const togglePlay = () => {
-        setIsPlaying(!isPlaying);
-    };
-
-    const handleStop = () => {
-        setIsPlaying(false);
-        setCurrentTime(0);
-    };
-
     const handleSeek = (time: number) => {
         setCurrentTime(time);
     };
@@ -235,7 +149,7 @@ export const TimelinePage: React.FC = () => {
                     </div>
                     <h3 className="text-lg font-semibold text-slate-200 mb-2">No MIDI Data</h3>
                     <p className="text-sm text-slate-400 mb-4">
-                        {songName ? `"${songName}" doesn't have any MIDI data linked yet.` : "This song doesn't have any MIDI data linked yet."} 
+                        {songName ? `"${songName}" doesn't have any MIDI data linked yet.` : "This song doesn't have any MIDI data linked yet."}
                         Go back to the Dashboard and use the "Link MIDI" button to add a MIDI file.
                     </p>
                     <Link
@@ -276,58 +190,6 @@ export const TimelinePage: React.FC = () => {
 
                 {/* Controls */}
                 <div className="flex items-center gap-4">
-                    {/* Practice Mode Toggle */}
-                    <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
-                        <span className="text-xs text-slate-400 font-medium">Practice Mode</span>
-                        <button
-                            className="w-8 h-4 bg-slate-700 rounded-full relative transition-colors hover:bg-slate-600"
-                            title="Toggle Practice Mode (Visual only for MVP)"
-                        >
-                            <div className="absolute top-0.5 left-0.5 w-3 h-3 bg-slate-400 rounded-full shadow-sm" />
-                        </button>
-                    </div>
-
-                    {/* Scroll Speed */}
-                    <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
-                        <span className="text-xs text-slate-400 font-medium">Scroll Speed</span>
-                        <select
-                            className="bg-transparent text-xs font-bold text-blue-400 outline-none cursor-pointer"
-                            defaultValue="1x"
-                        >
-                            <option value="0.5x">0.5×</option>
-                            <option value="1x">1×</option>
-                            <option value="1.5x">1.5×</option>
-                            <option value="2x">2×</option>
-                        </select>
-                    </div>
-
-                    <div className="h-6 w-px bg-slate-700/50 mx-2" />
-
-                    {/* Playback Controls */}
-                    <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 shadow-sm">
-                        <button
-                            onClick={togglePlay}
-                            className={`p-2 rounded transition-all ${isPlaying ? 'bg-yellow-500/10 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'text-slate-300 hover:text-white hover:bg-slate-700'}`}
-                        >
-                            {isPlaying ? (
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-                            ) : (
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z" /></svg>
-                            )}
-                        </button>
-                        <button
-                            onClick={handleStop}
-                            className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors"
-                        >
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" /></svg>
-                        </button>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-1.5 border border-slate-700 shadow-inner">
-                        <span className="text-xs text-slate-500 font-mono">TIME</span>
-                        <span className="text-sm font-mono text-cyan-400 w-16 text-right">{currentTime.toFixed(2)}s</span>
-                    </div>
-
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500">Zoom</span>
                         <input
@@ -350,7 +212,7 @@ export const TimelinePage: React.FC = () => {
                     fingerAssignments={fingerAssignments}
                     currentTime={currentTime}
                     zoom={zoom}
-                    isPlaying={isPlaying}
+                    isPlaying={false}
                     onSeek={handleSeek}
                 />
             </div>

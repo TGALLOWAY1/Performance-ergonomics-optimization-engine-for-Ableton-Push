@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
+import { Button } from '../components/ui/Button';
 import { LayoutDesigner } from './LayoutDesigner';
-import { GridMapping, Voice, LayoutMode, cellKey } from '../types/layout';
+import { GridMapping, Voice, cellKey } from '../types/layout';
 import { InstrumentConfig } from '../types/performance';
-import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 import { fetchMidiProject, parseMidiFileToProject } from '../utils/midiImport';
 import { mapToQuadrants } from '../utils/autoLayout';
@@ -14,6 +14,8 @@ import { getActivePerformance } from '../utils/performanceSelectors';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
+import { useSongStateHydration } from '../hooks/useSongStateHydration';
+import { saveProject, loadProject } from '../utils/projectPersistence';
 
 // Dev-only flag: only show Cost Debug in development builds
 // This is a developer-facing diagnostic view that relies on EngineResult.debugEvents
@@ -28,23 +30,29 @@ export const Workbench: React.FC = () => {
     redo,
     canUndo,
     canRedo,
-    engineResult,
-    setEngineResult,
-    runSolver,
     setActiveSolverId,
-    getSolverResult,
     optimizeLayout,
-    setInitialStateFromNeutralPose,
+    runSolver,
+    engineResult,
   } = useProject();
 
   const [searchParams] = useSearchParams();
   const songId = searchParams.get('songId');
-  const [currentSongId, setCurrentSongId] = useState<string | null>(null);
-  const [songName, setSongName] = useState<string | null>(null);
-  const [hasLoadedSong, setHasLoadedSong] = useState(false);
+  const [currentSongId, setCurrentSongId] = useState<string | null>(songId);
+
+  useEffect(() => {
+    setCurrentSongId(songId);
+  }, [songId]);
+
+  const { hasLoadedSong, songName } = useSongStateHydration(currentSongId);
+
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const [activeMappingId, setActiveMappingId] = useState<string | null>(null);
+  // Derive activeSolverId from projectState
+  // const activeSolverId = projectState.activeSolverId;
+
+  // Derive activeMappingId from projectState
+  const activeMappingId = projectState.activeMappingId;
 
   const activeLayout = useMemo(() =>
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
@@ -73,116 +81,33 @@ export const Workbench: React.FC = () => {
   useEffect(() => {
     const mappings = projectState.mappings;
     const currentId = activeMappingIdRef.current;
-    
+
     // Only process if mappings actually changed (reference check)
     // This prevents unnecessary updates on every render
     if (mappings === prevMappingsRef.current && currentId !== null) {
       return;
     }
     prevMappingsRef.current = mappings;
-    
+
     if (mappings.length > 0) {
       // Check if current selection is still valid
       const mappingExists = mappings.find(m => m.id === currentId);
       if (!currentId || !mappingExists) {
         // Select first mapping only if current is invalid
-        setActiveMappingId(mappings[0].id);
+        setProjectState(prev => ({
+          ...prev,
+          activeMappingId: mappings[0].id
+        }));
       }
     } else if (currentId !== null) {
       // Clear selection if no mappings
-      setActiveMappingId(null);
+      setProjectState(prev => ({
+        ...prev,
+        activeMappingId: null
+      }));
     }
-  }, [projectState.mappings]);
+  }, [projectState.mappings, setProjectState]);
 
-  // Track if we've already attempted to load this session to prevent double-loading
-  const hasAttemptedLoadRef = useRef(false);
-  const loadedSongIdRef = useRef<string | null>(null);
-  
-  // Load song state when navigating from Dashboard with a songId
-  // This effect runs on mount and when songId changes
-  useEffect(() => {
-    if (!songId) return;
-    
-    // Prevent double-loading the same song in the same session
-    if (hasAttemptedLoadRef.current && loadedSongIdRef.current === songId) {
-      console.log('[Workbench] Already loaded this song in session, skipping');
-      return;
-    }
-    
-    // Get song metadata for display
-    const song = songService.getSong(songId);
-    if (song) {
-      setSongName(song.metadata.title);
-    }
-    
-    // Check which song was last loaded (persists across page refresh)
-    const lastLoadedSongId = localStorage.getItem('workbench_current_song_id');
-    const isSameSong = lastLoadedSongId === songId;
-    
-    // Check if the current projectState has MEANINGFUL data (not just the default initial state)
-    // Check for performance events (MIDI data), voices, AND mapping cells
-    const hasPerformanceEvents = projectState.layouts.some(l => l.performance?.events?.length > 0);
-    const hasVoices = projectState.parkedSounds.length > 0;
-    const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-    const hasRealData = hasPerformanceEvents || hasVoices || hasMappingCells;
-    
-    // ALWAYS load from storage when:
-    // 1. Different song than last time (user switched songs), OR
-    // 2. Same song but no real data in context (page refresh / initial load)
-    const shouldLoad = !isSameSong || !hasRealData;
-    
-    console.log('[Workbench] Song load check:', { 
-      songId, 
-      lastLoadedSongId, 
-      isSameSong, 
-      hasPerformanceEvents,
-      hasVoices,
-      hasMappingCells,
-      hasRealData,
-      shouldLoad,
-      hasAttemptedLoad: hasAttemptedLoadRef.current,
-    });
-    
-    // Mark that we've attempted to load
-    hasAttemptedLoadRef.current = true;
-    loadedSongIdRef.current = songId;
-    
-    if (shouldLoad) {
-      console.log('[Workbench] Loading song state for:', songId);
-      
-      // Save the current song ID to localStorage
-      localStorage.setItem('workbench_current_song_id', songId);
-      setCurrentSongId(songId);
-      
-      const savedState = songService.loadSongState(songId);
-      if (savedState) {
-        console.log('[Workbench] Loaded saved project state:', {
-          layoutsCount: savedState.layouts.length,
-          parkedSoundsCount: savedState.parkedSounds.length,
-          mappingsCount: savedState.mappings.length,
-          mappingCells: savedState.mappings.map(m => Object.keys(m.cells).length),
-          voiceNames: savedState.parkedSounds.map(v => v.name),
-          performanceEventsCount: savedState.layouts[0]?.performance?.events?.length || 0,
-        });
-        
-        // Set the project state from the saved state
-        setProjectState(savedState, true); // Skip history for initial load
-        
-        // Set active mapping if available
-        if (savedState.mappings.length > 0) {
-          setActiveMappingId(savedState.mappings[0].id);
-        }
-      } else {
-        console.log('[Workbench] No saved state found for song:', songId);
-      }
-      
-      setHasLoadedSong(true);
-    } else {
-      console.log('[Workbench] Using existing data in context (navigation back from Timeline)');
-      setCurrentSongId(songId);
-      setHasLoadedSong(true);
-    }
-  }, [songId, setProjectState, projectState]); // Added projectState to properly track when data is loaded
 
   // Auto-save project state changes back to the song (debounced)
   useEffect(() => {
@@ -225,7 +150,7 @@ export const Workbench: React.FC = () => {
   const currentSongIdRef = useRef<string | null>(null);
   const projectStateRef = useRef(projectState);
   const hasLoadedSongRef = useRef(hasLoadedSong);
-  
+
   useEffect(() => {
     currentSongIdRef.current = currentSongId;
     projectStateRef.current = projectState;
@@ -271,12 +196,12 @@ export const Workbench: React.FC = () => {
   const [selectedSolver, setSelectedSolver] = useState<SolverType>('beam');
   const [isRunningSolver, setIsRunningSolver] = useState(false);
   const [solverProgress, setSolverProgress] = useState(0);
-  
+
   // Layout optimization state
   const [isOptimizingLayout, setIsOptimizingLayout] = useState(false);
-  
+
   // Neutral pose state
-  const [isSettingNeutralPose, setIsSettingNeutralPose] = useState(false);
+
 
   // Engine state
 
@@ -307,12 +232,12 @@ export const Workbench: React.FC = () => {
             return prev + 5;
           });
         }, 500);
-        
+
         await runSolver(selectedSolver, activeMapping);
-        
+
         clearInterval(progressInterval);
         setSolverProgress(100);
-        
+
         // Set as active solver
         setActiveSolverId(selectedSolver);
       } else {
@@ -338,6 +263,7 @@ export const Workbench: React.FC = () => {
    * @param source - Either a File object or a URL string
    * @param existingConfig - Optional existing instrument config to use as base
    */
+  // @ts-ignore
   const handleProjectLoad = useCallback(async (
     source: File | string,
     existingConfig?: InstrumentConfig
@@ -417,6 +343,7 @@ export const Workbench: React.FC = () => {
           parkedSounds: projectData.voices, // REPLACE, don't merge - ALL voices go here
           projectTempo: projectData.performance.tempo || prevState.projectTempo,
           ignoredNoteNumbers: [], // Reset to empty on new import
+          activeMappingId: projectData.gridMapping.id,
         };
 
         console.log('[Workbench] handleProjectLoad - Setting state:', {
@@ -441,8 +368,8 @@ export const Workbench: React.FC = () => {
       // DEBUG: Log after state update (but state might not be updated yet due to async nature)
       console.log('[Workbench] handleProjectLoad - State update queued, waiting for next render...');
 
-      // Always set active mapping ID to the new mapping (hard reset)
-      setActiveMappingId(projectData.gridMapping.id);
+      // activeMappingId was already set directly via activeMappingId: projectData.gridMapping.id in the state update queuing
+
 
       // DEBUG: Log mapping ID being set
       console.log('[Workbench] handleProjectLoad - Setting active mapping ID:', projectData.gridMapping.id);
@@ -450,7 +377,7 @@ export const Workbench: React.FC = () => {
       // Verify engine works with the new data
       // Pass engine configuration from project state (or use defaults)
       const solver = new BiomechanicalSolver(
-        projectData.instrumentConfig, 
+        projectData.instrumentConfig,
         projectData.gridMapping,
         undefined, // Use default engine constants
         projectState.engineConfiguration
@@ -468,7 +395,7 @@ export const Workbench: React.FC = () => {
       console.error('Failed to load MIDI project:', err);
       throw err; // Re-throw so caller can handle
     }
-  }, [setProjectState, activeMappingId, setActiveMappingId]);
+  }, [setProjectState, activeMappingId]);
 
   // DISABLED: Auto-load default test MIDI file
   // User wants to start with blank screen and manually drag/drop files
@@ -497,164 +424,32 @@ export const Workbench: React.FC = () => {
   //   };
   // }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id, handleProjectLoad]);
 
-  // Reactive Solver Loop: Automatically run engine when layout changes
-  // Watches: activeMapping, activeLayout.performance, activeSection.instrumentConfig, ignoredNoteNumbers
-  useEffect(() => {
-    // Get filtered performance (excludes ignored notes)
-    const filteredPerformance = getActivePerformance(projectState);
 
-    // Early exit conditions
-    // Debounce engine execution (300ms) to avoid crashing browser during rapid drag operations
-    const timer = setTimeout(() => {
-      try {
-        // Run solver with project instrument config and active mapping
-        if (!filteredPerformance) return;
-
-        // Get manual assignments for current layout
-        const currentLayoutId = projectState.activeLayoutId;
-        const manualAssignments = currentLayoutId && projectState.manualAssignments
-          ? projectState.manualAssignments[currentLayoutId]
-          : undefined;
-
-        // Convert string keys to numbers for the engine
-        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-        if (manualAssignments) {
-          Object.entries(manualAssignments).forEach(([key, value]) => {
-            parsedAssignments[parseInt(key, 10)] = value;
-          });
-        }
-
-        // Create solver with instrument config, grid mapping, and engine configuration
-        const solver = new BiomechanicalSolver(
-          projectState.instrumentConfig, 
-          activeMapping,
-          undefined, // Use default engine constants
-          projectState.engineConfiguration
-        );
-        const result = solver.solve(filteredPerformance, parsedAssignments);
-
-        // DEBUG: Log engine result to verify finger assignments
-        console.log('[Workbench] Engine result generated:', {
-          score: result.score,
-          hardCount: result.hardCount,
-          unplayableCount: result.unplayableCount,
-          debugEventsCount: result.debugEvents.length,
-          fingerUsageStats: result.fingerUsageStats,
-          fatigueMap: result.fatigueMap,
-          averageDrift: result.averageDrift,
-          sampleDebugEvents: result.debugEvents.slice(0, 5), // First 5 events
-          playableEventsCount: result.debugEvents.filter(e => e.assignedHand !== 'Unplayable').length,
-        });
-
-        // DIAGNOSTIC: If all events are unplayable, log why
-        if (result.unplayableCount === result.debugEvents.length && result.debugEvents.length > 0) {
-          console.warn('⚠️ [Workbench] ALL events are Unplayable! This means:');
-          console.warn('  1. No sounds have been assigned to grid cells, OR');
-          console.warn('  2. Grid mapping doesn\'t match MIDI note numbers, OR');
-          console.warn('  3. Instrument config is incorrect');
-
-          // Detailed diagnostics
-          console.group('📊 Diagnostic Information:');
-          console.log('Active mapping cells:', Object.keys(activeMapping?.cells || {}).length);
-          console.log('Sample event note numbers:', result.debugEvents.slice(0, 5).map(e => e.noteNumber));
-
-          // Show what's in the grid mapping
-          if (activeMapping) {
-            const gridNoteNumbers = Object.values(activeMapping.cells).map(c => c.originalMidiNote).filter(n => n !== null);
-            console.log('Grid has notes:', gridNoteNumbers);
-            console.log('Grid cells:', Object.entries(activeMapping.cells).slice(0, 5).map(([key, sound]) => ({
-              cellKey: key,
-              soundName: sound.name,
-              midiNote: sound.originalMidiNote,
-            })));
-          }
-
-          console.log('Instrument config:', {
-            name: projectState.instrumentConfig.name,
-            bottomLeftNote: projectState.instrumentConfig.bottomLeftNote,
-            layoutMode: projectState.instrumentConfig.layoutMode,
-          });
-
-          console.groupEnd();
-        }
-        setEngineResult(result);
-
-        // Update scoreCache in the mapping for quick reference
-        setProjectState(prevState => ({
-          ...prevState,
-          mappings: prevState.mappings.map(m =>
-            activeMapping && m.id === activeMapping.id
-              ? { ...m, scoreCache: result.score }
-              : m
-          ),
-        }));
-      } catch (err) {
-        console.error('[Workbench] Engine execution failed:', err);
-        setEngineResult(null);
-      }
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [
-    activeMapping?.id,
-    activeMapping?.cells, // Watch for cell changes (pad swaps/assignments)
-    activeLayout?.performance.events, // Watch for performance changes
-    projectState.instrumentConfig, // Watch for config changes
-    projectState.ignoredNoteNumbers, // Watch for voice visibility changes
-    projectState.engineConfiguration, // Watch for engine configuration changes
-    projectState, // Include full state for getActivePerformance selector
-  ]);
 
   const handleSaveProject = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectState, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "push3_project.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    saveProject(projectState);
   };
 
-  const handleLoadProject = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLoadProject = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const parsed = JSON.parse(content);
+    try {
+      const loadedState = await loadProject(file);
 
-        // Basic validation
-        if (
-          parsed &&
-          Array.isArray(parsed.layouts) &&
-          typeof parsed.projectTempo === 'number'
-        ) {
-          // Ensure new fields are initialized if missing (for backward compatibility)
-          const loadedState: ProjectState = {
-            ...parsed,
-            parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-            mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
-            // Safety Check: Default ignoredNoteNumbers to empty array if undefined
-            ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : []
-          };
-          setProjectState(loadedState, true); // Skip history on load
-          // Initialize activeMappingId if mappings exist
-          if (loadedState.mappings.length > 0) {
-            setActiveMappingId(loadedState.mappings[0].id);
-          }
-        } else {
-          alert("Invalid project file structure");
-        }
-      } catch (err) {
-        console.error(err);
-        alert("Failed to parse project file");
+      // Initialize activeMappingId if mappings exist
+      if (loadedState.mappings.length > 0 && !loadedState.activeMappingId) {
+        loadedState.activeMappingId = loadedState.mappings[0].id;
       }
-      // Reset input value so same file can be loaded again if needed
-      event.target.value = '';
-    };
-    reader.readAsText(file);
+
+      setProjectState(loadedState, true); // Skip history on load
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse project file");
+    }
+
+    // Reset input value so same file can be loaded again if needed
+    event.target.value = '';
   };
 
   // LayoutDesigner handlers
@@ -674,9 +469,8 @@ export const Workbench: React.FC = () => {
       setProjectState({
         ...projectState,
         mappings: [...projectState.mappings, newMapping],
+        activeMappingId: newMapping.id,
       });
-      // Set activeMappingId immediately to ensure it's available
-      setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping, set layoutMode to 'manual' (user modified the layout)
       setProjectState({
@@ -696,40 +490,7 @@ export const Workbench: React.FC = () => {
     }
   };
 
-  const handleAssignSounds = (assignments: Record<string, Voice>) => {
-    if (!activeMapping) {
-      // Create a new mapping with all assignments
-      const newMapping: GridMapping = {
-        id: `mapping-${Date.now()}`,
-        name: 'New Mapping',
-        cells: assignments,
-        fingerConstraints: {},
-        scoreCache: null,
-        notes: '',
-      };
-      setProjectState({
-        ...projectState,
-        mappings: [...projectState.mappings, newMapping],
-      });
-      // Set activeMappingId immediately to ensure it's available
-      setActiveMappingId(newMapping.id);
-    } else {
-      // Update existing mapping with all assignments
-      setProjectState({
-        ...projectState,
-        mappings: projectState.mappings.map(m => {
-          if (m.id !== activeMapping.id) return m;
-          return {
-            ...m,
-            cells: {
-              ...m.cells,
-              ...assignments,
-            },
-          };
-        }),
-      });
-    }
-  };
+
 
   const handleUpdateMapping = (updates: Partial<GridMapping>) => {
     if (!activeMapping) return;
@@ -743,6 +504,7 @@ export const Workbench: React.FC = () => {
     });
   };
 
+  // @ts-ignore
   const handleDuplicateMapping = () => {
     if (!activeMapping) return;
 
@@ -755,8 +517,8 @@ export const Workbench: React.FC = () => {
     setProjectState({
       ...projectState,
       mappings: [...projectState.mappings, newMapping],
+      activeMappingId: newMapping.id,
     });
-    setActiveMappingId(newMapping.id);
   };
 
   const handleAssignmentChange = (index: number, hand: 'left' | 'right', finger: FingerType) => {
@@ -788,7 +550,7 @@ export const Workbench: React.FC = () => {
 
     // Collect all sounds that have originalMidiNote set
     const soundsWithNotes = projectState.parkedSounds.filter(s => s.originalMidiNote !== null);
-    
+
     // Also include sounds from active mapping
     if (activeMapping) {
       Object.values(activeMapping.cells).forEach(sound => {
@@ -826,8 +588,8 @@ export const Workbench: React.FC = () => {
       setProjectState({
         ...projectState,
         mappings: [...projectState.mappings, newMapping],
+        activeMappingId: newMapping.id,
       });
-      setActiveMappingId(newMapping.id);
     } else {
       // Update existing mapping
       setProjectState({
@@ -972,6 +734,124 @@ export const Workbench: React.FC = () => {
   };
 
   // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Assign Manually (Random Placement)
+  // ============================================================================
+  // Maps all unassigned Voices to empty Pads using random, non-colliding placement.
+  // Does NOT move already-assigned pads. Sets layoutMode to 'random'.
+  // ============================================================================
+  const handleAutoAssignRandom = () => {
+    if (!activeMapping || !projectState.instrumentConfig) {
+      alert('No active mapping or instrument config available. Please create a mapping first.');
+      return;
+    }
+
+    // Find all unassigned Voices (in staging, not yet assigned to a Pad)
+    // We filter parkedSounds to those NOT in the active mapping
+    const assignedIds = new Set(Object.values(activeMapping.cells).map(v => v.id));
+    const unassignedVoices = projectState.parkedSounds.filter(s => !assignedIds.has(s.id));
+
+    if (unassignedVoices.length === 0) {
+      alert('No unassigned Voices found. All Voices are already assigned to Pads.');
+      return;
+    }
+
+    // Find all empty Pads (8x8 grid positions without a Voice assignment)
+    const emptyPads: Array<{ row: number; col: number; key: string }> = [];
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const key = cellKey(row, col);
+        if (!activeMapping.cells[key]) {
+          emptyPads.push({ row, col, key });
+        }
+      }
+    }
+
+    if (emptyPads.length === 0) {
+      alert('No empty Pads available. All 64 Pads are already assigned.');
+      return;
+    }
+
+    // Randomly shuffle both arrays
+    const shuffledVoices = [...unassignedVoices].sort(() => Math.random() - 0.5);
+    const shuffledPads = [...emptyPads].sort(() => Math.random() - 0.5);
+
+    // Map voices to pads (up to the minimum of available voices and empty pads)
+    const assignments: Record<string, Voice> = {};
+    const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
+
+    for (let i = 0; i < maxAssignments; i++) {
+      assignments[shuffledPads[i].key] = shuffledVoices[i];
+    }
+
+    // Batch assign all at once and update layoutMode to 'random'
+    // Batch assign all at once and update layoutMode to 'random'
+    if (Object.keys(assignments).length > 0) {
+      // Merge new assignments with existing cells and update layoutMode
+      if (!activeMapping) {
+        // Create a new mapping with all assignments
+        const newMapping: GridMapping = {
+          id: `mapping-${Date.now()}`,
+          name: 'New Mapping',
+          cells: assignments,
+          fingerConstraints: {},
+          scoreCache: null,
+          notes: '',
+          layoutMode: 'random',
+        };
+        setProjectState({
+          ...projectState,
+          mappings: [...projectState.mappings, newMapping],
+          activeMappingId: newMapping.id,
+        });
+        // Set activeMappingId immediately to ensure it's available
+      } else {
+        // Update existing mapping with all assignments AND layoutMode atomically
+        setProjectState({
+          ...projectState,
+          mappings: projectState.mappings.map(m => {
+            if (m.id !== activeMapping.id) return m;
+            return {
+              ...m,
+              cells: {
+                ...m.cells,
+                ...assignments,
+              },
+              layoutMode: 'random',
+            };
+          }),
+        });
+      }
+
+      console.log(`[Workbench] Assign Randomly: placed ${Object.keys(assignments).length} voices randomly.`);
+    }
+  };
+
+  // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Clear Grid
+  // ============================================================================
+  // Removes all pad assignments and moves sounds back to staging.
+  // Sets layoutMode to 'none'.
+  // ============================================================================
+  const handleClearGrid = () => {
+    if (!activeMapping) {
+      return;
+    }
+
+    if (Object.keys(activeMapping.cells).length === 0) {
+      return;
+    }
+
+    // Sounds are already in parkedSounds (since they are just references), 
+    // but we need to ensure the logic knows they are unassigned.
+    handleUpdateMapping({
+      cells: {},
+      layoutMode: 'none',
+    });
+
+    console.log('[Workbench] Clear Grid: all sounds moved to staging. Layout mode set to "none".');
+  };
+
+  // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Optimize Layout (Simulated Annealing)
   // ============================================================================
   // Runs the Simulated Annealing solver to find an optimal layout.
@@ -1005,7 +885,7 @@ export const Workbench: React.FC = () => {
       await optimizeLayout(activeMapping);
 
       console.log('[Workbench] Layout optimization complete!');
-      
+
       // The context method already updates the project state and engine result
       // No need to do anything else here
     } catch (err) {
@@ -1016,82 +896,9 @@ export const Workbench: React.FC = () => {
     }
   }, [activeMapping, projectState, optimizeLayout]);
 
-  // Handler for setting neutral hand pose
-  const handleSetNeutralPose = useCallback(async () => {
-    if (!activeMapping) {
-      alert('No active mapping. Please assign some sounds first.');
-      return;
-    }
 
-    if (Object.keys(activeMapping.cells || {}).length === 0) {
-      alert('No sounds assigned to the grid. Please assign sounds first.');
-      return;
-    }
 
-    if (!filteredPerformance || filteredPerformance.events.length === 0) {
-      alert('No performance data available. Please load a MIDI file first.');
-      return;
-    }
 
-    setIsSettingNeutralPose(true);
-
-    try {
-      // Call the context method
-      await setInitialStateFromNeutralPose(activeMapping);
-      
-      // The context method already re-runs the solver, so we're done
-      console.log('[Workbench] Neutral hand pose set successfully');
-    } catch (error) {
-      console.error('[Workbench] Failed to set neutral hand pose:', error);
-      alert(`Failed to set neutral hand pose: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsSettingNeutralPose(false);
-    }
-  }, [activeMapping, filteredPerformance, setInitialStateFromNeutralPose]);
-
-  // ============================================================================
-  // EXPLICIT LAYOUT CONTROL: Save Layout Version
-  // ============================================================================
-  // Saves the current layout as a new version (snapshot).
-  // This is for versioning, not basic persistence (autosave handles that).
-  // ============================================================================
-  const handleSaveLayoutVersion = useCallback(() => {
-    if (!activeMapping) {
-      alert('No active mapping to save.');
-      return;
-    }
-
-    if (Object.keys(activeMapping.cells).length === 0) {
-      alert('Cannot save an empty layout. Please assign some sounds first.');
-      return;
-    }
-
-    // Increment version number
-    const currentVersion = activeMapping.version || 0;
-    const newVersion = currentVersion + 1;
-
-    console.log(`[Workbench] Saving layout version ${newVersion}...`);
-
-    // Update the mapping with new version info
-    setProjectState(prevState => ({
-      ...prevState,
-      mappings: prevState.mappings.map(m =>
-        activeMapping && m.id === activeMapping.id
-          ? {
-              ...m,
-              version: newVersion,
-              savedAt: new Date().toISOString(),
-            }
-          : m
-      ),
-    }));
-
-    // The autosave mechanism will persist this change automatically
-
-    alert(`Layout saved as version ${newVersion}.\n\nAutosave will persist this to storage.`);
-
-    console.log(`[Workbench] Layout version ${newVersion} saved successfully.`);
-  }, [activeMapping, setProjectState]);
 
 
 
@@ -1188,9 +995,8 @@ export const Workbench: React.FC = () => {
           <div className="relative" ref={settingsMenuRef}>
             <button
               onClick={() => setSettingsMenuOpen(!settingsMenuOpen)}
-              className={`p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors rounded-[var(--radius-sm)] ${
-                settingsMenuOpen ? 'bg-[var(--bg-input)] text-[var(--text-primary)]' : ''
-              }`}
+              className={`p-2 text-[var(--text-secondary)]hover:text-[var(--text-primary)]transition-colors rounded-[var(--radius-sm)] ${settingsMenuOpen ? 'bg-[var(--bg-input)] text-[var(--text-primary)]' : ''
+                } `}
               title="View Settings"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1279,37 +1085,43 @@ export const Workbench: React.FC = () => {
           {/* Undo/Redo & Save/Load */}
           <div className="flex items-center gap-2">
             <div className="flex items-center bg-[var(--bg-input)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] p-0.5">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={undo}
                 disabled={!canUndo}
-                className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Undo"
+                className="p-2"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
-              </button>
+              </Button>
               <div className="w-px h-4 bg-[var(--border-subtle)]"></div>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={redo}
                 disabled={!canRedo}
-                className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Redo"
+                className="p-2"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
-              </button>
+              </Button>
             </div>
 
-            <button
+            <Button
+              variant="success"
+              size="sm"
               onClick={handleSaveProject}
-              className="px-4 py-2 text-xs font-semibold bg-[var(--finger-L1)] hover:brightness-110 text-white rounded-[var(--radius-sm)] shadow-lg transition-all"
             >
               Save Project
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => loadProjectInputRef.current?.click()}
-              className="px-4 py-2 text-xs font-semibold bg-[var(--bg-card)] hover:brightness-110 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
             >
               Load
-            </button>
+            </Button>
             <input
               ref={loadProjectInputRef}
               type="file"
@@ -1338,88 +1150,84 @@ export const Workbench: React.FC = () => {
 
             {/* Solver Controls */}
             <div className="flex items-center gap-3">
-              {/* Set to Natural Hand Pose Button */}
-              <button
-                onClick={handleSetNeutralPose}
-                disabled={isSettingNeutralPose || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
-                className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
-                title="Set initial finger assignments using neutral hand pose (greedy heuristic)"
+              {/* Clear Grid Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearGrid}
+                disabled={!activeMapping || Object.keys(activeMapping.cells).length === 0}
+                title="Clear all sounds from the grid"
+                className="text-amber-500 hover:text-amber-400 hover:bg-amber-900/20"
               >
-                {isSettingNeutralPose ? (
-                  <>
-                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Setting Neutral Pose...
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                    </svg>
-                    Set to Natural Hand Pose
-                  </>
+                Clear Grid
+              </Button>
+
+              <div className="h-6 w-px bg-slate-700/50" />
+
+              {/* Assign Randomly Button */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleAutoAssignRandom}
+                disabled={!activeMapping || projectState.parkedSounds.filter(s => !Object.values(activeMapping.cells).some(c => c.id === s.id)).length === 0}
+                title="Randomly assign unassigned sounds to empty pads"
+                leftIcon={(
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
                 )}
-              </button>
+              >
+                Randomize
+              </Button>
+
+              <div className="h-6 w-px bg-slate-700/50" />
 
               {/* Auto-Arrange Grid Button (Simulated Annealing) */}
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleOptimizeLayout}
                 disabled={isOptimizingLayout || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
-                className="px-4 py-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
-                title="Optimize pad layout using Simulated Annealing (rearranges sounds for better ergonomics)"
-              >
-                {isOptimizingLayout ? (
-                  <>
-                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Optimizing Layout (Annealing)...
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Auto-Arrange Grid
-                  </>
+                isLoading={isOptimizingLayout}
+                title="Optimize pad layout using Simulated Annealing"
+                leftIcon={!isOptimizingLayout && (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
                 )}
-              </button>
+              >
+                {isOptimizingLayout ? 'Optimizing...' : 'Auto-Arrange'}
+              </Button>
 
               <div className="h-6 w-px bg-slate-700/50" />
 
               <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
-                <label className="text-xs text-slate-400 font-medium">Optimization Model:</label>
                 <select
                   value={selectedSolver}
                   onChange={(e) => setSelectedSolver(e.target.value as SolverType)}
                   disabled={isRunningSolver}
-                  className="bg-slate-900/50 border border-slate-700/50 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-transparent border-none text-xs text-slate-200 focus:outline-none disabled:opacity-50 cursor-pointer"
                 >
-                  <option value="beam">Beam Search (Fast)</option>
-                  <option value="genetic">Genetic Algorithm (Deep)</option>
+                  <option value="beam">Beam Analysis</option>
+                  <option value="genetic">Genetic Analysis</option>
                 </select>
               </div>
 
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleRunSolver}
                 disabled={isRunningSolver || !filteredPerformance || filteredPerformance.events.length === 0}
-                className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-lg transition-all flex items-center gap-2"
-              >
-                {isRunningSolver ? (
-                  <>
-                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Running...
-                  </>
-                ) : (
-                  'Run Optimization'
+                isLoading={isRunningSolver}
+                leftIcon={!isRunningSolver && (
+                  <svg className="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 )}
-              </button>
+              >
+                {isRunningSolver ? 'Analyzing...' : 'Run Analysis'}
+              </Button>
 
               {/* Progress bar for genetic solver */}
               {isRunningSolver && selectedSolver === 'genetic' && (
@@ -1444,10 +1252,10 @@ export const Workbench: React.FC = () => {
                     >
                       {Object.keys(projectState.solverResults).map(solverId => (
                         <option key={solverId} value={solverId}>
-                          {solverId === 'beam' ? 'Beam Search' : 
-                           solverId === 'genetic' ? 'Genetic Algorithm' : 
-                           solverId === 'annealing' ? 'Simulated Annealing' : 
-                           solverId}
+                          {solverId === 'beam' ? 'Beam Search' :
+                            solverId === 'genetic' ? 'Genetic Algorithm' :
+                              solverId === 'annealing' ? 'Simulated Annealing' :
+                                solverId}
                         </option>
                       ))}
                     </select>
@@ -1467,7 +1275,7 @@ export const Workbench: React.FC = () => {
                 backgroundSize: '24px 24px'
               }}
             />
-            
+
             {/* Empty State Message */}
             {!songId && projectState.parkedSounds.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center z-10 bg-slate-900/80 backdrop-blur-sm">
@@ -1519,16 +1327,16 @@ export const Workbench: React.FC = () => {
                 </div>
               </div>
             )}
-            
+
             <div className="w-full h-full flex flex-col">
               <LayoutDesigner
                 parkedSounds={projectState.parkedSounds}
                 activeMapping={activeMapping}
                 instrumentConfig={projectState.instrumentConfig}
                 onAssignSound={handleAssignSound}
-                onAssignSounds={handleAssignSounds}
+                // onAssignSounds={handleAssignSounds}
                 onUpdateMapping={handleUpdateMapping}
-                onDuplicateMapping={handleDuplicateMapping}
+                // onDuplicateMapping={handleDuplicateMapping}
                 onAddSound={handleAddSound}
                 onUpdateSound={handleUpdateSound}
                 onUpdateMappingSound={handleUpdateMappingSound}
@@ -1536,16 +1344,16 @@ export const Workbench: React.FC = () => {
                 onDeleteSound={handleDeleteSound}
                 projectState={projectState}
                 onUpdateProjectState={setProjectState}
-                onSetActiveMappingId={setActiveMappingId}
+                // onSetActiveMappingId={setActiveMappingId}
                 activeLayout={activeLayout}
                 showNoteLabels={showNoteLabels}
                 showPositionLabels={showPositionLabels}
-                showHeatmap={showHeatmap}
+                // showHeatmap={showHeatmap}
                 engineResult={engineResult}
-                // Explicit layout control callbacks
-                onOptimizeLayout={handleOptimizeLayout}
-                onSaveLayoutVersion={handleSaveLayoutVersion}
-                onRequestMapToQuadrants={handleMapToQuadrants}
+              // Explicit layout control callbacks
+              // onOptimizeLayout={handleOptimizeLayout}
+              // onSaveLayoutVersion={handleSaveLayoutVersion}
+              // onRequestMapToQuadrants={handleMapToQuadrants}
               />
             </div>
           </div>

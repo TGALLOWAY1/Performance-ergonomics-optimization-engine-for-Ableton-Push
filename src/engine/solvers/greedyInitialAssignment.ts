@@ -6,11 +6,11 @@
  * instead of random initialization.
  */
 
-import { Performance, NoteEvent } from '../../types/performance';
+import { NoteEvent } from '../../types/performance';
 import { GridMapping } from '../../types/layout';
 import { InstrumentConfig } from '../../types/performance';
 import { FingerType } from '../models';
-import { resolveNeutralPadPositions, NeutralPadPositions } from '../handPose';
+import { resolveNeutralPadPositions } from '../handPose';
 import { GridMapService } from '../gridMapService';
 import { calculateGridDistance } from '../gridMath';
 
@@ -100,21 +100,22 @@ function calculateMovementCost(
  * Calculates stretch cost for a hand based on finger positions.
  * Returns 0 if span is within acceptable range, otherwise a penalty.
  */
+/*
 function calculateStretchCost(handState: HandState): number {
   if (handState.fingers.size < 2) return 0;
-  
+
   const positions = Array.from(handState.fingers.values());
   let minCol = Infinity;
   let maxCol = -Infinity;
-  
+
   for (const pos of positions) {
     minCol = Math.min(minCol, pos.col);
     maxCol = Math.max(maxCol, pos.col);
   }
-  
+
   const span = maxCol - minCol;
   if (span <= MAX_HAND_SPAN) return 0;
-  
+
   // Penalty increases quadratically with excess span
   const excess = span - MAX_HAND_SPAN;
   return excess * excess;
@@ -131,10 +132,10 @@ function wouldCauseCrossover(
   targetCol: number
 ): boolean {
   const fingerNum = parseInt(fingerKey.slice(1), 10); // Extract number from "L1", "R2", etc.
-  
+
   for (const [otherKey, otherPos] of handState.fingers.entries()) {
     const otherNum = parseInt(otherKey.slice(1), 10);
-    
+
     // If this finger is to the right of a higher-numbered finger, it's a crossover
     if (fingerNum < otherNum && targetCol > otherPos.col) {
       return true;
@@ -144,7 +145,7 @@ function wouldCauseCrossover(
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -191,15 +192,15 @@ export function buildNeutralGreedyInitialAssignment(
   params: GreedyInitialAssignmentParams
 ): Record<number, { hand: 'left' | 'right'; finger: FingerType }> {
   const { layout, instrumentConfig, events } = params;
-  
+
   // Early return if no events
   if (!events || events.length === 0) {
     return {};
   }
-  
+
   // 1. Resolve neutral pads for each finger
   const neutralPads = resolveNeutralPadPositions(layout, instrumentConfig);
-  
+
   // 2. Initialize current pad positions per finger from neutral pads
   const leftHandState: HandState = {
     fingers: new Map(),
@@ -209,19 +210,19 @@ export function buildNeutralGreedyInitialAssignment(
     fingers: new Map(),
     span: 0,
   };
-  
+
   // Populate initial positions from neutral pads
   for (const [fingerKey, padPos] of Object.entries(neutralPads)) {
     const hand = fingerKey.startsWith('L') ? 'left' : 'right';
     const handState = hand === 'left' ? leftHandState : rightHandState;
-    
+
     handState.fingers.set(fingerKey, {
       row: padPos.row,
       col: padPos.col,
       fingerKey,
     });
   }
-  
+
   // Calculate initial spans
   if (leftHandState.fingers.size >= 2) {
     const leftCols = Array.from(leftHandState.fingers.values()).map(p => p.col);
@@ -231,48 +232,48 @@ export function buildNeutralGreedyInitialAssignment(
     const rightCols = Array.from(rightHandState.fingers.values()).map(p => p.col);
     rightHandState.span = rightCols.length > 0 ? Math.max(...rightCols) - Math.min(...rightCols) : 0;
   }
-  
+
   // 3. Allocate result map
   const assignments: Record<number, { hand: 'left' | 'right'; finger: FingerType }> = {};
-  
+
   // 4. Sort events by time (if not already sorted)
   const sortedEvents = [...events].sort((a, b) => a.startTime - b.startTime);
-  
+
   // 5. Process events in time order
   for (let eventIndex = 0; eventIndex < sortedEvents.length; eventIndex++) {
     const event = sortedEvents[eventIndex];
-    
+
     // Get pad position for this event's note number
     const padPosition = GridMapService.noteToGrid(event.noteNumber, instrumentConfig);
     if (!padPosition) {
       // Note is outside the grid - skip it (will be marked as Unplayable by solver)
       continue;
     }
-    
+
     const [eventRow, eventCol] = padPosition;
-    
+
     // Determine which hand should play this pad
     const preferredHand = determineHandForPad(eventCol);
     const handState = preferredHand === 'left' ? leftHandState : rightHandState;
     const otherHandState = preferredHand === 'left' ? rightHandState : leftHandState;
-    
+
     // Try both hands, but prefer the natural hand for this column
     const candidates: Array<{ hand: 'left' | 'right'; handState: HandState; fingerKey: string; cost: number }> = [];
-    
+
     // Evaluate fingers from preferred hand
     for (const [fingerKey, fingerPos] of handState.fingers.entries()) {
       const movement = calculateMovementCost(fingerPos.row, fingerPos.col, eventRow, eventCol);
-      
+
       // Skip if too far
       if (movement > MAX_MOVEMENT_DISTANCE) continue;
-      
+
       // Check for crossover
       const crossover = wouldCauseCrossover(handState, fingerKey, eventCol);
-      
+
       // Calculate costs
       const movementCost = movement * MOVEMENT_WEIGHT;
       const crossoverCost = crossover ? CROSSOVER_WEIGHT : 0;
-      
+
       // Estimate stretch cost (simplified - assume adding this finger increases span)
       const tempSpan = Math.max(
         ...Array.from(handState.fingers.values()).map(p => p.col),
@@ -282,9 +283,9 @@ export function buildNeutralGreedyInitialAssignment(
         eventCol
       );
       const stretchCost = tempSpan > MAX_HAND_SPAN ? (tempSpan - MAX_HAND_SPAN) * (tempSpan - MAX_HAND_SPAN) * STRETCH_WEIGHT : 0;
-      
+
       const totalCost = movementCost + crossoverCost + stretchCost;
-      
+
       candidates.push({
         hand: preferredHand,
         handState,
@@ -292,18 +293,18 @@ export function buildNeutralGreedyInitialAssignment(
         cost: totalCost,
       });
     }
-    
+
     // Also try other hand if preferred hand has no good candidates
     if (candidates.length === 0 || Math.min(...candidates.map(c => c.cost)) > MAX_MOVEMENT_DISTANCE * 2) {
       for (const [fingerKey, fingerPos] of otherHandState.fingers.entries()) {
         const movement = calculateMovementCost(fingerPos.row, fingerPos.col, eventRow, eventCol);
-        
+
         if (movement > MAX_MOVEMENT_DISTANCE) continue;
-        
+
         const crossover = wouldCauseCrossover(otherHandState, fingerKey, eventCol);
         const movementCost = movement * MOVEMENT_WEIGHT;
         const crossoverCost = crossover ? CROSSOVER_WEIGHT : 0;
-        
+
         const tempSpan = Math.max(
           ...Array.from(otherHandState.fingers.values()).map(p => p.col),
           eventCol
@@ -312,9 +313,9 @@ export function buildNeutralGreedyInitialAssignment(
           eventCol
         );
         const stretchCost = tempSpan > MAX_HAND_SPAN ? (tempSpan - MAX_HAND_SPAN) * (tempSpan - MAX_HAND_SPAN) * STRETCH_WEIGHT : 0;
-        
+
         const totalCost = movementCost + crossoverCost + stretchCost;
-        
+
         candidates.push({
           hand: preferredHand === 'left' ? 'right' : 'left',
           handState: otherHandState,
@@ -323,37 +324,37 @@ export function buildNeutralGreedyInitialAssignment(
         });
       }
     }
-    
+
     // Select best candidate
     if (candidates.length === 0) {
       // No valid assignment - skip (will be marked as Unplayable)
       continue;
     }
-    
-    const bestCandidate = candidates.reduce((best, current) => 
+
+    const bestCandidate = candidates.reduce((best, current) =>
       current.cost < best.cost ? current : best
     );
-    
+
     // Record assignment
     assignments[eventIndex] = {
       hand: bestCandidate.hand,
       finger: fingerKeyToFingerType(bestCandidate.fingerKey),
     };
-    
+
     // Update finger position
     bestCandidate.handState.fingers.set(bestCandidate.fingerKey, {
       row: eventRow,
       col: eventCol,
       fingerKey: bestCandidate.fingerKey,
     });
-    
+
     // Update span
     if (bestCandidate.handState.fingers.size >= 2) {
       const cols = Array.from(bestCandidate.handState.fingers.values()).map(p => p.col);
       bestCandidate.handState.span = Math.max(...cols) - Math.min(...cols);
     }
   }
-  
+
   return assignments;
 }
 

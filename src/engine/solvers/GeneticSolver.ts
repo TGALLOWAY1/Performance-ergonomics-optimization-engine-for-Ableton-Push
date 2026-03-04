@@ -11,7 +11,7 @@ import { InstrumentConfig } from '../../types/performance';
 import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
 import { GridMapping, cellKey } from '../../types/layout';
-import { generateValidGripsWithTier, Pad, GripResult } from '../feasibility';
+import { generateValidGripsWithTier, Pad } from '../feasibility';
 import {
   calculateTransitionCost,
   calculateGripStretchCost,
@@ -85,6 +85,8 @@ interface Gene {
   position: GridPosition;
   /** Whether this is a fallback grip */
   isFallback: boolean;
+  /** Original event to maintain key */
+  event: NoteEvent;
 }
 
 /**
@@ -121,7 +123,7 @@ export class GeneticSolver implements SolverStrategy {
   public readonly name = 'Genetic Algorithm';
   public readonly type: SolverType = 'genetic';
   public readonly isSynchronous = false; // GA is async due to computation time
-  
+
   private instrumentConfig: InstrumentConfig;
   private gridMapping: GridMapping | null;
   private geneticConfig: GeneticConfig;
@@ -167,21 +169,21 @@ export class GeneticSolver implements SolverStrategy {
     rng: () => number
   ): Gene {
     const { event, originalIndex, position, pad } = eventContext;
-    
+
     // Randomly select hand
     const hand: 'left' | 'right' = rng() < 0.5 ? 'left' : 'right';
-    
+
     // Get valid grips for this hand
     const grips = generateValidGripsWithTier([pad], hand);
-    
+
     // Randomly select one grip
     const gripIndex = Math.floor(rng() * grips.length);
     const selectedGrip = grips[gripIndex];
-    
+
     // Get the first finger from the grip
     const fingers = Object.keys(selectedGrip.pose.fingers) as FingerType[];
     const finger = fingers[0] || 'index';
-    
+
     return {
       eventIndex: originalIndex,
       noteNumber: event.noteNumber,
@@ -191,6 +193,7 @@ export class GeneticSolver implements SolverStrategy {
       finger,
       position,
       isFallback: selectedGrip.isFallback,
+      event,
     };
   }
 
@@ -203,18 +206,18 @@ export class GeneticSolver implements SolverStrategy {
     rng: () => number
   ): Chromosome[] {
     const population: Chromosome[] = [];
-    
+
     for (let i = 0; i < populationSize; i++) {
-      const genes: Gene[] = eventContexts.map(ctx => 
+      const genes: Gene[] = eventContexts.map(ctx =>
         this.generateRandomGene(ctx, rng)
       );
-      
+
       population.push({
         genes,
         fitness: Infinity, // Will be calculated during evaluation
       });
     }
-    
+
     return population;
   }
 
@@ -229,28 +232,28 @@ export class GeneticSolver implements SolverStrategy {
     if (chromosome.genes.length === 0) {
       return 0;
     }
-    
+
     let totalCost = 0;
     const { stiffness, restingPose } = config;
-    
+
     // Calculate costs for each gene transition
     for (let i = 0; i < chromosome.genes.length; i++) {
       const gene = chromosome.genes[i];
-      
+
       // Static grip cost (stretch penalty)
-      const staticCost = calculateGripStretchCost(gene.pose);
+      const staticCost = calculateGripStretchCost(gene.pose, gene.hand);
       totalCost += staticCost;
-      
+
       // Attractor cost (distance from resting position)
       const restPose = gene.hand === 'left' ? restingPose.left : restingPose.right;
       const attractorCost = calculateAttractorCost(gene.pose, restPose, stiffness);
       totalCost += attractorCost;
-      
+
       // Transition cost from previous gene
       if (i > 0) {
         const prevGene = chromosome.genes[i - 1];
         const timeDelta = gene.startTime - prevGene.startTime;
-        
+
         // Only calculate transition if same hand
         if (gene.hand === prevGene.hand) {
           const transitionCost = calculateTransitionCost(prevGene.pose, gene.pose, timeDelta);
@@ -262,13 +265,13 @@ export class GeneticSolver implements SolverStrategy {
           }
         }
       }
-      
+
       // Fallback grip penalty
       if (gene.isFallback) {
         totalCost += 100;
       }
     }
-    
+
     return totalCost;
   }
 
@@ -293,16 +296,16 @@ export class GeneticSolver implements SolverStrategy {
     rng: () => number
   ): Chromosome {
     let best: Chromosome | null = null;
-    
+
     for (let i = 0; i < tournamentSize; i++) {
       const idx = Math.floor(rng() * population.length);
       const candidate = population[idx];
-      
+
       if (best === null || candidate.fitness < best.fitness) {
         best = candidate;
       }
     }
-    
+
     return best!;
   }
 
@@ -318,7 +321,7 @@ export class GeneticSolver implements SolverStrategy {
     rng: () => number
   ): [Chromosome, Chromosome] {
     const geneCount = parent1.genes.length;
-    
+
     if (geneCount <= 1) {
       // No crossover possible with 0 or 1 genes
       return [
@@ -326,25 +329,25 @@ export class GeneticSolver implements SolverStrategy {
         { genes: [...parent2.genes], fitness: Infinity },
       ];
     }
-    
+
     // Select random crossover point (1 to geneCount-1)
     const crossoverPoint = 1 + Math.floor(rng() * (geneCount - 1));
-    
+
     // Create children with swapped segments
     const child1Genes: Gene[] = [
       ...parent1.genes.slice(0, crossoverPoint),
       ...parent2.genes.slice(crossoverPoint),
     ];
-    
+
     const child2Genes: Gene[] = [
       ...parent2.genes.slice(0, crossoverPoint),
       ...parent1.genes.slice(crossoverPoint),
     ];
-    
+
     // Repair crossover point if transition is invalid
     this.repairCrossoverPoint(child1Genes, crossoverPoint, eventContexts, config, rng);
     this.repairCrossoverPoint(child2Genes, crossoverPoint, eventContexts, config, rng);
-    
+
     return [
       { genes: child1Genes, fitness: Infinity },
       { genes: child2Genes, fitness: Infinity },
@@ -358,19 +361,19 @@ export class GeneticSolver implements SolverStrategy {
     genes: Gene[],
     crossoverPoint: number,
     eventContexts: EventContext[],
-    config: EngineConfiguration,
+    _config: EngineConfiguration,
     rng: () => number
   ): void {
     if (crossoverPoint >= genes.length) return;
-    
+
     const prevGene = genes[crossoverPoint - 1];
     const currGene = genes[crossoverPoint];
-    
+
     // Check if transition is valid
     if (prevGene.hand === currGene.hand) {
       const timeDelta = currGene.startTime - prevGene.startTime;
       const transitionCost = calculateTransitionCost(prevGene.pose, currGene.pose, timeDelta);
-      
+
       if (transitionCost === Infinity) {
         // Invalid transition - re-generate the gene at crossover point
         genes[crossoverPoint] = this.generateRandomGene(eventContexts[crossoverPoint], rng);
@@ -405,12 +408,12 @@ export class GeneticSolver implements SolverStrategy {
     rng: () => number
   ): Chromosome[] {
     const { populationSize, tournamentSize, mutationRate, elitismCount } = this.geneticConfig;
-    
+
     // Sort population by fitness (best first)
     population.sort((a, b) => a.fitness - b.fitness);
-    
+
     const newPopulation: Chromosome[] = [];
-    
+
     // Elitism: keep best individuals unchanged
     for (let i = 0; i < elitismCount && i < population.length; i++) {
       newPopulation.push({
@@ -418,27 +421,27 @@ export class GeneticSolver implements SolverStrategy {
         fitness: population[i].fitness,
       });
     }
-    
+
     // Generate rest of population through selection and crossover
     while (newPopulation.length < populationSize) {
       // Select parents
       const parent1 = this.tournamentSelect(population, tournamentSize, rng);
       const parent2 = this.tournamentSelect(population, tournamentSize, rng);
-      
+
       // Crossover
       const [child1, child2] = this.crossover(parent1, parent2, eventContexts, config, rng);
-      
+
       // Mutate
       this.mutate(child1, eventContexts, mutationRate, rng);
       this.mutate(child2, eventContexts, mutationRate, rng);
-      
+
       // Add to new population
       newPopulation.push(child1);
       if (newPopulation.length < populationSize) {
         newPopulation.push(child2);
       }
     }
-    
+
     return newPopulation;
   }
 
@@ -470,7 +473,7 @@ export class GeneticSolver implements SolverStrategy {
     const debugEvents: EngineDebugEvent[] = [];
     const fingerUsageStats: FingerUsageStats = {};
     const fatigueMap: FatigueMap = {};
-    
+
     let unplayableCount = unmappedIndices.size;
     let hardCount = 0;
     let totalDrift = 0;
@@ -543,7 +546,7 @@ export class GeneticSolver implements SolverStrategy {
       }
 
       // Calculate individual gene cost for difficulty rating
-      const staticCost = calculateGripStretchCost(gene.pose);
+      const staticCost = calculateGripStretchCost(gene.pose, gene.hand);
       const restPose = gene.hand === 'left' ? config.restingPose.left : config.restingPose.right;
       const attractorCost = calculateAttractorCost(gene.pose, restPose, config.stiffness);
       const geneCost = staticCost + attractorCost + (gene.isFallback ? 100 : 0);
@@ -556,11 +559,11 @@ export class GeneticSolver implements SolverStrategy {
       fingerUsageStats[fingerKey] = (fingerUsageStats[fingerKey] || 0) + 1;
 
       // Calculate drift from home
-      const homeCentroid = gene.hand === 'left' 
-        ? config.restingPose.left.centroid 
+      const homeCentroid = gene.hand === 'left'
+        ? config.restingPose.left.centroid
         : config.restingPose.right.centroid;
       const drift = Math.sqrt(
-        Math.pow(gene.pose.centroid.x - homeCentroid.x, 2) + 
+        Math.pow(gene.pose.centroid.x - homeCentroid.x, 2) +
         Math.pow(gene.pose.centroid.y - homeCentroid.y, 2)
       );
       totalDrift += drift;
@@ -599,6 +602,7 @@ export class GeneticSolver implements SolverStrategy {
         row: gene.position.row,
         col: gene.position.col,
         eventIndex: gene.eventIndex,
+        eventKey: gene.event.eventKey,
         padId,
       });
     }
@@ -653,10 +657,10 @@ export class GeneticSolver implements SolverStrategy {
   public async solve(
     performance: Performance,
     config: EngineConfiguration,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): Promise<EngineResult> {
     const { populationSize, generations } = this.geneticConfig;
-    
+
     // Seeded PRNG for reproducibility (could be made configurable)
     let seed = 42;
     const rng = () => {
@@ -679,7 +683,7 @@ export class GeneticSolver implements SolverStrategy {
         unmappedIndices.add(originalIndex);
         continue;
       }
-      
+
       eventContexts.push({
         event,
         originalIndex,
@@ -702,24 +706,30 @@ export class GeneticSolver implements SolverStrategy {
     // Apply manual assignments as fixed genes
     const fixedGenes = new Map<number, Gene>();
     if (manualAssignments) {
-      for (const [indexStr, assignment] of Object.entries(manualAssignments)) {
-        const index = parseInt(indexStr, 10);
-        const context = eventContexts.find(ctx => ctx.originalIndex === index);
-        if (context) {
-          const grips = generateValidGripsWithTier([context.pad], assignment.hand);
-          const grip = grips.find(g => 
+      for (const ctx of eventContexts) {
+        const indexStr = ctx.originalIndex.toString();
+        const key = ctx.event.eventKey;
+        const assignment = (key !== undefined && manualAssignments[key])
+          ? manualAssignments[key]
+          : manualAssignments[indexStr];
+
+        if (assignment) {
+          const grips = generateValidGripsWithTier([ctx.pad], assignment.hand);
+          const grip = grips.find(g =>
             Object.keys(g.pose.fingers).includes(assignment.finger)
           ) || grips[0];
-          
-          fixedGenes.set(index, {
-            eventIndex: index,
-            noteNumber: context.event.noteNumber,
-            startTime: context.event.startTime,
+
+          fixedGenes.set(ctx.originalIndex, {
+            eventIndex: ctx.originalIndex,
+            noteNumber: ctx.event.noteNumber,
+            startTime: ctx.event.startTime,
             hand: assignment.hand,
             pose: grip.pose,
             finger: assignment.finger,
-            position: context.position,
+            position: ctx.position,
             isFallback: grip.isFallback,
+            // Reattach full event to access eventKey later
+            event: ctx.event,
           });
         }
       }

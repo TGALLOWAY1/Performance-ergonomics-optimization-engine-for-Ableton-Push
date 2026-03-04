@@ -93,6 +93,8 @@ export interface NoteEvent {
   velocity?: number;
   /** MIDI channel (1-16, optional) */
   channel?: number;
+  /** Deterministic unique identifier based on MIDI timing (e.g., tick:note:channel:ordinal) */
+  eventKey?: string;
 }
 
 /**
@@ -138,4 +140,13 @@ export interface InstrumentConfig {
   layoutMode?: 'drum_64';
 }
 
-
+/**
+ * SectionMap: Defines a musical section (e.g., Verse, Chorus) and its associated instrument configuration.
+ */
+export interface SectionMap {
+  id: string;
+  name: string;
+  startMeasure: number;
+  lengthInMeasures: number;
+  instrumentConfig: InstrumentConfig;
+}

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useMemo } from 'react';
+import React, { createContext, useContext, ReactNode, useMemo } from 'react';
 import { ProjectState, DEFAULT_ENGINE_CONFIGURATION } from '../types/projectState';
 import { InstrumentConfig } from '../types/performance';
 import { useProjectHistory } from '../hooks/useProjectHistory';
@@ -20,22 +20,12 @@ const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
 };
 
 const INITIAL_PROJECT_STATE: ProjectState = {
-    layouts: [
-        {
-            id: 'layout-1',
-            name: 'My First Layout',
-            createdAt: new Date().toISOString(),
-            performance: {
-                events: [],
-                tempo: 120,
-                name: 'Demo Performance'
-            }
-        }
-    ],
+    layouts: [],
     instrumentConfigs: [INITIAL_INSTRUMENT_CONFIG],
     sectionMaps: [], // Initialize empty
     instrumentConfig: INITIAL_INSTRUMENT_CONFIG,
-    activeLayoutId: 'layout-1',
+    activeLayoutId: null,
+    activeMappingId: null,
     projectTempo: 120,
     parkedSounds: [],
     mappings: [],
@@ -65,10 +55,9 @@ interface ProjectContextType {
      */
     engineResult: EngineResult | null;
     /** 
-     * @deprecated Use runSolver() instead. This is kept for backwards compatibility.
-     * Directly sets the engine result, but doesn't store it in the results map.
+     * @deprecated Removed in favor of running explicit solvers via runSolver()
      */
-    setEngineResult: (result: EngineResult | null) => void;
+    setEngineResult?: never;
     /**
      * Runs a solver and stores the result in the solverResults map.
      * The result is stored under the solverType key (e.g., 'beam', 'genetic').
@@ -122,21 +111,19 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         canRedo,
     } = useProjectHistory(INITIAL_PROJECT_STATE);
 
-    // Legacy state for backwards compatibility
-    const [legacyEngineResult, setLegacyEngineResult] = useState<EngineResult | null>(null);
+
 
     // Derive active result from solverResults map
     const activeResult = useMemo(() => {
         const { solverResults, activeSolverId } = projectState;
-        
+
         // If activeSolverId is set and exists in results, use it
         if (activeSolverId && solverResults && solverResults[activeSolverId]) {
             return solverResults[activeSolverId];
         }
-        
-        // Fallback to legacy state for backwards compatibility
-        return legacyEngineResult;
-    }, [projectState.solverResults, projectState.activeSolverId, legacyEngineResult]);
+
+        return null;
+    }, [projectState.solverResults, projectState.activeSolverId]);
 
     /**
      * Runs a solver and stores the result in the solverResults map.
@@ -150,7 +137,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         // Get manual assignments for current layout
@@ -250,7 +237,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         if (!mapping) {
@@ -344,7 +331,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         // Get active mapping (use provided or find first)
-        const mapping = activeMapping ?? 
+        const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
         if (!mapping) {
@@ -403,13 +390,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
     };
 
-    /**
-     * Legacy setEngineResult for backwards compatibility.
-     * This directly sets the legacy state but doesn't update the results map.
-     */
-    const setEngineResult = (result: EngineResult | null): void => {
-        setLegacyEngineResult(result);
-    };
+
 
     return (
         <ProjectContext.Provider value={{
@@ -420,7 +401,8 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             canUndo,
             canRedo,
             engineResult: activeResult,
-            setEngineResult,
+            // @ts-ignore: Deprecated but kept to prevent TS errors in unmodified consumers
+            setEngineResult: () => { },
             runSolver,
             setActiveSolverId,
             getSolverResult,

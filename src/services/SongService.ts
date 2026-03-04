@@ -5,7 +5,7 @@ const STORAGE_KEY = 'push_perf_songs';
 
 import { parseMidiFileToProject, MidiProjectData } from '../utils/midiImport';
 import { saveProjectStateToStorage, loadProjectStateFromStorage, deleteProjectStateFromStorage } from '../utils/projectPersistence';
-import { ProjectState, createInitialProjectState } from '../types/projectState';
+import { ProjectState } from '../types/projectState';
 import { generateId } from '../utils/performanceUtils';
 
 class SongService {
@@ -94,13 +94,13 @@ class SongService {
      */
     private createProjectStateFromMidi(projectData: MidiProjectData): ProjectState {
         const layoutId = generateId('layout');
-        
+
         // Ensure the gridMapping has layoutMode set to 'none' (explicit empty grid)
         const gridMappingWithMode = {
             ...projectData.gridMapping,
             layoutMode: 'none' as const,
         };
-        
+
         const state: ProjectState = {
             layouts: [{
                 id: layoutId,
@@ -112,6 +112,7 @@ class SongService {
             sectionMaps: projectData.sectionMaps || [],
             instrumentConfig: projectData.instrumentConfig,
             activeLayoutId: layoutId,
+            activeMappingId: gridMappingWithMode.id,
             projectTempo: projectData.performance.tempo || 120,
             parkedSounds: projectData.voices, // All voices in staging area
             mappings: [gridMappingWithMode], // Empty grid with layoutMode: 'none'
@@ -131,7 +132,7 @@ class SongService {
         try {
             // Store MIDI file as base64
             const midiData = await this.fileToBase64(file);
-            
+
             const projectData = await parseMidiFileToProject(file);
             const { performance, minNoteNumber } = projectData;
 
@@ -202,7 +203,7 @@ class SongService {
 
             // Store MIDI file as base64
             const midiData = await this.fileToBase64(file);
-            
+
             const projectData = await parseMidiFileToProject(file);
             const { performance, minNoteNumber } = projectData;
 
@@ -312,76 +313,8 @@ class SongService {
 
     // Helper to seed mock data if empty
     seedMockData(): void {
-        if (this.getAllSongs().length === 0) {
-            const MOCK_SONGS: SongMetadata[] = [
-                {
-                    id: '1',
-                    title: 'Midnight Pulse',
-                    artist: 'SunTzu',
-                    bpm: 128,
-                    key: 'F# Minor',
-                    duration: 245,
-                    lastPracticed: Date.now(),
-                    totalPracticeTime: 47,
-                    performanceRating: 88,
-                    difficulty: 'Medium',
-                    isFavorite: true,
-                    tags: ['Techno', 'Live']
-                },
-                {
-                    id: '2',
-                    title: 'Drumline 2025',
-                    artist: 'Drumline 2025',
-                    bpm: 140,
-                    key: 'C Major',
-                    duration: 180,
-                    lastPracticed: Date.now() - 86400000 * 2,
-                    totalPracticeTime: 120,
-                    performanceRating: 86,
-                    difficulty: 'Hard',
-                    isFavorite: false,
-                    tags: ['Drum & Bass']
-                },
-                {
-                    id: '3',
-                    title: 'Echo Patterns',
-                    artist: 'Echo Patterns',
-                    bpm: 120,
-                    key: 'A Minor',
-                    duration: 300,
-                    lastPracticed: Date.now() - 86400000 * 5,
-                    totalPracticeTime: 200,
-                    performanceRating: 95,
-                    difficulty: 'Easy',
-                    isFavorite: true,
-                    tags: ['House']
-                },
-                {
-                    id: '4',
-                    title: 'Rhythmic Shift',
-                    artist: 'Kims',
-                    bpm: 130,
-                    key: 'D Minor',
-                    duration: 210,
-                    lastPracticed: Date.now() - 86400000 * 1,
-                    totalPracticeTime: 15,
-                    performanceRating: 72,
-                    difficulty: 'Medium',
-                    isFavorite: false,
-                    tags: ['Experimental']
-                }
-            ];
-
-            const songs = this.getSongsMap();
-            MOCK_SONGS.forEach(meta => {
-                songs[meta.id] = {
-                    projectStateId: uuidv4(),
-                    metadata: meta,
-                    sections: []
-                };
-            });
-            this.saveSongsMap(songs);
-        }
+        // Mock data removed to ensure only valid MIDI data is used.
+        // User must import Songs from MIDI files.
     }
 }
 

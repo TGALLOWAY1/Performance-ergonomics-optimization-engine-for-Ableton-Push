@@ -35,7 +35,11 @@ const customMapping: GridMapping = {
         '7,7': {
             originalMidiNote: 48,
             name: 'C3',
-            channel: 1
+            channel: 1,
+            id: 'test-voice',
+            sourceType: 'midi_track',
+            sourceFile: '',
+            color: '#000000',
         } as Voice
     },
     fingerConstraints: {},

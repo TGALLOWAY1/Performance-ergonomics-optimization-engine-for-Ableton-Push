@@ -12,6 +12,9 @@ import { analyzeEvents } from '../engine/eventMetrics';
 import { analyzeAllTransitions } from '../engine/transitionAnalyzer';
 import { buildOnionSkinModel, type OnionSkinInput } from '../engine/onionSkinBuilder';
 import { EventTimelinePanel } from './EventTimelinePanel';
+import { EventLogTable } from './EventLogTable';
+import { FingerType } from '../engine/models';
+import { Button } from '../components/ui/Button';
 import { TransitionMetricsPanel } from './TransitionMetricsPanel';
 import { OnionSkinGrid } from '../components/vis/OnionSkinGrid';
 import { PracticeLoopControls } from './PracticeLoopControls';
@@ -27,13 +30,19 @@ interface EventAnalysisPanelProps {
   /** Engine result containing debug events */
   engineResult: EngineResult | null;
   /** Performance data (for tempo) */
+  /** Performance data (for tempo) */
   performance: Performance | null;
+  /** Callback for manual finger assignment changes */
+  onAssignmentChange?: (eventKey: string, hand: 'left' | 'right', finger: FingerType) => void;
 }
 
 export const EventAnalysisPanel: React.FC<EventAnalysisPanelProps> = ({
   engineResult,
   performance,
+  onAssignmentChange,
 }) => {
+  // View state for left panel
+  const [leftPanelView, setLeftPanelView] = useState<'timeline' | 'log'>('timeline');
   // Analyze events and transitions (memoized with proper dependencies)
   const { analyzedEvents, transitions } = useMemo(() => {
     if (!engineResult) {
@@ -195,48 +204,89 @@ export const EventAnalysisPanel: React.FC<EventAnalysisPanelProps> = ({
     <div className="h-full flex flex-col bg-[var(--bg-app)] overflow-hidden">
       {/* Export Buttons Bar */}
       <div className="flex-none h-10 border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] flex items-center justify-end px-4 gap-2">
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={handleExportAllEvents}
-          className="px-3 py-1 text-[10px] font-semibold bg-[var(--bg-input)] hover:bg-[var(--bg-input)]/80 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
           title="Export all event metrics to JSON"
         >
           Export Metrics
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={handleExportHardTransitions}
-          className="px-3 py-1 text-[10px] font-semibold bg-[var(--bg-input)] hover:bg-[var(--bg-input)]/80 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
           title="Export hard transitions (difficulty ≥ 0.7) to JSON"
         >
           Export Hard Transitions
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={handleExportPracticeLoopSettings}
-          className="px-3 py-1 text-[10px] font-semibold bg-[var(--bg-input)] hover:bg-[var(--bg-input)]/80 text-[var(--text-primary)] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] transition-all"
           title="Export practice loop settings to JSON"
         >
           Export Loop Settings
-        </button>
+        </Button>
       </div>
 
       {/* Main content: Three-column layout */}
       <div className="flex-1 flex overflow-hidden min-w-0">
         {/* Left: Event Timeline (scrollable) */}
         <div className="w-80 flex-none border-r border-[var(--border-subtle)] bg-[var(--bg-panel)] flex flex-col overflow-hidden">
-          <EventTimelinePanel
-            events={analyzedEvents}
-            transitions={transitions}
-            selectedIndex={selectedEventIndex}
-            onSelectIndex={setSelectedEventIndex}
-          />
+          {/* Header with Tabs */}
+          <div className="flex-none flex items-center h-10 border-b border-[var(--border-subtle)] bg-[var(--bg-card)] px-2 gap-1">
+            <button
+              onClick={() => setLeftPanelView('timeline')}
+              className={`flex-1 text-[10px] uppercase font-bold tracking-wider py-1.5 rounded-[var(--radius-sm)] transition-colors ${leftPanelView === 'timeline'
+                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-input)]/50'
+                }`}
+            >
+              Timeline
+            </button>
+            <button
+              onClick={() => setLeftPanelView('log')}
+              className={`flex-1 text-[10px] uppercase font-bold tracking-wider py-1.5 rounded-[var(--radius-sm)] transition-colors ${leftPanelView === 'log'
+                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-input)]/50'
+                }`}
+            >
+              Event Log
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-hidden relative">
+            {leftPanelView === 'timeline' ? (
+              <EventTimelinePanel
+                events={analyzedEvents}
+                transitions={transitions}
+                selectedIndex={selectedEventIndex}
+                onSelectIndex={setSelectedEventIndex}
+              />
+            ) : (
+              <div className="absolute inset-0 overflow-hidden">
+                <EventLogTable
+                  events={engineResult.debugEvents}
+                  onAssignmentChange={(eventKey, hand, finger) => {
+                    if (onAssignmentChange) {
+                      onAssignmentChange(eventKey, hand, finger);
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Center: Onion Skin Grid Visualization */}
-        <div 
-          className="flex-1 flex items-center justify-center p-6 bg-[var(--bg-app)] min-w-0 overflow-hidden" 
+        <div
+          className="flex-1 flex items-center justify-center p-6 bg-[var(--bg-app)] min-w-0 overflow-hidden"
           style={{ containerType: 'size' } as React.CSSProperties}
         >
           {onionSkinModel ? (
-            <div 
+            <div
               style={{
                 width: 'calc(100cqmin - 48px)',
                 height: 'calc(100cqmin - 48px)',

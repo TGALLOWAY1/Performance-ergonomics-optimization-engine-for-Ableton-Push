@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Voice, GridMapping, parseCellKey } from '../types/layout';
-import { InstrumentConfig } from '../types/performance';
 import { getRawActivePerformance } from '../utils/performanceSelectors';
 import { ProjectState } from '../types/projectState';
 
@@ -313,7 +312,6 @@ interface VoiceLibraryProps {
     parkedSounds: Voice[];
     activeMapping: GridMapping | null;
     projectState: ProjectState;
-    instrumentConfig: InstrumentConfig | null;
     selectedSoundId: string | null;
     selectedCellKey: string | null;
     ignoredNoteNumbers: number[];
@@ -325,7 +323,6 @@ interface VoiceLibraryProps {
     onDeleteSound: (id: string) => void;
     onToggleVoiceVisibility: (note: number) => void;
     handleDestructiveDelete: (note: number) => void;
-    handleAutoAssignRandom: () => void;
     handleClearStaging: () => void;
 }
 
@@ -333,19 +330,17 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
     parkedSounds,
     activeMapping,
     projectState,
-    instrumentConfig,
     selectedSoundId,
     selectedCellKey,
     ignoredNoteNumbers,
     onSelectSound,
     onSelectCell,
-    onAddSound,
+    // onAddSound,
     onUpdateSound,
     onUpdateMappingSound,
     onDeleteSound,
     onToggleVoiceVisibility,
     handleDestructiveDelete,
-    handleAutoAssignRandom,
     handleClearStaging,
 }) => {
     const [activeTab, setActiveTab] = useState<'all' | 'unassigned' | 'placed'>('unassigned');
@@ -487,29 +482,7 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
                 {/* TAB: UNASSIGNED (Staging Area) */}
                 {activeTab === 'unassigned' && (
                     <DroppableStagingArea>
-                        {/* Assign Actions Toolbar */}
-                        {stagingAssets.length > 0 && (
-                            <div className="mb-3 p-2 bg-[var(--bg-panel)] rounded border border-[var(--border-subtle)]">
-                                <div className="text-xs font-semibold text-[var(--text-secondary)] uppercase mb-2">Assign Actions</div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleAutoAssignRandom}
-                                        disabled={!activeMapping || !instrumentConfig || stagingAssets.length === 0}
-                                        className="flex-1 px-3 py-1.5 text-xs bg-[var(--finger-L1)] hover:bg-[var(--finger-L2)] disabled:bg-[var(--bg-input)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed text-white rounded border border-[var(--finger-L2)] disabled:border-[var(--border-subtle)] transition-colors"
-                                        title={!activeMapping || !instrumentConfig ? 'No active mapping or instrument config' : 'Randomly assign unassigned Voices to empty Pads'}
-                                    >
-                                        Auto-Assign (Random)
-                                    </button>
-                                    <button
-                                        disabled
-                                        className="flex-1 px-3 py-1.5 text-xs bg-[var(--bg-input)] text-[var(--text-secondary)] cursor-not-allowed rounded border border-[var(--border-subtle)] flex items-center justify-center gap-1"
-                                        title="AI Optimization coming in v2"
-                                    >
-                                        Auto-Assign (Optimize) 🧠
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+
                         <div className="space-y-2 mt-2">
                             {stagingAssets.length === 0 ? (
                                 <div className="text-sm text-[var(--text-secondary)] text-center py-8 border-2 border-dashed border-[var(--border-subtle)] rounded">

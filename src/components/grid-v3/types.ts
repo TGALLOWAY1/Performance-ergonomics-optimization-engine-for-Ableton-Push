@@ -1,4 +1,4 @@
-import { FingerType, HandSide } from '../../engine/models';
+import { HandSide } from '../../engine/models';
 
 /**
  * Unique identifier for a Pad (format: "row,col")

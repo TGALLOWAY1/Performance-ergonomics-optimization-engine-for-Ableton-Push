@@ -12,7 +12,7 @@
  */
 
 import type { EngineDebugEvent } from '../engine/core';
-import type { FingerType, HandSide } from '../engine/models';
+import type { FingerType } from '../engine/models';
 
 /**
  * Pad key format: "row,col" string representing a Pad position on the 8x8 grid.
@@ -46,22 +46,22 @@ export interface EventNote {
 export interface TransitionMetrics {
   /** Time delta between events in milliseconds */
   timeDeltaMs: number;
-  
+
   /** Euclidean grid distance between the two pad positions (in grid cells) */
   gridDistance: number;
-  
+
   /** Whether the transition requires switching hands (left ↔ right) */
   handSwitch: boolean;
-  
+
   /** Whether the transition requires changing fingers (same hand, different finger) */
   fingerChange: boolean;
-  
+
   /** Speed pressure metric: higher values indicate faster required movement (distance / time) */
   speedPressure: number;
-  
+
   /** Anatomical stretch score: measures hand span expansion/contraction (0-1, higher = more stretch) */
   anatomicalStretchScore: number;
-  
+
   /** Composite difficulty score: normalized 0-1 value combining all transition factors (for heatmaps) */
   compositeDifficultyScore: number;
 }
@@ -75,16 +75,16 @@ export interface TransitionMetrics {
 export interface AnalyzedEvent {
   /** 0-based index in the event sequence */
   eventIndex: number;
-  
+
   /** startTime of this moment (in seconds) */
   timestamp: number;
-  
+
   /** All notes active at this time */
   notes: EventNote[];
-  
+
   /** Convenience: unique pad IDs for this event */
   pads: PadKey[];
-  
+
   /** Optional per-event metrics */
   eventMetrics?: {
     /** Number of simultaneous notes (polyphony) */
@@ -109,16 +109,16 @@ export interface AnalyzedEvent {
 export interface Transition {
   /** Index of the source event in the debugEvents array */
   fromIndex: number;
-  
+
   /** Index of the target event in the debugEvents array (usually fromIndex + 1) */
   toIndex: number;
-  
+
   /** Source analyzed event */
   fromEvent: AnalyzedEvent;
-  
+
   /** Target analyzed event */
   toEvent: AnalyzedEvent;
-  
+
   /** Transition metrics quantifying the difficulty of this movement */
   metrics: TransitionMetrics;
 }
@@ -132,25 +132,25 @@ export interface Transition {
 export interface FingerMove {
   /** Finger type making the movement */
   finger: FingerType;
-  
+
   /** Hand side (left or right) */
   hand: HandType;
-  
+
   /** Source pad key ("row,col" format), or null if finger was not placed before */
   fromPad: PadKey | null;
-  
+
   /** Target pad key ("row,col" format), or null if finger is not placed after */
   toPad: PadKey | null;
-  
+
   /** Whether this finger is holding the same pad (no movement) */
   isHold: boolean;
-  
+
   /** Whether this movement is biomechanically impossible (exceeds max reach) */
   isImpossible?: boolean;
-  
+
   /** Raw Euclidean distance in grid cells (if movement occurred) */
   rawDistance?: number;
-  
+
   /** Anatomical stretch score for this specific finger movement (0-1) */
   anatomicalStretchScore?: number;
 }
@@ -169,25 +169,25 @@ export interface FingerMove {
 export interface OnionSkinModel {
   /** Index of the currently focused event in the debugEvents array */
   currentEventIndex: number;
-  
+
   /** The currently focused analyzed event (rendered as solid pads) */
   currentEvent: AnalyzedEvent;
-  
+
   /** Previous analyzed event (rendered as ghost pads), or null if this is the first event */
   previousEvent?: AnalyzedEvent | null;
-  
+
   /** Next analyzed event (rendered as ghost pads), or null if this is the last event */
   nextEvent?: AnalyzedEvent | null;
-  
+
   /** Pad keys that are active in both current and next events (shared pads) */
   sharedPads: PadKey[];
-  
+
   /** Pad keys that are active only in the current event (not in next) */
   currentOnlyPads: PadKey[];
-  
+
   /** Pad keys that are active only in the next event (not in current) */
   nextOnlyPads: PadKey[];
-  
+
   /** Finger movements between current and next events (for vector arrow visualization) */
   fingerMoves: FingerMove[];
 }

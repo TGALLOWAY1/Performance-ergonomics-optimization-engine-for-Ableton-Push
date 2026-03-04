@@ -3,7 +3,7 @@ import { EngineResult } from '../engine/core';
 import { GridMapping } from '../types/layout';
 import { SoundAssignmentTable } from './SoundAssignmentTable';
 import { Performance } from '../types/performance';
-import { EventLogTable } from './EventLogTable';
+// import { EventLogTable } from './EventLogTable';
 import { FingerType } from '../engine/models';
 import { useProject } from '../context/ProjectContext';
 import { EvolutionLogEntry } from '../engine/solvers/types';
@@ -19,9 +19,9 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     engineResult,
     activeMapping,
     performance,
-    onAssignmentChange,
+    // onAssignmentChange,
 }) => {
-    const { projectState, getSolverResult } = useProject();
+    const { getSolverResult } = useProject();
     const [activeTab, setActiveTab] = useState<'summary' | 'comparison' | 'optimization'>('summary');
 
     // Get solver results for comparison
@@ -113,31 +113,28 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                     <div className="flex gap-1">
                         <button
                             onClick={() => setActiveTab('summary')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                                activeTab === 'summary'
-                                    ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
-                                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                            }`}
+                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'summary'
+                                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                }`}
                         >
                             Performance Summary
                         </button>
                         <button
                             onClick={() => setActiveTab('comparison')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                                activeTab === 'comparison'
-                                    ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
-                                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                            }`}
+                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'comparison'
+                                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                }`}
                         >
                             Model Comparison
                         </button>
                         <button
                             onClick={() => setActiveTab('optimization')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                                activeTab === 'optimization'
-                                    ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
-                                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                            }`}
+                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'optimization'
+                                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                }`}
                         >
                             Optimization Process
                         </button>
@@ -149,112 +146,97 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                 {activeTab === 'summary' ? (
                     <>
                         {/* Performance Summary Card */}
-                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] space-y-4 flex-none border border-[var(--border-subtle)] shadow-sm">
-                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Performance Summary</h3>
+                        <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] space-y-4 flex-none border border-[var(--border-subtle)] shadow-sm">
+                            <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Performance Summary</h3>
 
-                    {stats ? (
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
-                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Ergonomic Score</div>
-                                    <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.score}</div>
-                                </div>
-                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
-                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Total Events</div>
-                                    <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.eventCount}</div>
-                                </div>
+                            {stats ? (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                            <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Ergonomic Score</div>
+                                            <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.score}</div>
+                                        </div>
+                                        <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                            <div className="text-[10px] text-[var(--text-tertiary)] uppercase">Total Events</div>
+                                            <div className="text-2xl font-light text-[var(--text-primary)] mt-1">{stats.eventCount}</div>
+                                        </div>
 
-                                {/* Hand Balance Visualization */}
-                                <div className="col-span-2 bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
-                                    <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] uppercase mb-2">
-                                        <span>Left Hand</span>
-                                        <span>Hand Balance</span>
-                                        <span>Right Hand</span>
+                                        {/* Hand Balance Visualization */}
+                                        <div className="col-span-2 bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                            <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] uppercase mb-2">
+                                                <span>Left Hand</span>
+                                                <span>Hand Balance</span>
+                                                <span>Right Hand</span>
+                                            </div>
+                                            <div className="h-2 bg-[var(--bg-app)] rounded-full overflow-hidden flex">
+                                                <div
+                                                    className="h-full bg-[var(--finger-L2)] transition-all duration-500"
+                                                    style={{ width: `${stats.handBalance.left}%` }}
+                                                />
+                                                <div
+                                                    className="h-full bg-[var(--finger-R2)] transition-all duration-500"
+                                                    style={{ width: `${stats.handBalance.right}%` }}
+                                                />
+                                            </div>
+                                            <div className="flex justify-between text-xs text-[var(--text-primary)] mt-1 font-mono">
+                                                <span>{stats.handBalance.left}%</span>
+                                                <span>{stats.handBalance.right}%</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="h-2 bg-[var(--bg-app)] rounded-full overflow-hidden flex">
-                                        <div
-                                            className="h-full bg-[var(--finger-L2)] transition-all duration-500"
-                                            style={{ width: `${stats.handBalance.left}%` }}
-                                        />
-                                        <div
-                                            className="h-full bg-[var(--finger-R2)] transition-all duration-500"
-                                            style={{ width: `${stats.handBalance.right}%` }}
-                                        />
-                                    </div>
-                                    <div className="flex justify-between text-xs text-[var(--text-primary)] mt-1 font-mono">
-                                        <span>{stats.handBalance.left}%</span>
-                                        <span>{stats.handBalance.right}%</span>
-                                    </div>
-                                </div>
-                            </div>
 
-                            {/* Cost Metrics Breakdown */}
-                            {engineResult && engineResult.averageMetrics && (
-                                <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
-                                    <div className="text-[10px] text-[var(--text-tertiary)] uppercase mb-3">Average Cost Metrics</div>
-                                    <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Movement</span>
-                                            <span className="text-xs font-mono text-[var(--finger-L3)]">{engineResult.averageMetrics.movement.toFixed(1)}</span>
+                                    {/* Cost Metrics Breakdown */}
+                                    {engineResult && engineResult.averageMetrics && (
+                                        <div className="bg-[var(--bg-input)] rounded-[var(--radius-md)] p-3 border border-[var(--border-subtle)]">
+                                            <div className="text-[10px] text-[var(--text-tertiary)] uppercase mb-3">Average Cost Metrics</div>
+                                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Movement</span>
+                                                    <span className="text-xs font-mono text-[var(--finger-L3)]">{engineResult.averageMetrics.movement.toFixed(1)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Stretch</span>
+                                                    <span className="text-xs font-mono text-[var(--finger-L5)]">{engineResult.averageMetrics.stretch.toFixed(1)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Drift</span>
+                                                    <span className="text-xs font-mono text-[var(--finger-R3)]">{engineResult.averageMetrics.drift.toFixed(1)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Bounce</span>
+                                                    <span className="text-xs font-mono text-[var(--text-warning)]">{engineResult.averageMetrics.bounce.toFixed(1)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Fatigue</span>
+                                                    <span className="text-xs font-mono text-[var(--finger-R4)]">{engineResult.averageMetrics.fatigue.toFixed(1)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-[var(--text-secondary)]">Crossover</span>
+                                                    <span className="text-xs font-mono text-[var(--finger-L4)]">{engineResult.averageMetrics.crossover.toFixed(1)}</span>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Stretch</span>
-                                            <span className="text-xs font-mono text-[var(--finger-L5)]">{engineResult.averageMetrics.stretch.toFixed(1)}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Drift</span>
-                                            <span className="text-xs font-mono text-[var(--finger-R3)]">{engineResult.averageMetrics.drift.toFixed(1)}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Bounce</span>
-                                            <span className="text-xs font-mono text-[var(--text-warning)]">{engineResult.averageMetrics.bounce.toFixed(1)}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Fatigue</span>
-                                            <span className="text-xs font-mono text-[var(--finger-R4)]">{engineResult.averageMetrics.fatigue.toFixed(1)}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-[var(--text-secondary)]">Crossover</span>
-                                            <span className="text-xs font-mono text-[var(--finger-L4)]">{engineResult.averageMetrics.crossover.toFixed(1)}</span>
-                                        </div>
-                                    </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-center py-4 text-[var(--text-tertiary)] text-sm italic">
+                                    No analysis data available.
                                 </div>
                             )}
                         </div>
-                    ) : (
-                        <div className="text-center py-4 text-[var(--text-tertiary)] text-sm italic">
-                            No analysis data available.
-                        </div>
-                    )}
-                </div>
 
-                {/* Event Log & Manual Assignments */}
-                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex-none h-[300px] flex flex-col border border-[var(--border-subtle)] shadow-sm">
-                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Event Log</h3>
-                    <div className="flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-input)]">
-                        {engineResult ? (
-                            <EventLogTable
-                                events={engineResult.debugEvents}
-                                onAssignmentChange={onAssignmentChange}
-                            />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-[var(--text-tertiary)] text-xs italic">
-                                No events to display
+                        {/* Event Log moved to /event-analysis page */}
+
+                        {/* Sound Assignments */}
+                        <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex flex-col flex-1 min-h-[300px] border border-[var(--border-subtle)] shadow-sm">
+                            <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Finger Assignments</h3>
+                            <div className="flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-input)]">
+                                <SoundAssignmentTable
+                                    activeMapping={activeMapping}
+                                    engineResult={engineResult}
+                                />
                             </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Sound Assignments */}
-                <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] flex flex-col flex-1 min-h-[300px] border border-[var(--border-subtle)] shadow-sm">
-                    <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Finger Assignments</h3>
-                    <div className="flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-input)]">
-                        <SoundAssignmentTable
-                            activeMapping={activeMapping}
-                            engineResult={engineResult}
-                        />
-                    </div>
-                </div>
+                        </div>
                     </>
                 ) : activeTab === 'comparison' ? (
                     <>
@@ -655,7 +637,7 @@ const AnnealingProcessGraph: React.FC<AnnealingProcessGraphProps> = ({ optimizat
         .join(' ');
 
     // Generate area path for temperature (filled area)
-    const tempAreaPath = tempPath + 
+    const tempAreaPath = tempPath +
         ` L ${scaleX(optimizationLog[optimizationLog.length - 1].step)} ${padding.top + chartHeight}` +
         ` L ${scaleX(optimizationLog[0].step)} ${padding.top + chartHeight} Z`;
 
@@ -764,7 +746,7 @@ const AnnealingProcessGraph: React.FC<AnnealingProcessGraphProps> = ({ optimizat
                     // Sample points to avoid overcrowding (show every Nth point)
                     const sampleRate = Math.max(1, Math.floor(optimizationLog.length / 200));
                     if (i % sampleRate !== 0 && i !== optimizationLog.length - 1) return null;
-                    
+
                     const x = scaleX(entry.step);
                     const y = scaleYCost(entry.cost);
                     return (

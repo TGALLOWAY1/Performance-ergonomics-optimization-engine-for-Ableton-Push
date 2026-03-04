@@ -81,7 +81,7 @@ export class AnnealingSolver implements SolverStrategy {
   public readonly name = 'Simulated Annealing';
   public readonly type: SolverType = 'annealing';
   public readonly isSynchronous = false; // Async-only due to iterative nature
-  
+
   private instrumentConfig: SolverConfig['instrumentConfig'];
   private initialGridMapping: GridMapping | null;
   private bestMapping: GridMapping | null = null;
@@ -119,18 +119,18 @@ export class AnnealingSolver implements SolverStrategy {
       instrumentConfig: this.instrumentConfig,
       gridMapping: mapping,
     };
-    
+
     const beamSolver = createBeamSolver(solverConfig);
-    
+
     // Create a modified config with the specified beam width
     const evaluationConfig: EngineConfiguration = {
       ...config,
       beamWidth,
     };
-    
+
     // Run the solver
     const result = await beamSolver.solve(performance, evaluationConfig);
-    
+
     // Return both the full result (for cost breakdown) and the cost value
     // The cost is the average total cost per event (normalized metric for comparison)
     return {
@@ -158,7 +158,7 @@ export class AnnealingSolver implements SolverStrategy {
   public async solve(
     performance: Performance,
     config: EngineConfiguration,
-    manualAssignments?: Record<number, { hand: 'left' | 'right', finger: FingerType }>
+    manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): Promise<EngineResult> {
     // Validate that we have an initial mapping
     if (!this.initialGridMapping) {
@@ -171,7 +171,7 @@ export class AnnealingSolver implements SolverStrategy {
       cells: { ...this.initialGridMapping.cells },
       fingerConstraints: { ...this.initialGridMapping.fingerConstraints },
     };
-    
+
     // Calculate initial cost using fast Beam Search
     const initialEvaluation = await this.evaluateMappingCost(
       currentMapping,
@@ -194,10 +194,10 @@ export class AnnealingSolver implements SolverStrategy {
 
     // Telemetry for visualization (backward compatibility)
     const telemetry: AnnealingTelemetry[] = [];
-    
+
     // Detailed annealing trace for comprehensive visualization
     const annealingTrace: AnnealingIterationSnapshot[] = [];
-    
+
     // Downsampling: Log every iteration for accuracy (1000 iterations is manageable)
     // If needed in future, can downsample with: const logEveryN = Math.ceil(ITERATIONS / 1000);
     const LOG_EVERY_N = 1; // Log every iteration
@@ -264,7 +264,7 @@ export class AnnealingSolver implements SolverStrategy {
         const playableEvents = candidateEvaluation.result.debugEvents.filter(
           e => e.assignedHand !== 'Unplayable' && e.costBreakdown
         );
-        
+
         // Calculate sums by summing up all cost breakdowns
         let movementSum = 0;
         let stretchSum = 0;
@@ -273,7 +273,7 @@ export class AnnealingSolver implements SolverStrategy {
         let fatigueSum = 0;
         let crossoverSum = 0;
         let totalCostSum = 0;
-        
+
         playableEvents.forEach(event => {
           if (event.costBreakdown) {
             movementSum += event.costBreakdown.movement;
@@ -285,7 +285,7 @@ export class AnnealingSolver implements SolverStrategy {
             totalCostSum += event.costBreakdown.total;
           }
         });
-        
+
         // Build snapshot with sums
         const snapshot: AnnealingIterationSnapshot = {
           iteration: step,
@@ -302,7 +302,7 @@ export class AnnealingSolver implements SolverStrategy {
           fatigueSum,
           crossoverSum,
         };
-        
+
         // Calculate shares if total cost sum is available and > 0
         if (totalCostSum > 0) {
           snapshot.movementShare = movementSum / totalCostSum;
@@ -312,7 +312,7 @@ export class AnnealingSolver implements SolverStrategy {
           snapshot.fatigueShare = fatigueSum / totalCostSum;
           snapshot.crossoverShare = crossoverSum / totalCostSum;
         }
-        
+
         annealingTrace.push(snapshot);
       }
 
@@ -337,14 +337,14 @@ export class AnnealingSolver implements SolverStrategy {
       instrumentConfig: this.instrumentConfig,
       gridMapping: bestMapping,
     };
-    
+
     const finalBeamSolver = createBeamSolver(solverConfig);
-    
+
     const finalConfig: EngineConfiguration = {
       ...config,
       beamWidth: FINAL_BEAM_WIDTH,
     };
-    
+
     const finalResult = await finalBeamSolver.solve(
       performance,
       finalConfig,

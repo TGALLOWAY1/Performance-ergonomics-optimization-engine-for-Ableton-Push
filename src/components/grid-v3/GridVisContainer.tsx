@@ -25,6 +25,7 @@ const DEFAULT_THEME: GridTheme = {
 export const GridVisContainer: React.FC<GridVisProps> = ({
     rows = 8,
     cols = 8,
+    // @ts-ignore
     mode,
     pads,
     vectors = [],

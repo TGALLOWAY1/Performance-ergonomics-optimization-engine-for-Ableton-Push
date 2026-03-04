@@ -109,7 +109,7 @@ export function calculateMovementCost(
   if (neutralHandCenters && hand) {
     const fingerKey = fingerTypeToKey(finger, hand);
     const neutralPad = neutralHandCenters.neutralPads[fingerKey];
-    
+
     if (neutralPad) {
       const neutralDistance = calculateDistance(
         to,
@@ -192,19 +192,19 @@ function getComfortableSpread(
 ): number {
   const keyA = fingerTypeToKey(fingerA, hand);
   const keyB = fingerTypeToKey(fingerB, hand);
-  
+
   const padA = neutralPads[keyA];
   const padB = neutralPads[keyB];
-  
+
   if (!padA || !padB) {
     return defaultSpread;
   }
-  
+
   const baseDist = calculateDistance(
     { row: padA.row, col: padA.col },
     { row: padB.row, col: padB.col }
   );
-  
+
   return baseDist + slack;
 }
 
@@ -251,7 +251,7 @@ export function calculateStretchPenalty(
     // Use maximum comfortable spread from neutral finger pairs
     const fingerTypes: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
     let maxComfortable = 0;
-    
+
     for (let i = 0; i < fingerTypes.length; i++) {
       for (let j = i + 1; j < fingerTypes.length; j++) {
         const spread = getComfortableSpread(
@@ -263,7 +263,7 @@ export function calculateStretchPenalty(
         maxComfortable = Math.max(maxComfortable, spread);
       }
     }
-    
+
     comfortableSpan = maxComfortable > 0 ? maxComfortable : constants.idealReach;
   } else {
     // Fallback to default idealReach
@@ -306,7 +306,7 @@ export function calculateStretchPenalty(
 export function calculateDriftPenalty(
   handState: HandState,
   handSide: 'left' | 'right',
-  constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS,
+  _constants: typeof DEFAULT_ENGINE_CONSTANTS = DEFAULT_ENGINE_CONSTANTS,
   neutralHandCenters?: NeutralHandCenters | null,
   homePos?: GridPosition,
   driftMultiplier: number = 0.5
@@ -321,12 +321,12 @@ export function calculateDriftPenalty(
 
   // Determine target position (neutral center or fallback homePos)
   let targetPos: GridPosition | null = null;
-  
+
   if (neutralHandCenters) {
-    const neutralCenter = handSide === 'left' 
-      ? neutralHandCenters.leftCenter 
+    const neutralCenter = handSide === 'left'
+      ? neutralHandCenters.leftCenter
       : neutralHandCenters.rightCenter;
-    
+
     if (neutralCenter) {
       targetPos = {
         row: neutralCenter.y,
@@ -334,12 +334,12 @@ export function calculateDriftPenalty(
       };
     }
   }
-  
+
   // Fallback to homePos if neutral center is not available
   if (!targetPos && homePos) {
     targetPos = homePos;
   }
-  
+
   // If no target position available, return 0 (graceful degradation)
   if (!targetPos) {
     return 0;
@@ -578,7 +578,7 @@ export function calculateAttractorCost(
 ): number {
   // Calculate distance between current and resting centroids
   const distance = fingerCoordinateDistance(current.centroid, resting.centroid);
-  
+
   // Attractor force: linear spring model
   // Cost increases linearly with distance from resting position
   return distance * stiffness;
@@ -620,27 +620,27 @@ export function calculateTransitionCost(
   if (timeDelta <= MIN_TIME_DELTA) {
     return 0;
   }
-  
+
   // Calculate the distance the centroid moved
   const distance = fingerCoordinateDistance(prev.centroid, curr.centroid);
-  
+
   // Handle edge case: no movement
   if (distance === 0) {
     return 0;
   }
-  
+
   // Calculate required speed
   const speed = distance / timeDelta;
-  
+
   // Physiological constraint: if speed exceeds maximum, movement is impossible
   if (speed > MAX_HAND_SPEED) {
     return Infinity;
   }
-  
+
   // Fitts's Law-inspired cost: base distance + speed penalty
   // This makes fast movements proportionally more expensive
   const speedPenalty = speed * SPEED_COST_WEIGHT;
-  
+
   return distance + speedPenalty;
 }
 
@@ -666,16 +666,16 @@ export function calculateGripStretchCost(
   neutralHandCenters?: NeutralHandCenters | null
 ): number {
   const fingerEntries = Object.entries(pose.fingers) as [FingerType, FingerCoordinate][];
-  
+
   // Need at least 2 fingers to calculate span
   if (fingerEntries.length < 2) {
     return 0;
   }
-  
+
   // Find maximum distance between any two fingers
   let maxDistance = 0;
   let maxPair: [FingerType, FingerType] | null = null;
-  
+
   for (let i = 0; i < fingerEntries.length; i++) {
     for (let j = i + 1; j < fingerEntries.length; j++) {
       const [fingerA, posA] = fingerEntries[i];
@@ -687,7 +687,7 @@ export function calculateGripStretchCost(
       }
     }
   }
-  
+
   // Determine comfortable span based on neutral pose or use default
   let comfortableSpan: number;
   if (neutralHandCenters && maxPair) {
@@ -703,20 +703,20 @@ export function calculateGripStretchCost(
   } else {
     comfortableSpan = idealSpan;
   }
-  
+
   // If within comfortable span, no penalty
   if (maxDistance <= comfortableSpan) {
     return 0;
   }
-  
+
   // Non-linear penalty for excessive spread
   const excessSpan = maxDistance - comfortableSpan;
   const maxExcess = maxSpan - comfortableSpan;
-  
+
   // Normalize and apply quadratic penalty
   const normalizedExcess = maxExcess > 0 ? Math.min(excessSpan / maxExcess, 1.0) : 1.0;
   const penalty = Math.pow(normalizedExcess, 2) * 10;
-  
+
   return penalty;
 }
 
@@ -744,15 +744,15 @@ export function calculateTotalGripCost(
 ): number {
   // Calculate individual cost components
   const transitionCost = calculateTransitionCost(prev, curr, timeDelta);
-  
+
   // If transition is impossible, return immediately
   if (transitionCost === Infinity) {
     return Infinity;
   }
-  
+
   const attractorCost = calculateAttractorCost(curr, resting, stiffness);
-  const stretchCost = calculateGripStretchCost(curr);
-  
+  const stretchCost = calculateGripStretchCost(curr, 'left');
+
   // Combine costs with equal weighting
   // Could be extended with configurable weights
   return transitionCost + attractorCost + stretchCost;
@@ -766,7 +766,7 @@ export function calculateTotalGripCost(
  */
 export function handStateToHandPose(handState: HandState): HandPose {
   const fingers: Partial<Record<FingerType, FingerCoordinate>> = {};
-  
+
   // Convert each placed finger
   const fingerTypes: FingerType[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
   for (const fingerType of fingerTypes) {
@@ -778,11 +778,11 @@ export function handStateToHandPose(handState: HandState): HandPose {
       };
     }
   }
-  
+
   // Calculate centroid from placed fingers
   const placedPositions = Object.values(fingers);
   let centroid: FingerCoordinate;
-  
+
   if (placedPositions.length > 0) {
     const sumX = placedPositions.reduce((sum, pos) => sum + pos.x, 0);
     const sumY = placedPositions.reduce((sum, pos) => sum + pos.y, 0);
@@ -800,7 +800,7 @@ export function handStateToHandPose(handState: HandState): HandPose {
     // Default to grid center
     centroid = { x: 3.5, y: 3.5 };
   }
-  
+
   return { centroid, fingers };
 }
 

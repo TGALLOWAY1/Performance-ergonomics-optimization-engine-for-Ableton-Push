@@ -8,7 +8,7 @@
  */
 
 import type { AnalyzedEvent, Transition, TransitionMetrics } from '../types/eventAnalysis';
-import { calculateGridDistance, type GridPosition } from './gridMath';
+import { calculateGridDistance } from './gridMath';
 import { parseCellKey } from '../types/layout';
 
 /**
@@ -31,16 +31,16 @@ import { parseCellKey } from '../types/layout';
 export function analyzeTransition(
   fromEvent: AnalyzedEvent,
   toEvent: AnalyzedEvent,
-  tempoBpm?: number
+  _tempoBpm?: number
 ): Transition {
   // Calculate time delta in milliseconds
   const timeDeltaSeconds = toEvent.timestamp - fromEvent.timestamp;
   const timeDeltaMs = timeDeltaSeconds * 1000;
-  
+
   // Calculate grid distance between events
   // For grouped events, compute average or max distance between matched pads
   let gridDistance = 0;
-  
+
   if (fromEvent.pads.length === 0 || toEvent.pads.length === 0) {
     // If either event has no pads, assume maximum distance (unplayable transition)
     gridDistance = Infinity;
@@ -60,7 +60,7 @@ export function analyzeTransition(
     }
     gridDistance = maxDistance;
   }
-  
+
   // Detect hand switch: check if any note in fromEvent uses a different hand than any note in toEvent
   // For simplicity, we check if there's overlap in hands used
   const fromHands = new Set(
@@ -73,13 +73,13 @@ export function analyzeTransition(
       .map((n) => n.debugEvent.assignedHand)
       .filter((h): h is 'left' | 'right' => h !== 'Unplayable')
   );
-  
+
   // Hand switch occurs if both events use hands but they don't overlap
-  const handSwitch = 
+  const handSwitch =
     fromHands.size > 0 &&
     toHands.size > 0 &&
     !Array.from(fromHands).some((h) => toHands.has(h));
-  
+
   // Detect finger change: check if same hand uses different fingers
   // For simplicity, we check if there's any finger change within the same hand
   let fingerChange = false;
@@ -99,7 +99,7 @@ export function analyzeTransition(
     }
     if (fingerChange) break;
   }
-  
+
   // Calculate speed pressure: higher when timeDeltaMs is small and distance is large
   // Formula: distance / (timeDeltaMs + epsilon) to avoid division by zero
   // Normalized to 0-1 range using a sigmoid-like function
@@ -108,7 +108,7 @@ export function analyzeTransition(
   if (timeDeltaMs > 0 && gridDistance !== Infinity) {
     // Raw speed: distance per millisecond
     const rawSpeed = gridDistance / (timeDeltaMs + epsilon);
-    
+
     // Normalize: typical fast transitions are 0.1-1.0 cells/ms
     // Use a sigmoid-like normalization: tanh(rawSpeed * 10) gives 0-1 range
     speedPressure = Math.min(Math.tanh(rawSpeed * 10), 1.0);
@@ -116,14 +116,14 @@ export function analyzeTransition(
     // Simultaneous events or unplayable transitions get maximum speed pressure
     speedPressure = 1.0;
   }
-  
+
   // Aggregate anatomical stretch score (use maximum from event metrics)
   // This represents the maximum stretch required during the transition
   const anatomicalStretchScore = Math.max(
     fromEvent.eventMetrics?.anatomicalStretchScore || 0,
     toEvent.eventMetrics?.anatomicalStretchScore || 0
   );
-  
+
   // Calculate composite difficulty score
   // Weighted combination of: speed pressure, stretch, hand switch, finger change, distance
   const compositeDifficultyScore = computeTransitionDifficulty(
@@ -133,7 +133,7 @@ export function analyzeTransition(
     fingerChange,
     gridDistance
   );
-  
+
   const metrics: TransitionMetrics = {
     timeDeltaMs,
     gridDistance: gridDistance === Infinity ? 999.0 : gridDistance, // Cap at 999 for display
@@ -143,7 +143,7 @@ export function analyzeTransition(
     anatomicalStretchScore,
     compositeDifficultyScore,
   };
-  
+
   // Note: fromIndex and toIndex will be set by analyzeAllTransitions
   return {
     fromIndex: -1, // Will be set by caller
@@ -180,13 +180,13 @@ function computeTransitionDifficulty(
 ): number {
   // Base score from speed and stretch (weighted 60% speed, 30% stretch)
   let baseScore = (speedPressure * 0.6) + (anatomicalStretchScore * 0.3);
-  
+
   // Distance factor (normalized, contributes 10%)
   // Normalize distance: max expected distance is ~11.3 (diagonal of 8x8 grid)
   const maxDistance = Math.sqrt(8 * 8 + 8 * 8); // ~11.31
   const normalizedDistance = Math.min(gridDistance / maxDistance, 1.0);
   baseScore += normalizedDistance * 0.1;
-  
+
   // Penalties for hand switch and finger change
   if (handSwitch) {
     baseScore += 0.15; // Hand switch adds 15% difficulty
@@ -194,7 +194,7 @@ function computeTransitionDifficulty(
   if (fingerChange) {
     baseScore += 0.1; // Finger change adds 10% difficulty
   }
-  
+
   // Clamp to 0-1 range
   return Math.min(Math.max(baseScore, 0.0), 1.0);
 }
@@ -216,23 +216,23 @@ export function analyzeAllTransitions(
   if (events.length < 2) {
     return []; // Need at least 2 events to create a transition
   }
-  
+
   const transitions: Transition[] = [];
-  
+
   // Pair consecutive events: (events[i], events[i+1])
   for (let i = 0; i < events.length - 1; i++) {
     const fromEvent = events[i];
     const toEvent = events[i + 1];
-    
+
     const transition = analyzeTransition(fromEvent, toEvent, tempoBpm);
-    
+
     // Set indices
     transition.fromIndex = i;
     transition.toIndex = i + 1;
-    
+
     transitions.push(transition);
   }
-  
+
   return transitions;
 }
 

@@ -16,9 +16,9 @@ import type {
   PadKey,
   HandType,
 } from '../types/eventAnalysis';
-import type { FingerType } from './models';
-import { cellKey, parseCellKey } from '../types/layout';
-import { calculateGridDistance, type GridPosition } from './gridMath';
+
+import { parseCellKey } from '../types/layout';
+import { calculateGridDistance } from './gridMath';
 
 /**
  * Input data for building an onion skin model.
@@ -65,16 +65,16 @@ function computePadSets(
 } {
   const currentPads = getPadKeysForEvent(currentEvent);
   const nextPads = nextEvent ? getPadKeysForEvent(nextEvent) : [];
-  
+
   // Shared pads: pads that appear in both current and next events
   const sharedPads = currentPads.filter(pad => nextPads.includes(pad));
-  
+
   // Current-only pads: pads in current but not in next
   const currentOnlyPads = currentPads.filter(pad => !nextPads.includes(pad));
-  
+
   // Next-only pads: pads in next but not in current
   const nextOnlyPads = nextPads.filter(pad => !currentPads.includes(pad));
-  
+
   return {
     sharedPads,
     currentOnlyPads,
@@ -97,51 +97,51 @@ function createFingerMoves(
   nextEvent: AnalyzedEvent | null | undefined
 ): FingerMove[] {
   const moves: FingerMove[] = [];
-  
+
   // If no next event, no movement to track
   if (!nextEvent) {
     return moves;
   }
-  
+
   // For each note in the next event, try to find a matching note in the current event
   // Match by (hand, finger) pair
   for (const nextNote of nextEvent.notes) {
     const nextHand = nextNote.debugEvent.assignedHand;
     const nextFinger = nextNote.debugEvent.finger;
     const toPad = nextNote.pad;
-    
+
     // Skip unplayable notes
     if (nextHand === 'Unplayable' || !nextFinger) {
       continue;
     }
-    
+
     // Find matching note in current event (same hand and finger)
     const matchingCurrentNote = currentEvent.notes.find(
       (n) =>
         n.debugEvent.assignedHand === nextHand &&
         n.debugEvent.finger === nextFinger
     );
-    
+
     const fromPad = matchingCurrentNote ? matchingCurrentNote.pad : null;
-    
+
     // Check if it's a hold (same pad)
     const isHold = fromPad !== null && toPad !== null && fromPad === toPad;
-    
+
     // Calculate distance if both pads exist
     let rawDistance: number | undefined;
     let isImpossible = false;
-    
+
     if (fromPad && toPad) {
       const fromPos = parseCellKey(fromPad);
       const toPos = parseCellKey(toPad);
-      
+
       if (fromPos && toPos) {
         rawDistance = calculateGridDistance(fromPos, toPos);
         // Mark as impossible if distance exceeds max reach
         isImpossible = rawDistance > MAX_REACH_DISTANCE;
       }
     }
-    
+
     moves.push({
       finger: nextFinger,
       hand: nextHand as HandType,
@@ -154,7 +154,7 @@ function createFingerMoves(
       anatomicalStretchScore: nextEvent.eventMetrics?.anatomicalStretchScore,
     });
   }
-  
+
   return moves;
 }
 
@@ -196,24 +196,24 @@ export function buildOnionSkinModel(
   input: OnionSkinInput,
   focusedEventIndex: number
 ): OnionSkinModel | null {
-  const { events, transitions } = input;
-  
+  const { events } = input;
+
   // Validate index
   if (focusedEventIndex < 0 || focusedEventIndex >= events.length) {
     return null;
   }
-  
+
   // Get current, previous, and next events
   const currentEvent = events[focusedEventIndex];
   const previousEvent = focusedEventIndex > 0 ? events[focusedEventIndex - 1] : null;
   const nextEvent = focusedEventIndex < events.length - 1 ? events[focusedEventIndex + 1] : null;
-  
+
   // Compute pad sets (shared, current-only, next-only)
   const { sharedPads, currentOnlyPads, nextOnlyPads } = computePadSets(currentEvent, nextEvent);
-  
+
   // Build finger moves between current and next events
   const fingerMoves = buildFingerMoves(currentEvent, nextEvent);
-  
+
   return {
     currentEventIndex: focusedEventIndex,
     currentEvent,

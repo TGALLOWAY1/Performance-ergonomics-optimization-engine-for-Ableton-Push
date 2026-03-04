@@ -11,7 +11,7 @@
 
 import type { EngineResult, EngineDebugEvent } from './core';
 import type { AnalyzedEvent, EventNote } from '../types/eventAnalysis';
-import type { FingerType } from './models';
+// import type { FingerType } from './models';
 import { calculateGridDistance, type GridPosition } from './gridMath';
 import { cellKey, parseCellKey } from '../types/layout';
 
@@ -56,7 +56,7 @@ export function createDefaultAnatomicalStretchTable(): AnatomicalStretchTable {
     'L_INDEX-L_RING': 1.5,
     'L_INDEX-L_PINKY': 2.2,
     'L_MIDDLE-L_PINKY': 2.0,
-    
+
     // Right hand finger pairs (same values, mirrored)
     'R_THUMB-R_INDEX': 0.5,
     'R_INDEX-R_MIDDLE': 0.8,
@@ -108,7 +108,7 @@ function groupDebugEventsIntoMoments(
 
   const flushGroup = () => {
     if (!currentGroup.length || currentStartTime == null) return;
-    
+
     const eventIndex = moments.length;
     const notes: EventNote[] = currentGroup
       .map((ev) => {
@@ -131,7 +131,7 @@ function groupDebugEventsIntoMoments(
 
     // Compute event-level metrics
     const polyphony = notes.length;
-    
+
     // Calculate spread if we have multiple pads
     let spreadX: number | undefined;
     let spreadY: number | undefined;
@@ -139,7 +139,7 @@ function groupDebugEventsIntoMoments(
       const positions = pads
         .map((pad) => parseCellKey(pad))
         .filter((pos): pos is { row: number; col: number } => pos !== null);
-      
+
       if (positions.length > 1) {
         const cols = positions.map((p) => p.col);
         const rows = positions.map((p) => p.row);
@@ -211,11 +211,11 @@ function groupDebugEventsIntoMoments(
 export function computeRawDistance(fromPad: string, toPad: string): number {
   const fromPos = parseCellKey(fromPad);
   const toPos = parseCellKey(toPad);
-  
+
   if (!fromPos || !toPos) {
     return Infinity;
   }
-  
+
   return calculateGridDistance(fromPos, toPos);
 }
 
@@ -253,13 +253,13 @@ function getHomePosition(hand: 'left' | 'right'): GridPosition {
  */
 export function computeEventAnatomicalStretchScore(
   event: EngineDebugEvent,
-  stretchTable: AnatomicalStretchTable = createDefaultAnatomicalStretchTable()
+  _stretchTable: AnatomicalStretchTable = createDefaultAnatomicalStretchTable()
 ): number {
   // If event is unplayable, return maximum stretch score
   if (event.assignedHand === 'Unplayable' || !event.finger || event.row === undefined || event.col === undefined) {
     return 1.0;
   }
-  
+
   // If we have stretch penalty from cost breakdown, use it as a base
   // The engine's stretch penalty is already calculated based on hand span
   if (event.costBreakdown?.stretch !== undefined) {
@@ -268,23 +268,23 @@ export function computeEventAnatomicalStretchScore(
     const normalizedStretch = Math.min(event.costBreakdown.stretch / 10.0, 1.0);
     return normalizedStretch;
   }
-  
+
   // Fallback: Calculate distance from home position
   // This is a simplified approximation for v1
   const hand = event.assignedHand;
-  if (hand === 'Unplayable') {
-    return 1.0;
-  }
-  
+  // if (hand === 'Unplayable') {
+  //   return 1.0;
+  // }
+
   const homePos = getHomePosition(hand);
   const eventPos: GridPosition = { row: event.row, col: event.col };
   const distanceFromHome = calculateGridDistance(homePos, eventPos);
-  
+
   // Normalize: max expected stretch is ~4 grid cells (maxReach from engine constants)
   // Distance beyond 4 cells is clamped to 1.0
   const maxStretch = 4.0;
   const normalizedDistance = Math.min(distanceFromHome / maxStretch, 1.0);
-  
+
   return normalizedDistance;
 }
 
@@ -316,7 +316,7 @@ export function computeCompositeDifficultyScore(
   if (event.difficulty === 'Unplayable' || event.assignedHand === 'Unplayable') {
     return 1.0;
   }
-  
+
   // Base difficulty from engine's difficulty classification
   let baseScore: number;
   switch (event.difficulty) {
@@ -332,7 +332,7 @@ export function computeCompositeDifficultyScore(
     default:
       baseScore = 0.5; // Fallback
   }
-  
+
   // Adjust based on cost (if available)
   // Engine cost typically ranges 0-100+ (Infinity for unplayable)
   // Normalize cost contribution (0-0.2 range)
@@ -342,10 +342,10 @@ export function computeCompositeDifficultyScore(
     const normalizedCost = Math.min(event.cost / 20.0, 1.0);
     costContribution = normalizedCost * 0.2; // Max 0.2 contribution
   }
-  
+
   // Adjust based on anatomical stretch (0-0.1 range)
   const stretchContribution = anatomicalStretchScore * 0.1; // Max 0.1 contribution
-  
+
   // Adjust based on cost breakdown components if available
   let breakdownContribution = 0.0;
   if (event.costBreakdown) {
@@ -357,10 +357,10 @@ export function computeCompositeDifficultyScore(
     const crossoverFactor = Math.min(breakdown.crossover / 20.0, 1.0) * 0.02;
     breakdownContribution = movementFactor + fatigueFactor + crossoverFactor;
   }
-  
+
   // Combine all factors
   const compositeScore = baseScore + costContribution + stretchContribution + breakdownContribution;
-  
+
   // Clamp to 0-1 range
   return Math.min(Math.max(compositeScore, 0.0), 1.0);
 }
@@ -380,14 +380,14 @@ export function computeCompositeDifficultyScore(
  */
 export function analyzeEvents(
   engineResult: EngineResult,
-  stretchTable: AnatomicalStretchTable = createDefaultAnatomicalStretchTable()
+  _stretchTable: AnatomicalStretchTable = createDefaultAnatomicalStretchTable()
 ): AnalyzedEvent[] {
   // First, group events by timestamp into moments
   const moments = groupDebugEventsIntoMoments(engineResult.debugEvents);
-  
+
   // Note: Per-event metrics are already computed in groupDebugEventsIntoMoments
   // The stretchTable parameter is used within computeEventAnatomicalStretchScore
-  
+
   return moments;
 }
 
