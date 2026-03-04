@@ -1,8 +1,7 @@
 /**
  * Project persistence utilities for saving and loading project state.
  */
-
-import { ProjectState } from '../types/projectState';
+import { ProjectState, DEFAULT_ENGINE_CONFIGURATION, HAND_SIZE_PRESETS, HandSizePreset } from '../types/projectState';
 
 /**
  * Saves the full project state to a JSON file.
@@ -31,6 +30,15 @@ export function validateProjectState(parsed: any): ProjectState {
     throw new Error('Invalid project state data structure.');
   }
 
+  let engineConfig = parsed.engineConfiguration || DEFAULT_ENGINE_CONFIGURATION;
+
+  // Migrate legacy string-based restingPose
+  if (typeof engineConfig.restingPose === 'string') {
+    const presetKey = engineConfig.restingPose as HandSizePreset;
+    const preset = HAND_SIZE_PRESETS[presetKey] || HAND_SIZE_PRESETS.standard;
+    engineConfig = { ...engineConfig, restingPose: preset };
+  }
+
   return {
     layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
     sectionMaps: Array.isArray(parsed.sectionMaps) ? parsed.sectionMaps : [],
@@ -43,7 +51,7 @@ export function validateProjectState(parsed: any): ProjectState {
     instrumentConfig: parsed.instrumentConfig || (Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs[0] : null) || null,
     ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : [],
     manualAssignments: parsed.manualAssignments || {},
-    engineConfiguration: parsed.engineConfiguration || { beamWidth: 50, stiffness: 1.0, restingPose: 'standard' },
+    engineConfiguration: engineConfig,
     solverResults: parsed.solverResults || {},
     activeSolverId: parsed.activeSolverId || undefined,
   };
