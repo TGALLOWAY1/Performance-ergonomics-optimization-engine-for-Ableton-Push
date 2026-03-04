@@ -33,7 +33,6 @@ export const Workbench: React.FC = () => {
     optimizeLayout,
     runSolver,
     engineResult,
-    setEngineResult,
   } = useProject();
 
   const [searchParams] = useSearchParams();
@@ -500,113 +499,7 @@ export const Workbench: React.FC = () => {
   //   };
   // }, [activeLayout?.id, activeLayout?.performance.events.length, activeSection?.id, handleProjectLoad]);
 
-  // Reactive Solver Loop: Automatically run engine when layout changes
-  // Watches: activeMapping, activeLayout.performance, activeSection.instrumentConfig, ignoredNoteNumbers
-  useEffect(() => {
-    // Get filtered performance (excludes ignored notes)
-    const filteredPerformance = getActivePerformance(projectState);
 
-    // Early exit conditions
-    // Debounce engine execution (300ms) to avoid crashing browser during rapid drag operations
-    const timer = setTimeout(() => {
-      try {
-        // Run solver with project instrument config and active mapping
-        if (!filteredPerformance) return;
-
-        // Get manual assignments for current layout
-        const currentLayoutId = projectState.activeLayoutId;
-        const manualAssignments = currentLayoutId && projectState.manualAssignments
-          ? projectState.manualAssignments[currentLayoutId]
-          : undefined;
-
-        // Convert string keys to numbers for the engine
-        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-        if (manualAssignments) {
-          Object.entries(manualAssignments).forEach(([key, value]) => {
-            parsedAssignments[parseInt(key, 10)] = value;
-          });
-        }
-
-        // Create solver with instrument config, grid mapping, and engine configuration
-        const solver = new BiomechanicalSolver(
-          projectState.instrumentConfig,
-          activeMapping,
-          undefined, // Use default engine constants
-          projectState.engineConfiguration
-        );
-        const result = solver.solve(filteredPerformance, parsedAssignments);
-
-        // DEBUG: Log engine result to verify finger assignments
-        console.log('[Workbench] Engine result generated:', {
-          score: result.score,
-          hardCount: result.hardCount,
-          unplayableCount: result.unplayableCount,
-          debugEventsCount: result.debugEvents.length,
-          fingerUsageStats: result.fingerUsageStats,
-          fatigueMap: result.fatigueMap,
-          averageDrift: result.averageDrift,
-          sampleDebugEvents: result.debugEvents.slice(0, 5), // First 5 events
-          playableEventsCount: result.debugEvents.filter(e => e.assignedHand !== 'Unplayable').length,
-        });
-
-        // DIAGNOSTIC: If all events are unplayable, log why
-        if (result.unplayableCount === result.debugEvents.length && result.debugEvents.length > 0) {
-          console.warn('⚠️ [Workbench] ALL events are Unplayable! This means:');
-          console.warn('  1. No sounds have been assigned to grid cells, OR');
-          console.warn('  2. Grid mapping doesn\'t match MIDI note numbers, OR');
-          console.warn('  3. Instrument config is incorrect');
-
-          // Detailed diagnostics
-          console.group('📊 Diagnostic Information:');
-          console.log('Active mapping cells:', Object.keys(activeMapping?.cells || {}).length);
-          console.log('Sample event note numbers:', result.debugEvents.slice(0, 5).map(e => e.noteNumber));
-
-          // Show what's in the grid mapping
-          if (activeMapping) {
-            const gridNoteNumbers = Object.values(activeMapping.cells).map(c => c.originalMidiNote).filter(n => n !== null);
-            console.log('Grid has notes:', gridNoteNumbers);
-            console.log('Grid cells:', Object.entries(activeMapping.cells).slice(0, 5).map(([key, sound]) => ({
-              cellKey: key,
-              soundName: sound.name,
-              midiNote: sound.originalMidiNote,
-            })));
-          }
-
-          console.log('Instrument config:', {
-            name: projectState.instrumentConfig.name,
-            bottomLeftNote: projectState.instrumentConfig.bottomLeftNote,
-            layoutMode: projectState.instrumentConfig.layoutMode,
-          });
-
-          console.groupEnd();
-        }
-        setEngineResult(result);
-
-        // Update scoreCache in the mapping for quick reference
-        setProjectState(prevState => ({
-          ...prevState,
-          mappings: prevState.mappings.map(m =>
-            activeMapping && m.id === activeMapping.id
-              ? { ...m, scoreCache: result.score }
-              : m
-          ),
-        }));
-      } catch (err) {
-        console.error('[Workbench] Engine execution failed:', err);
-        setEngineResult(null);
-      }
-    }, 300); // 300ms debounce
-
-    return () => clearTimeout(timer);
-  }, [
-    activeMapping?.id,
-    activeMapping?.cells, // Watch for cell changes (pad swaps/assignments)
-    activeLayout?.performance.events, // Watch for performance changes
-    projectState.instrumentConfig, // Watch for config changes
-    projectState.ignoredNoteNumbers, // Watch for voice visibility changes
-    projectState.engineConfiguration, // Watch for engine configuration changes
-    projectState, // Include full state for getActivePerformance selector
-  ]);
 
   const handleSaveProject = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectState, null, 2));

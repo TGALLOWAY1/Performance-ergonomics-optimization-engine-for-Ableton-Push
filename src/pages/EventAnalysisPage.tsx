@@ -11,14 +11,12 @@ import { useProject } from '../context/ProjectContext';
 import { EventAnalysisPanel } from '../workbench/EventAnalysisPanel';
 import { getActivePerformance } from '../utils/performanceSelectors';
 import { songService } from '../services/SongService';
-import { BiomechanicalSolver } from '../engine/core';
 import { FingerType } from '../engine/models';
 
 export const EventAnalysisPage: React.FC = () => {
   const {
     projectState,
     engineResult,
-    setEngineResult,
     setProjectState,
   } = useProject();
 
@@ -26,7 +24,6 @@ export const EventAnalysisPage: React.FC = () => {
   const songId = searchParams.get('songId');
   // @ts-ignore
   const [songName, setSongName] = useState<string | null>(null);
-  const [hasLoadedSong, setHasLoadedSong] = useState(false);
 
   // Get active layout and performance
   // @ts-ignore
@@ -37,16 +34,11 @@ export const EventAnalysisPage: React.FC = () => {
 
   const performance = useMemo(() => getActivePerformance(projectState), [projectState]);
 
-  // Get active mapping for engine
-  const activeMapping = useMemo(() =>
-    projectState.mappings.length > 0 ? projectState.mappings[0] : null,
-    [projectState.mappings]
-  );
+
 
   // Load song state when navigating with songId (same logic as Workbench/Timeline)
   useEffect(() => {
     if (!songId) {
-      setHasLoadedSong(true);
       return;
     }
 
@@ -80,62 +72,9 @@ export const EventAnalysisPage: React.FC = () => {
     } else {
       console.log('[EventAnalysisPage] Using existing data in context');
     }
-
-    setHasLoadedSong(true);
   }, [songId, setProjectState]);
 
-  // Run engine when layout/mapping changes (similar to Workbench)
-  useEffect(() => {
-    if (!performance || !activeMapping || !hasLoadedSong) {
-      return;
-    }
 
-    // Debounce engine execution (300ms)
-    const timer = setTimeout(() => {
-      try {
-        // Get manual assignments for current layout
-        const currentLayoutId = projectState.activeLayoutId;
-        const manualAssignments = currentLayoutId && projectState.manualAssignments
-          ? projectState.manualAssignments[currentLayoutId]
-          : undefined;
-
-        // Convert string keys to numbers for the engine
-        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-        if (manualAssignments) {
-          Object.entries(manualAssignments).forEach(([key, value]) => {
-            parsedAssignments[parseInt(key, 10)] = value;
-          });
-        }
-
-        const solver = new BiomechanicalSolver(projectState.instrumentConfig, activeMapping);
-        const result = solver.solve(performance, parsedAssignments);
-
-        console.log('[EventAnalysisPage] Engine result generated:', {
-          score: result.score,
-          hardCount: result.hardCount,
-          unplayableCount: result.unplayableCount,
-          debugEventsCount: result.debugEvents.length,
-        });
-
-        setEngineResult(result);
-      } catch (err) {
-        console.error('[EventAnalysisPage] Engine execution failed:', err);
-        setEngineResult(null);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [
-    activeMapping?.id,
-    activeMapping?.cells,
-    performance?.events,
-    projectState.instrumentConfig,
-    projectState.ignoredNoteNumbers,
-    projectState,
-    hasLoadedSong,
-    setEngineResult,
-    setEngineResult,
-  ]);
 
   // Handler for manual assignment changes (from Event Log)
   const handleAssignmentChange = React.useCallback((index: number, hand: 'left' | 'right', finger: FingerType) => {

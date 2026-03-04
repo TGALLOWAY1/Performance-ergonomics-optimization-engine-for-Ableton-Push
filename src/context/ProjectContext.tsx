@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode, useMemo } from 'react';
+import React, { createContext, useContext, ReactNode, useMemo } from 'react';
 import { ProjectState, DEFAULT_ENGINE_CONFIGURATION } from '../types/projectState';
 import { InstrumentConfig } from '../types/performance';
 import { useProjectHistory } from '../hooks/useProjectHistory';
@@ -54,10 +54,9 @@ interface ProjectContextType {
      */
     engineResult: EngineResult | null;
     /** 
-     * @deprecated Use runSolver() instead. This is kept for backwards compatibility.
-     * Directly sets the engine result, but doesn't store it in the results map.
+     * @deprecated Removed in favor of running explicit solvers via runSolver()
      */
-    setEngineResult: (result: EngineResult | null) => void;
+    setEngineResult?: never;
     /**
      * Runs a solver and stores the result in the solverResults map.
      * The result is stored under the solverType key (e.g., 'beam', 'genetic').
@@ -111,8 +110,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         canRedo,
     } = useProjectHistory(INITIAL_PROJECT_STATE);
 
-    // Legacy state for backwards compatibility
-    const [legacyEngineResult, setLegacyEngineResult] = useState<EngineResult | null>(null);
+
 
     // Derive active result from solverResults map
     const activeResult = useMemo(() => {
@@ -123,9 +121,8 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             return solverResults[activeSolverId];
         }
 
-        // Fallback to legacy state for backwards compatibility
-        return legacyEngineResult;
-    }, [projectState.solverResults, projectState.activeSolverId, legacyEngineResult]);
+        return null;
+    }, [projectState.solverResults, projectState.activeSolverId]);
 
     /**
      * Runs a solver and stores the result in the solverResults map.
@@ -392,13 +389,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
     };
 
-    /**
-     * Legacy setEngineResult for backwards compatibility.
-     * This directly sets the legacy state but doesn't update the results map.
-     */
-    const setEngineResult = (result: EngineResult | null): void => {
-        setLegacyEngineResult(result);
-    };
+
 
     return (
         <ProjectContext.Provider value={{
@@ -409,7 +400,8 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             canUndo,
             canRedo,
             engineResult: activeResult,
-            setEngineResult,
+            // @ts-ignore: Deprecated but kept to prevent TS errors in unmodified consumers
+            setEngineResult: () => { },
             runSolver,
             setActiveSolverId,
             getSolverResult,
