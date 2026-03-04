@@ -699,41 +699,7 @@ export const Workbench: React.FC = () => {
     }
   };
 
-  // @ts-ignore
-  const handleAssignSounds = (assignments: Record<string, Voice>) => {
-    if (!activeMapping) {
-      // Create a new mapping with all assignments
-      const newMapping: GridMapping = {
-        id: `mapping-${Date.now()}`,
-        name: 'New Mapping',
-        cells: assignments,
-        fingerConstraints: {},
-        scoreCache: null,
-        notes: '',
-      };
-      setProjectState({
-        ...projectState,
-        mappings: [...projectState.mappings, newMapping],
-      });
-      // Set activeMappingId immediately to ensure it's available
-      setActiveMappingId(newMapping.id);
-    } else {
-      // Update existing mapping with all assignments
-      setProjectState({
-        ...projectState,
-        mappings: projectState.mappings.map(m => {
-          if (m.id !== activeMapping.id) return m;
-          return {
-            ...m,
-            cells: {
-              ...m.cells,
-              ...assignments,
-            },
-          };
-        }),
-      });
-    }
-  };
+
 
   const handleUpdateMapping = (updates: Partial<GridMapping>) => {
     if (!activeMapping) return;
@@ -1141,48 +1107,7 @@ export const Workbench: React.FC = () => {
 
 
 
-  // ============================================================================
-  // EXPLICIT LAYOUT CONTROL: Save Layout Version
-  // ============================================================================
-  // Saves the current layout as a new version (snapshot).
-  // This is for versioning, not basic persistence (autosave handles that).
-  // ============================================================================
-  const handleSaveLayoutVersion = useCallback(() => {
-    if (!activeMapping) {
-      alert('No active mapping to save.');
-      return;
-    }
 
-    if (Object.keys(activeMapping.cells).length === 0) {
-      alert('Cannot save an empty layout. Please assign some sounds first.');
-      return;
-    }
-
-    // Increment version number
-    const currentVersion = activeMapping.version || 0;
-    const newVersion = currentVersion + 1;
-
-    console.log(`[Workbench] Saving layout version ${newVersion}...`);
-
-    // Update the mapping with new version info
-    setProjectState(prevState => ({
-      ...prevState,
-      mappings: prevState.mappings.map(m =>
-        activeMapping && m.id === activeMapping.id
-          ? {
-            ...m,
-            version: newVersion,
-            savedAt: new Date().toISOString(),
-          }
-          : m
-      ),
-    }));
-    // The autosave mechanism will persist this change automatically
-
-    alert(`Layout saved as version ${newVersion}.\n\nAutosave will persist this to storage.`);
-
-    alert(`Layout version ${newVersion} saved successfully to local storage (auto-save).`);
-  }, [activeMapping, setProjectState]);
 
 
 

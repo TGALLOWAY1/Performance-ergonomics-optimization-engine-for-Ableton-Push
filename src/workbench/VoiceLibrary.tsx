@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Voice, GridMapping, parseCellKey } from '../types/layout';
-import { InstrumentConfig } from '../types/performance';
 import { getRawActivePerformance } from '../utils/performanceSelectors';
 import { ProjectState } from '../types/projectState';
 
@@ -313,7 +312,6 @@ interface VoiceLibraryProps {
     parkedSounds: Voice[];
     activeMapping: GridMapping | null;
     projectState: ProjectState;
-    instrumentConfig: InstrumentConfig | null;
     selectedSoundId: string | null;
     selectedCellKey: string | null;
     ignoredNoteNumbers: number[];
@@ -325,7 +323,6 @@ interface VoiceLibraryProps {
     onDeleteSound: (id: string) => void;
     onToggleVoiceVisibility: (note: number) => void;
     handleDestructiveDelete: (note: number) => void;
-    handleAutoAssignRandom: () => void;
     handleClearStaging: () => void;
 }
 
@@ -333,7 +330,6 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
     parkedSounds,
     activeMapping,
     projectState,
-    instrumentConfig,
     selectedSoundId,
     selectedCellKey,
     ignoredNoteNumbers,
@@ -345,7 +341,6 @@ export const VoiceLibrary: React.FC<VoiceLibraryProps> = ({
     onDeleteSound,
     onToggleVoiceVisibility,
     handleDestructiveDelete,
-    handleAutoAssignRandom,
     handleClearStaging,
 }) => {
     const [activeTab, setActiveTab] = useState<'all' | 'unassigned' | 'placed'>('unassigned');

@@ -73,7 +73,7 @@ export const Dashboard: React.FC = () => {
         refreshSongs();
     };
 
-    const handleDeleteSong = (id: string, title: string) => {
+    const handleDeleteSong = (id: string, _title: string) => {
         // if (window.confirm(`Are you sure you want to delete "${title}"? This action cannot be undone.`)) {
         songService.deleteSong(id);
         refreshSongs();

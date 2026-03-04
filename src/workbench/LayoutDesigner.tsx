@@ -37,7 +37,6 @@ const fingerTypeToId = (fingerType: FingerType | null): FingerID | null => {
 };
 import { InstrumentConfig } from '../types/performance';
 import { GridMapService } from '../engine/gridMapService';
-import { mapToQuadrants } from '../utils/autoLayout';
 import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { EngineResult } from '../engine/core';
 import { VoiceLibrary } from './VoiceLibrary';
@@ -787,107 +786,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     }
   };
 
-  // ============================================================================
-  // EXPLICIT LAYOUT CONTROL: Clear Grid
-  // ============================================================================
-  // Removes all pad assignments and moves sounds back to staging.
-  // Sets layoutMode to 'none'.
-  // ============================================================================
-  const handleClearGrid = () => {
-    if (!activeMapping) {
-      return; // Nothing to clear
-    }
 
-    if (window.confirm('Are you sure you want to clear all sounds from the grid? All sounds will be moved back to staging.')) {
-      // Collect all sounds from the grid
-      const soundsToMove = Object.values(activeMapping.cells);
 
-      // Add sounds back to parkedSounds if they're not already there
-      soundsToMove.forEach(sound => {
-        const isInParked = parkedSounds.some(s => s.id === sound.id);
-        if (!isInParked) {
-          onAddSound(sound);
-        }
-      });
-
-      // Clear the grid and set layoutMode to 'none'
-      onUpdateMapping({
-        cells: {},
-        layoutMode: 'none',
-      });
-      setSelectedCellKey(null);
-      setReachabilityConfig(null);
-
-      console.log('[LayoutDesigner] Clear Grid: all sounds moved to staging. Layout mode set to "none".');
-    }
-  };
-
-  // Note: Save/Load Project functionality moved to main Workbench header to avoid duplication
-
-  // Keyboard shortcuts
-  // Note: Ctrl+S keyboard shortcut removed - Save Project is handled by main Workbench header
-
-  // Handle auto-layout to quadrants
-  // @ts-ignore
-  const handleMapToQuadrants = () => {
-    // If callback provided, use it (for external control from Workbench settings)
-    if (onRequestMapToQuadrants) {
-      onRequestMapToQuadrants();
-      return;
-    }
-    if (!instrumentConfig) {
-      alert('No instrument configuration available. Cannot perform auto-layout.');
-      return;
-    }
-
-    // Collect all sounds that have originalMidiNote set
-    // Use derived lists to avoid duplicates
-    const soundsWithNotes: Voice[] = [
-      ...placedAssets.filter(s => s.originalMidiNote !== null),
-      ...stagingAssets.filter(s => s.originalMidiNote !== null),
-    ];
-
-    if (soundsWithNotes.length === 0) {
-      alert('No sounds with MIDI note information found. Sounds need originalMidiNote to be auto-laid out.');
-      return;
-    }
-
-    // Map sounds to quadrants
-    const assignments = mapToQuadrants(soundsWithNotes, instrumentConfig.bottomLeftNote);
-
-    if (Object.keys(assignments).length === 0) {
-      alert('No sounds could be mapped to quadrants. Check that sounds have valid MIDI note numbers.');
-      return;
-    }
-
-    // If no active mapping exists, create one by assigning the first sound
-    // This will trigger mapping creation, then we can update it
-    if (!activeMapping) {
-      const firstAssignment = Object.entries(assignments)[0];
-      if (firstAssignment) {
-        const [cellKey, sound] = firstAssignment;
-        onAssignSound(cellKey, sound);
-
-        // Wait a moment for the mapping to be created, then update with all assignments
-        setTimeout(() => {
-          onUpdateMapping({
-            cells: assignments,
-            name: 'Quadrant Layout',
-            notes: 'Auto-laid out to 4x4 quadrants',
-          });
-        }, 10);
-        return;
-      }
-    }
-
-    // Replace all cells with the new quadrant layout (this clears old cells and applies new ones)
-    onUpdateMapping({
-      cells: assignments,
-      notes: activeMapping?.notes
-        ? `${activeMapping.notes}\n\nAuto-laid out to 4x4 quadrants`
-        : 'Auto-laid out to 4x4 quadrants',
-    });
-  };
 
   // Handle cell click - selects the sound asset at that coordinate
   const handleCellClick = (row: number, col: number) => {
@@ -1010,70 +910,7 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     });
   };
 
-  // ============================================================================
-  // EXPLICIT LAYOUT CONTROL: Assign Manually (Random Placement)
-  // ============================================================================
-  // Maps all unassigned Voices to empty Pads using random, non-colliding placement.
-  // Does NOT move already-assigned pads. Sets layoutMode to 'random'.
-  // ============================================================================
-  const handleAutoAssignRandom = () => {
-    if (!activeMapping || !instrumentConfig) {
-      alert('No active mapping or instrument config available. Please create a mapping first.');
-      return;
-    }
 
-    // Find all unassigned Voices (in staging, not yet assigned to a Pad)
-    const unassignedVoices = stagingAssets;
-
-    if (unassignedVoices.length === 0) {
-      alert('No unassigned Voices found. All Voices are already assigned to Pads.');
-      return;
-    }
-
-    // Find all empty Pads (8x8 grid positions without a Voice assignment)
-    const emptyPads: Array<{ row: number; col: number; key: string }> = [];
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const key = cellKey(row, col);
-        if (!activeMapping.cells[key]) {
-          emptyPads.push({ row, col, key });
-        }
-      }
-    }
-
-    if (emptyPads.length === 0) {
-      alert('No empty Pads available. All 64 Pads are already assigned.');
-      return;
-    }
-
-    // Randomly shuffle both arrays
-    const shuffledVoices = [...unassignedVoices].sort(() => Math.random() - 0.5);
-    const shuffledPads = [...emptyPads].sort(() => Math.random() - 0.5);
-
-    // Map voices to pads (up to the minimum of available voices and empty pads)
-    const assignments: Record<string, Voice> = {};
-    const maxAssignments = Math.min(shuffledVoices.length, shuffledPads.length);
-
-    for (let i = 0; i < maxAssignments; i++) {
-      assignments[shuffledPads[i].key] = shuffledVoices[i];
-    }
-
-    // Batch assign all at once and update layoutMode to 'random'
-    if (Object.keys(assignments).length > 0) {
-      // Merge new assignments with existing cells and update layoutMode
-      const mergedCells = {
-        ...activeMapping.cells,
-        ...assignments,
-      };
-
-      onUpdateMapping({
-        cells: mergedCells,
-        layoutMode: 'random',
-      });
-
-      console.log(`[LayoutDesigner] Assign Manually: placed ${Object.keys(assignments).length} voices randomly. Layout mode set to 'random'.`);
-    }
-  };
 
   // Update reachability config when activeMapping changes (in case anchor cell was moved)
   useEffect(() => {
@@ -1150,7 +987,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               parkedSounds={stagingAssets}
               activeMapping={activeMapping}
               projectState={projectState}
-              instrumentConfig={instrumentConfig}
               selectedSoundId={selectedSoundId}
               selectedCellKey={selectedCellKey}
               ignoredNoteNumbers={ignoredNoteNumbers}
@@ -1168,7 +1004,6 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
               onDeleteSound={(id) => onDeleteSound?.(id)}
               onToggleVoiceVisibility={handleToggleVoiceVisibility}
               handleDestructiveDelete={handleDestructiveDelete}
-              handleAutoAssignRandom={handleAutoAssignRandom}
               handleClearStaging={handleClearStaging}
             />
           </div>
