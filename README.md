@@ -5,15 +5,12 @@ Analyzes MIDI, evaluates playability, and generates musician-adaptive pad layout
 
 ### Workbench (Layout Editor)
 Interactive grid to assign sounds, run the ergonomic optimization solver, and visualize the generated finger assignments.
-![Workbench Editor](./public/assets/docs/workbench.png)
 
 ### Event Analysis
 Review the physical difficulty of the pad layout, with detailed transition metrics, hand balance constraint tracking, and ergonomic scores.
-![Event Analysis](./public/assets/docs/analysis.png)
 
 ### Timeline View
 Review the generated layout chronologically, analyzing the sequence of grip transitions over the performance.
-![Timeline View](./public/assets/docs/timeline.png)
 
 ### Architecture 
 <img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/51c6b719-9db4-4126-b5ff-54f4e449e1d4" />

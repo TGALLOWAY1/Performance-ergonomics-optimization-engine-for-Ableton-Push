@@ -285,8 +285,11 @@ export class BeamSolver implements SolverStrategy {
         const gripFingers = Object.keys(grip.fingers) as FingerType[];
         if (gripFingers.length === 0) continue;
 
+        // Constraint: one finger per note. Skip this grip if it has fewer fingers than notes.
+        if (gripFingers.length < group.notes.length) continue;
+
         // Create assignments for ALL notes in the group (handles chords correctly)
-        // Each note in the chord gets its own assignment with the appropriate finger
+        // Each note gets a distinct finger (1:1 mapping; no finger reused within the chord).
         const assignments: NoteAssignment[] = [];
         const costPerNote = stepCost / group.notes.length; // Distribute cost across notes
 
@@ -296,8 +299,7 @@ export class BeamSolver implements SolverStrategy {
           const eventIndex = group.eventIndices[i];
           const eventKey = group.eventKeys[i];
 
-          // Assign finger based on position in grip (or use first finger for all if not enough)
-          const finger = gripFingers[i % gripFingers.length];
+          const finger = gripFingers[i];
 
           assignments.push({
             eventIndex,
@@ -367,11 +369,27 @@ export class BeamSolver implements SolverStrategy {
     const leftPads = sortedPads.slice(0, midpoint);
     const rightPads = sortedPads.slice(midpoint);
 
+    const leftPadKeys = new Set(leftPads.map((p) => `${p.row},${p.col}`));
+    const leftNoteIndices: number[] = [];
+    const rightNoteIndices: number[] = [];
+    for (let i = 0; i < group.positions.length; i++) {
+      const pos = group.positions[i];
+      const key = `${pos.row},${pos.col}`;
+      if (leftPadKeys.has(key)) leftNoteIndices.push(i);
+      else rightNoteIndices.push(i);
+    }
+
     const leftGripResults = generateValidGripsWithTier(leftPads, 'left');
     const rightGripResults = generateValidGripsWithTier(rightPads, 'right');
 
     for (const leftResult of leftGripResults) {
+      const leftFingers = Object.keys(leftResult.pose.fingers) as FingerType[];
+      if (leftFingers.length < leftNoteIndices.length) continue;
+
       for (const rightResult of rightGripResults) {
+        const rightFingers = Object.keys(rightResult.pose.fingers) as FingerType[];
+        if (rightFingers.length < rightNoteIndices.length) continue;
+
         const leftTransition = calculateTransitionCost(node.leftPose, leftResult.pose, timeDelta);
         const rightTransition = calculateTransitionCost(node.rightPose, rightResult.pose, timeDelta);
 
@@ -397,36 +415,43 @@ export class BeamSolver implements SolverStrategy {
           leftStatic + rightStatic +
           leftFallbackPenalty + rightFallbackPenalty;
 
-        // Create assignments for ALL notes in the split chord
+        // Create assignments for ALL notes in the split chord (1:1 finger per note per hand)
         const assignments: NoteAssignment[] = [];
         const costPerNote = stepCost / group.notes.length;
 
-        // Get fingers from both grips
-        const leftFingers = Object.keys(leftResult.pose.fingers) as FingerType[];
-        const rightFingers = Object.keys(rightResult.pose.fingers) as FingerType[];
-
-        for (let i = 0; i < group.notes.length; i++) {
+        for (let j = 0; j < leftNoteIndices.length; j++) {
+          const i = leftNoteIndices[j];
           const event = group.notes[i];
           const position = group.positions[i];
           const eventIndex = group.eventIndices[i];
           const eventKey = group.eventKeys[i];
-
-          // Determine which hand based on pad position (left pads -> left hand)
-          const isLeftPad = i < leftPads.length;
-          const hand = isLeftPad ? 'left' : 'right';
-          const fingers = isLeftPad ? leftFingers : rightFingers;
-          const grip = isLeftPad ? leftResult.pose : rightResult.pose;
-          const fingerIndex = isLeftPad ? i : i - leftPads.length;
-          const finger = fingers[fingerIndex % fingers.length] || 'index';
-
           assignments.push({
             eventIndex,
             eventKey,
             noteNumber: event.noteNumber,
             startTime: event.startTime,
-            hand,
-            finger,
-            grip,
+            hand: 'left',
+            finger: leftFingers[j],
+            grip: leftResult.pose,
+            cost: costPerNote,
+            row: position.row,
+            col: position.col,
+          });
+        }
+        for (let j = 0; j < rightNoteIndices.length; j++) {
+          const i = rightNoteIndices[j];
+          const event = group.notes[i];
+          const position = group.positions[i];
+          const eventIndex = group.eventIndices[i];
+          const eventKey = group.eventKeys[i];
+          assignments.push({
+            eventIndex,
+            eventKey,
+            noteNumber: event.noteNumber,
+            startTime: event.startTime,
+            hand: 'right',
+            finger: rightFingers[j],
+            grip: rightResult.pose,
             cost: costPerNote,
             row: position.row,
             col: position.col,
@@ -826,29 +851,55 @@ export class BeamSolver implements SolverStrategy {
       if (newBeam.length === 0) {
         console.warn(`No valid expansions for group at t=${group.timestamp}. Using emergency fallback.`);
 
-        // Emergency fallback: create minimal assignments for ALL notes in group
+        const fallbackFingers: FingerType[] = ['index', 'middle', 'ring', 'thumb', 'pinky'];
+
         for (const node of beam) {
           const assignments: NoteAssignment[] = [];
           const costPerNote = FALLBACK_GRIP_PENALTY / group.notes.length;
 
+          const leftIndices: number[] = [];
+          const rightIndices: number[] = [];
           for (let i = 0; i < group.notes.length; i++) {
-            const fallbackGrip: HandPose = {
-              centroid: { x: group.positions[i].col, y: group.positions[i].row },
-              fingers: {
-                index: { x: group.positions[i].col, y: group.positions[i].row },
-              },
-            };
-
             const leftDist = Math.abs(group.positions[i].col - 2);
             const rightDist = Math.abs(group.positions[i].col - 5);
-            const hand = leftDist <= rightDist ? 'left' : 'right';
+            if (leftDist <= rightDist) leftIndices.push(i);
+            else rightIndices.push(i);
+          }
 
+          for (let j = 0; j < Math.min(leftIndices.length, fallbackFingers.length); j++) {
+            const i = leftIndices[j];
+            const finger = fallbackFingers[j];
+            const fallbackGrip: HandPose = {
+              centroid: { x: group.positions[i].col, y: group.positions[i].row },
+              fingers: { [finger]: { x: group.positions[i].col, y: group.positions[i].row } },
+            };
             assignments.push({
               eventIndex: group.eventIndices[i],
+              eventKey: group.eventKeys[i],
               noteNumber: group.notes[i].noteNumber,
               startTime: group.notes[i].startTime,
-              hand,
-              finger: 'index',
+              hand: 'left',
+              finger,
+              grip: fallbackGrip,
+              cost: costPerNote,
+              row: group.positions[i].row,
+              col: group.positions[i].col,
+            });
+          }
+          for (let j = 0; j < Math.min(rightIndices.length, fallbackFingers.length); j++) {
+            const i = rightIndices[j];
+            const finger = fallbackFingers[j];
+            const fallbackGrip: HandPose = {
+              centroid: { x: group.positions[i].col, y: group.positions[i].row },
+              fingers: { [finger]: { x: group.positions[i].col, y: group.positions[i].row } },
+            };
+            assignments.push({
+              eventIndex: group.eventIndices[i],
+              eventKey: group.eventKeys[i],
+              noteNumber: group.notes[i].noteNumber,
+              startTime: group.notes[i].startTime,
+              hand: 'right',
+              finger,
               grip: fallbackGrip,
               cost: costPerNote,
               row: group.positions[i].row,

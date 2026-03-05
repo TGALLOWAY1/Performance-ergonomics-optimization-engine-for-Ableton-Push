@@ -236,32 +236,40 @@ export function buildNeutralGreedyInitialAssignment(
   // 3. Allocate result map
   const assignments: Record<number, { hand: 'left' | 'right'; finger: FingerType }> = {};
 
-  // 4. Sort events by time (if not already sorted)
-  const sortedEvents = [...events].sort((a, b) => a.startTime - b.startTime);
+  // 4. Sort by time (and stable key) but keep original indices for the result map
+  const withIndex = events.map((event, index) => ({ event, originalIndex: index }));
+  withIndex.sort((a, b) => {
+    if (a.event.startTime !== b.event.startTime) return a.event.startTime - b.event.startTime;
+    return a.event.noteNumber - b.event.noteNumber;
+  });
+
+  const TIME_EPSILON = 0.001;
+  let usedFingersInCurrentSlice = new Set<string>();
 
   // 5. Process events in time order
-  for (let eventIndex = 0; eventIndex < sortedEvents.length; eventIndex++) {
-    const event = sortedEvents[eventIndex];
+  for (let i = 0; i < withIndex.length; i++) {
+    const { event, originalIndex: eventIndex } = withIndex[i];
+
+    if (i === 0 || event.startTime - withIndex[i - 1].event.startTime > TIME_EPSILON) {
+      usedFingersInCurrentSlice = new Set();
+    }
 
     // Get pad position for this event's note number
     const padPosition = GridMapService.noteToGrid(event.noteNumber, instrumentConfig);
     if (!padPosition) {
-      // Note is outside the grid - skip it (will be marked as Unplayable by solver)
       continue;
     }
 
     const [eventRow, eventCol] = padPosition;
 
-    // Determine which hand should play this pad
     const preferredHand = determineHandForPad(eventCol);
     const handState = preferredHand === 'left' ? leftHandState : rightHandState;
     const otherHandState = preferredHand === 'left' ? rightHandState : leftHandState;
 
-    // Try both hands, but prefer the natural hand for this column
     const candidates: Array<{ hand: 'left' | 'right'; handState: HandState; fingerKey: string; cost: number }> = [];
 
-    // Evaluate fingers from preferred hand
     for (const [fingerKey, fingerPos] of handState.fingers.entries()) {
+      if (usedFingersInCurrentSlice.has(`${preferredHand}-${fingerKey}`)) continue;
       const movement = calculateMovementCost(fingerPos.row, fingerPos.col, eventRow, eventCol);
 
       // Skip if too far
@@ -294,9 +302,10 @@ export function buildNeutralGreedyInitialAssignment(
       });
     }
 
-    // Also try other hand if preferred hand has no good candidates
+    const otherHand = preferredHand === 'left' ? 'right' : 'left';
     if (candidates.length === 0 || Math.min(...candidates.map(c => c.cost)) > MAX_MOVEMENT_DISTANCE * 2) {
       for (const [fingerKey, fingerPos] of otherHandState.fingers.entries()) {
+        if (usedFingersInCurrentSlice.has(`${otherHand}-${fingerKey}`)) continue;
         const movement = calculateMovementCost(fingerPos.row, fingerPos.col, eventRow, eventCol);
 
         if (movement > MAX_MOVEMENT_DISTANCE) continue;
@@ -317,7 +326,7 @@ export function buildNeutralGreedyInitialAssignment(
         const totalCost = movementCost + crossoverCost + stretchCost;
 
         candidates.push({
-          hand: preferredHand === 'left' ? 'right' : 'left',
+          hand: otherHand,
           handState: otherHandState,
           fingerKey,
           cost: totalCost,
@@ -335,11 +344,11 @@ export function buildNeutralGreedyInitialAssignment(
       current.cost < best.cost ? current : best
     );
 
-    // Record assignment
     assignments[eventIndex] = {
       hand: bestCandidate.hand,
       finger: fingerKeyToFingerType(bestCandidate.fingerKey),
     };
+    usedFingersInCurrentSlice.add(`${bestCandidate.hand}-${bestCandidate.fingerKey}`);
 
     // Update finger position
     bestCandidate.handState.fingers.set(bestCandidate.fingerKey, {
@@ -348,7 +357,6 @@ export function buildNeutralGreedyInitialAssignment(
       fingerKey: bestCandidate.fingerKey,
     });
 
-    // Update span
     if (bestCandidate.handState.fingers.size >= 2) {
       const cols = Array.from(bestCandidate.handState.fingers.values()).map(p => p.col);
       bestCandidate.handState.span = Math.max(...cols) - Math.min(...cols);

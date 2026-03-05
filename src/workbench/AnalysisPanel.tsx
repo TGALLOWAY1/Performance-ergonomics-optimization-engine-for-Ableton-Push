@@ -12,7 +12,7 @@ interface AnalysisPanelProps {
     engineResult: EngineResult | null;
     activeMapping: GridMapping | null;
     performance: Performance | null;
-    onAssignmentChange: (index: number, hand: 'left' | 'right', finger: FingerType) => void;
+    onAssignmentChange: (eventKey: string, hand: 'left' | 'right', finger: FingerType) => void;
 }
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({

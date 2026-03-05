@@ -140,19 +140,12 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
         const mapping = activeMapping ??
             (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
 
-        // Get manual assignments for current layout
+        // Get manual assignments for current layout (keyed by eventKey for stable identity)
         const currentLayoutId = projectState.activeLayoutId;
-        const manualAssignments = currentLayoutId && projectState.manualAssignments
-            ? projectState.manualAssignments[currentLayoutId]
-            : undefined;
-
-        // Convert string keys to numbers for the engine
-        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-        if (manualAssignments) {
-            Object.entries(manualAssignments).forEach(([key, value]) => {
-                parsedAssignments[parseInt(key, 10)] = value;
-            });
-        }
+        const manualAssignments: Record<string, { hand: 'left' | 'right'; finger: FingerType }> | undefined =
+            currentLayoutId && projectState.manualAssignments
+                ? projectState.manualAssignments[currentLayoutId]
+                : undefined;
 
         try {
             // Create solver with the specified type
@@ -164,18 +157,18 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
                 solverType
             );
 
-            // Run solver (async for genetic, sync for beam)
+            // Run solver (async for genetic, sync for beam). Pass string-keyed manualAssignments as-is.
             let result: EngineResult;
             if (solverType === 'genetic') {
                 // Genetic solver is always async
-                result = await solver.solveAsync(filteredPerformance, parsedAssignments);
+                result = await solver.solveAsync(filteredPerformance, manualAssignments);
             } else {
                 // Beam solver supports sync
                 try {
-                    result = solver.solve(filteredPerformance, parsedAssignments);
+                    result = solver.solve(filteredPerformance, manualAssignments);
                 } catch (error) {
                     // Fallback to async if sync fails
-                    result = await solver.solveAsync(filteredPerformance, parsedAssignments);
+                    result = await solver.solveAsync(filteredPerformance, manualAssignments);
                 }
             }
 
@@ -248,19 +241,12 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             throw new Error('No sounds assigned to the grid. Please assign sounds first, then optimize.');
         }
 
-        // Get manual assignments for current layout
+        // Get manual assignments for current layout (keyed by eventKey)
         const currentLayoutId = projectState.activeLayoutId;
-        const manualAssignments = currentLayoutId && projectState.manualAssignments
-            ? projectState.manualAssignments[currentLayoutId]
-            : undefined;
-
-        // Convert string keys to numbers for the engine
-        const parsedAssignments: Record<number, { hand: 'left' | 'right', finger: FingerType }> = {};
-        if (manualAssignments) {
-            Object.entries(manualAssignments).forEach(([key, value]) => {
-                parsedAssignments[parseInt(key, 10)] = value;
-            });
-        }
+        const manualAssignments: Record<string, { hand: 'left' | 'right'; finger: FingerType }> | undefined =
+            currentLayoutId && projectState.manualAssignments
+                ? projectState.manualAssignments[currentLayoutId]
+                : undefined;
 
         try {
             // Create AnnealingSolver
@@ -269,11 +255,11 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
                 gridMapping: mapping,
             });
 
-            // Run the solver
+            // Run the solver (pass string-keyed manualAssignments as-is)
             const result = await solver.solve(
                 filteredPerformance,
                 projectState.engineConfiguration || DEFAULT_ENGINE_CONFIGURATION,
-                parsedAssignments
+                manualAssignments
             );
 
             // Get the optimized mapping

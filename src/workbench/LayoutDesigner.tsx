@@ -487,11 +487,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     // Get filtered performance to map event indices to note numbers
     const filteredPerformance = getActivePerformance(projectState);
 
-    // First, process manual assignments (they override engine results)
+    // First, process manual assignments (they override engine results). Key by eventKey for stable identity.
     if (manualAssignments && filteredPerformance) {
       filteredPerformance.events.forEach((event, eventIndex) => {
-        const eventIndexStr = String(eventIndex);
-        const manualAssignment = manualAssignments[eventIndexStr];
+        const key = event.eventKey ?? String(eventIndex);
+        const manualAssignment = manualAssignments[key];
 
         if (manualAssignment) {
           // Manual assignment takes priority - use it even if engine says Unplayable
@@ -510,8 +510,9 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
     engineResult.debugEvents.forEach((event, eventIndex) => {
       // Skip if this event has a manual assignment (already processed above)
       if (manualAssignments && filteredPerformance) {
-        const eventIndexStr = String(eventIndex);
-        if (manualAssignments[eventIndexStr]) {
+        const ev = filteredPerformance.events[eventIndex];
+        const key = ev?.eventKey ?? String(eventIndex);
+        if (manualAssignments[key]) {
           return; // Skip - manual assignment already handled
         }
       }
