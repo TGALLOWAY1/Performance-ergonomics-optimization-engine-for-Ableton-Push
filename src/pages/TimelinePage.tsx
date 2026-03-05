@@ -24,10 +24,10 @@ export const TimelinePage: React.FC = () => {
         [projectState.layouts, projectState.activeLayoutId]
     );
 
-    // Get active mapping to determine voices
+    // Resolve active mapping via activeMappingId (route-consistent with Workbench)
     const activeMapping = useMemo(() =>
-        projectState.mappings.find(m => m.id === (projectState.activeLayoutId ? projectState.mappings[0]?.id : null)) || projectState.mappings[0] || null,
-        [projectState.mappings, projectState.activeLayoutId]
+        projectState.mappings.find(m => m.id === projectState.activeMappingId) ?? projectState.mappings[0] ?? null,
+        [projectState.mappings, projectState.activeMappingId]
     );
 
     // Extract unique voices from mapping
