@@ -1,0 +1,41 @@
+{
+  "name": "F12",
+  "tempo": 120,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0,
+      "duration": 0.5,
+      "velocity": 100,
+      "eventKey": "0:0.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.01,
+      "duration": 0.5,
+      "velocity": 100,
+      "eventKey": "1:0.0100:37:1"
+    },
+    {
+      "noteNumber": 38,
+      "startTime": 0.02,
+      "duration": 0.5,
+      "velocity": 100,
+      "eventKey": "2:0.0200:38:1"
+    },
+    {
+      "noteNumber": 39,
+      "startTime": 0.5,
+      "duration": 0.5,
+      "velocity": 100,
+      "eventKey": "3:0.5000:39:1"
+    },
+    {
+      "noteNumber": 40,
+      "startTime": 0.51,
+      "duration": 0.5,
+      "velocity": 100,
+      "eventKey": "4:0.5100:40:1"
+    }
+  ]
+}

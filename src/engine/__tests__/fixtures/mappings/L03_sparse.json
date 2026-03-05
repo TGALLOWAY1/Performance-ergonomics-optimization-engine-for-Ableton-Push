@@ -1,0 +1,14 @@
+{
+  "id": "L03-sparse",
+  "name": "Sparse Layout",
+  "description": "Only a few pads have voices - tests unmapped note handling",
+  "cells": {
+    "0,0": { "id": "v36", "name": "C1", "sourceType": "midi", "originalMidiNote": 36, "color": "#ff0000" },
+    "0,4": { "id": "v40", "name": "E1", "sourceType": "midi", "originalMidiNote": 40, "color": "#ff0000" },
+    "4,0": { "id": "v48", "name": "C2", "sourceType": "midi", "originalMidiNote": 48, "color": "#00ff00" },
+    "4,4": { "id": "v52", "name": "E2", "sourceType": "midi", "originalMidiNote": 52, "color": "#00ff00" },
+    "7,7": { "id": "v60", "name": "C3", "sourceType": "midi", "originalMidiNote": 60, "color": "#0000ff" }
+  },
+  "fingerConstraints": {},
+  "layoutMode": "drum_64"
+}

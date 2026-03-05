@@ -1,0 +1,25 @@
+{
+  "id": "L05-noncontiguous",
+  "name": "Non-Contiguous Layout",
+  "description": "Voices scattered in checkerboard pattern - tests lookup correctness",
+  "cells": {
+    "0,0": { "id": "v36", "name": "C1", "sourceType": "midi", "originalMidiNote": 36, "color": "#ff0000" },
+    "0,2": { "id": "v37", "name": "C#1", "sourceType": "midi", "originalMidiNote": 37, "color": "#ff0000" },
+    "0,4": { "id": "v38", "name": "D1", "sourceType": "midi", "originalMidiNote": 38, "color": "#ff0000" },
+    "0,6": { "id": "v39", "name": "D#1", "sourceType": "midi", "originalMidiNote": 39, "color": "#ff0000" },
+    "2,1": { "id": "v40", "name": "E1", "sourceType": "midi", "originalMidiNote": 40, "color": "#ff0000" },
+    "2,3": { "id": "v41", "name": "F1", "sourceType": "midi", "originalMidiNote": 41, "color": "#ff0000" },
+    "2,5": { "id": "v42", "name": "F#1", "sourceType": "midi", "originalMidiNote": 42, "color": "#ff0000" },
+    "2,7": { "id": "v43", "name": "G1", "sourceType": "midi", "originalMidiNote": 43, "color": "#ff0000" },
+    "4,0": { "id": "v44", "name": "G#1", "sourceType": "midi", "originalMidiNote": 44, "color": "#00ff00" },
+    "4,2": { "id": "v45", "name": "A1", "sourceType": "midi", "originalMidiNote": 45, "color": "#00ff00" },
+    "4,4": { "id": "v46", "name": "A#1", "sourceType": "midi", "originalMidiNote": 46, "color": "#00ff00" },
+    "4,6": { "id": "v47", "name": "B1", "sourceType": "midi", "originalMidiNote": 47, "color": "#00ff00" },
+    "6,1": { "id": "v48", "name": "C2", "sourceType": "midi", "originalMidiNote": 48, "color": "#00ff00" },
+    "6,3": { "id": "v49", "name": "C#2", "sourceType": "midi", "originalMidiNote": 49, "color": "#00ff00" },
+    "6,5": { "id": "v50", "name": "D2", "sourceType": "midi", "originalMidiNote": 50, "color": "#00ff00" },
+    "6,7": { "id": "v51", "name": "D#2", "sourceType": "midi", "originalMidiNote": 51, "color": "#00ff00" }
+  },
+  "fingerConstraints": {},
+  "layoutMode": "drum_64"
+}

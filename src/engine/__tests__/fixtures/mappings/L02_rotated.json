@@ -1,0 +1,25 @@
+{
+  "id": "L02-rotated",
+  "name": "Rotated/Inverted Layout",
+  "description": "Voices rotated 180 degrees - bottom-left becomes top-right",
+  "cells": {
+    "7,7": { "id": "v36", "name": "C1", "sourceType": "midi", "originalMidiNote": 36, "color": "#ff0000" },
+    "7,6": { "id": "v37", "name": "C#1", "sourceType": "midi", "originalMidiNote": 37, "color": "#ff0000" },
+    "7,5": { "id": "v38", "name": "D1", "sourceType": "midi", "originalMidiNote": 38, "color": "#ff0000" },
+    "7,4": { "id": "v39", "name": "D#1", "sourceType": "midi", "originalMidiNote": 39, "color": "#ff0000" },
+    "7,3": { "id": "v40", "name": "E1", "sourceType": "midi", "originalMidiNote": 40, "color": "#ff0000" },
+    "7,2": { "id": "v41", "name": "F1", "sourceType": "midi", "originalMidiNote": 41, "color": "#ff0000" },
+    "7,1": { "id": "v42", "name": "F#1", "sourceType": "midi", "originalMidiNote": 42, "color": "#ff0000" },
+    "7,0": { "id": "v43", "name": "G1", "sourceType": "midi", "originalMidiNote": 43, "color": "#ff0000" },
+    "6,7": { "id": "v44", "name": "G#1", "sourceType": "midi", "originalMidiNote": 44, "color": "#00ff00" },
+    "6,6": { "id": "v45", "name": "A1", "sourceType": "midi", "originalMidiNote": 45, "color": "#00ff00" },
+    "6,5": { "id": "v46", "name": "A#1", "sourceType": "midi", "originalMidiNote": 46, "color": "#00ff00" },
+    "6,4": { "id": "v47", "name": "B1", "sourceType": "midi", "originalMidiNote": 47, "color": "#00ff00" },
+    "6,3": { "id": "v48", "name": "C2", "sourceType": "midi", "originalMidiNote": 48, "color": "#00ff00" },
+    "6,2": { "id": "v49", "name": "C#2", "sourceType": "midi", "originalMidiNote": 49, "color": "#00ff00" },
+    "6,1": { "id": "v50", "name": "D2", "sourceType": "midi", "originalMidiNote": 50, "color": "#00ff00" },
+    "6,0": { "id": "v51", "name": "D#2", "sourceType": "midi", "originalMidiNote": 51, "color": "#00ff00" }
+  },
+  "fingerConstraints": {},
+  "layoutMode": "drum_64"
+}

@@ -1,0 +1,118 @@
+{
+  "name": "F03",
+  "tempo": 120,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "0:0.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.25,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "1:0.2500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 0.5,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "2:0.5000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.75,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "3:0.7500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 1,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "4:1.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 1.25,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "5:1.2500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 1.5,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "6:1.5000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 1.75,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "7:1.7500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 2,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "8:2.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 2.25,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "9:2.2500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 2.5,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "10:2.5000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 2.75,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "11:2.7500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 3,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "12:3.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 3.25,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "13:3.2500:37:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 3.5,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "14:3.5000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 3.75,
+      "duration": 0.2,
+      "velocity": 100,
+      "eventKey": "15:3.7500:37:1"
+    }
+  ]
+}

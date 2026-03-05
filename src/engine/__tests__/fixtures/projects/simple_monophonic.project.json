@@ -1,0 +1,45 @@
+{
+  "layouts": [
+    {
+      "id": "layout-1",
+      "name": "Simple Monophonic Pattern",
+      "performance": {
+        "name": "Simple Scale",
+        "tempo": 120,
+        "events": [
+          { "noteNumber": 36, "startTime": 0.0, "duration": 0.4, "velocity": 100, "eventKey": "0:0:36:1" },
+          { "noteNumber": 38, "startTime": 0.5, "duration": 0.4, "velocity": 100, "eventKey": "1:0.5:38:1" },
+          { "noteNumber": 40, "startTime": 1.0, "duration": 0.4, "velocity": 100, "eventKey": "2:1:40:1" },
+          { "noteNumber": 41, "startTime": 1.5, "duration": 0.4, "velocity": 100, "eventKey": "3:1.5:41:1" },
+          { "noteNumber": 43, "startTime": 2.0, "duration": 0.4, "velocity": 100, "eventKey": "4:2:43:1" },
+          { "noteNumber": 45, "startTime": 2.5, "duration": 0.4, "velocity": 100, "eventKey": "5:2.5:45:1" },
+          { "noteNumber": 47, "startTime": 3.0, "duration": 0.4, "velocity": 100, "eventKey": "6:3:47:1" },
+          { "noteNumber": 48, "startTime": 3.5, "duration": 0.4, "velocity": 100, "eventKey": "7:3.5:48:1" }
+        ]
+      },
+      "createdAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "instrumentConfigs": [],
+  "sectionMaps": [],
+  "instrumentConfig": {
+    "id": "default-config",
+    "name": "Default 64-Pad Layout",
+    "rows": 8,
+    "cols": 8,
+    "bottomLeftNote": 36,
+    "layoutMode": "drum_64"
+  },
+  "activeLayoutId": "layout-1",
+  "projectTempo": 120,
+  "parkedSounds": [],
+  "mappings": [],
+  "ignoredNoteNumbers": [],
+  "manualAssignments": {},
+  "engineConfiguration": {
+    "beamWidth": 50,
+    "stiffness": 1.0
+  },
+  "solverResults": {},
+  "activeMappingId": null
+}

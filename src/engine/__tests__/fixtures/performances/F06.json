@@ -1,0 +1,62 @@
+{
+  "name": "F06",
+  "tempo": 140,
+  "events": [
+    {
+      "noteNumber": 200,
+      "startTime": 0,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "0:0.0000:200:1"
+    },
+    {
+      "noteNumber": 201,
+      "startTime": 0.10714285714285714,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "1:0.1071:201:1"
+    },
+    {
+      "noteNumber": 202,
+      "startTime": 0.21428571428571427,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "2:0.2143:202:1"
+    },
+    {
+      "noteNumber": 203,
+      "startTime": 0.3214285714285714,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "3:0.3214:203:1"
+    },
+    {
+      "noteNumber": 204,
+      "startTime": 0.42857142857142855,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "4:0.4286:204:1"
+    },
+    {
+      "noteNumber": 205,
+      "startTime": 0.5357142857142857,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "5:0.5357:205:1"
+    },
+    {
+      "noteNumber": 206,
+      "startTime": 0.6428571428571428,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "6:0.6429:206:1"
+    },
+    {
+      "noteNumber": 207,
+      "startTime": 0.75,
+      "duration": 0.08571428571428572,
+      "velocity": 100,
+      "eventKey": "7:0.7500:207:1"
+    }
+  ]
+}
