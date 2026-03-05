@@ -412,3 +412,31 @@ export function countUniqueFingers(result: EngineResult): number {
   
   return fingers.size;
 }
+
+/**
+ * Asserts that no two simultaneous (same startTime) playable events share the same
+ * (hand, finger). This is a physical constraint: one finger cannot play two pads at once.
+ * Use in solver tests to catch duplicate-finger assignments.
+ */
+export function assertNoDuplicateFingerPerSimultaneousGroup(result: EngineResult): void {
+  const byTime = new Map<number, EngineDebugEvent[]>();
+  for (const e of result.debugEvents) {
+    if (e.assignedHand === 'Unplayable' || e.finger == null) continue;
+    const t = e.startTime;
+    if (!byTime.has(t)) byTime.set(t, []);
+    byTime.get(t)!.push(e);
+  }
+  for (const [, events] of byTime) {
+    const used = new Set<string>();
+    for (const e of events) {
+      const key = `${e.assignedHand}-${e.finger}`;
+      if (used.has(key)) {
+        throw new Error(
+          `Duplicate finger assignment at startTime=${events[0].startTime}: same (hand, finger) used for multiple notes. ` +
+          `Events: ${events.map(ev => `note=${ev.noteNumber} ${ev.assignedHand}/${ev.finger}`).join('; ')}`
+        );
+      }
+      used.add(key);
+    }
+  }
+}

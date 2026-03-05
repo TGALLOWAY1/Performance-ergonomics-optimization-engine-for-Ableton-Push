@@ -15,6 +15,9 @@ Review the physical difficulty of the pad layout, with detailed transition metri
 Review the generated layout chronologically, analyzing the sequence of grip transitions over the performance.
 ![Timeline View](./public/assets/docs/timeline.png)
 
+*To refresh these screenshots: run `npm run dev` in one terminal, then `npm run docs:screenshots` in another.*
+
+---
 
 The Performability Engine is an ergonomics-driven optimization system for performing electronic music on the Ableton Push.
 

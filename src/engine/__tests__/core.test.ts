@@ -1,6 +1,6 @@
 /**
  * Tests for BiomechanicalSolver core engine.
- * 
+ *
  * Critical tests for preventing the same finger from being assigned
  * to multiple simultaneous notes (physically impossible).
  */
@@ -10,6 +10,7 @@ import { BiomechanicalSolver } from '../core';
 import { Performance } from '../../types/performance';
 import { GridMapping } from '../../types/layout';
 import { InstrumentConfig } from '../../types/performance';
+import { assertNoDuplicateFingerPerSimultaneousGroup } from './helpers/testHelpers';
 
 // Default test instrument config (standard Push 3 layout)
 const testInstrumentConfig: InstrumentConfig = {
@@ -33,61 +34,68 @@ describe('BiomechanicalSolver', () => {
   describe('simultaneous note handling', () => {
     it('should NOT assign the same finger to multiple simultaneous notes', () => {
       const solver = new BiomechanicalSolver(testInstrumentConfig, emptyMapping);
-      
-      // Create a chord with 3 notes at exactly the same time
+
       const performance: Performance = {
         name: 'Test Chord',
         tempo: 120,
         events: [
-          { noteNumber: 36, startTime: 0.0, duration: 0.5, velocity: 100 }, // C1
-          { noteNumber: 37, startTime: 0.0, duration: 0.5, velocity: 100 }, // C#1
-          { noteNumber: 38, startTime: 0.0, duration: 0.5, velocity: 100 }, // D1
+          { noteNumber: 36, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 37, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 38, startTime: 0.0, duration: 0.5, velocity: 100 },
         ],
       };
-      
+
       const result = solver.solve(performance);
-      
-      // Get all playable events at time 0
+      assertNoDuplicateFingerPerSimultaneousGroup(result);
+
       const simultaneousEvents = result.debugEvents.filter(
         e => e.startTime === 0.0 && e.assignedHand !== 'Unplayable' && e.finger !== null
       );
-      
-      // Check that no two events have the same (hand, finger) combination
-      const usedFingers = new Set<string>();
-      for (const event of simultaneousEvents) {
-        const key = `${event.assignedHand}-${event.finger}`;
-        expect(usedFingers.has(key)).toBe(false); // Should NOT have duplicate
-        usedFingers.add(key);
-      }
-      
-      // We should have 3 unique finger assignments
-      expect(usedFingers.size).toBe(simultaneousEvents.length);
+      expect(simultaneousEvents.length).toBe(3);
+      const usedFingers = new Set(simultaneousEvents.map(e => `${e.assignedHand}-${e.finger}`));
+      expect(usedFingers.size).toBe(3);
     });
 
     it('should handle chords that span both hands', () => {
       const solver = new BiomechanicalSolver(testInstrumentConfig, emptyMapping);
-      
-      // Create a wide chord that requires both hands
+
       const performance: Performance = {
         name: 'Two Hand Chord',
         tempo: 120,
         events: [
-          { noteNumber: 36, startTime: 0.0, duration: 0.5, velocity: 100 }, // Left side
-          { noteNumber: 43, startTime: 0.0, duration: 0.5, velocity: 100 }, // Right side (one octave up)
+          { noteNumber: 36, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 43, startTime: 0.0, duration: 0.5, velocity: 100 },
         ],
       };
-      
+
       const result = solver.solve(performance);
-      
-      // Get all playable events at time 0
-      const simultaneousEvents = result.debugEvents.filter(
-        e => e.startTime === 0.0 && e.assignedHand !== 'Unplayable' && e.finger !== null
+      assertNoDuplicateFingerPerSimultaneousGroup(result);
+    });
+
+    it('should NOT assign same finger twice in a 6-note chord (stress fallback grip path)', () => {
+      const solver = new BiomechanicalSolver(testInstrumentConfig, emptyMapping);
+
+      const performance: Performance = {
+        name: 'Six-note chord',
+        tempo: 120,
+        events: [
+          { noteNumber: 36, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 37, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 38, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 39, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 40, startTime: 0.0, duration: 0.5, velocity: 100 },
+          { noteNumber: 41, startTime: 0.0, duration: 0.5, velocity: 100 },
+        ],
+      };
+
+      const result = solver.solve(performance);
+      assertNoDuplicateFingerPerSimultaneousGroup(result);
+
+      const playableAtZero = result.debugEvents.filter(
+        e => e.startTime === 0.0 && e.assignedHand !== 'Unplayable' && e.finger != null
       );
-      
-      // No finger should be used twice
-      const fingerKeys = simultaneousEvents.map(e => `${e.assignedHand}-${e.finger}`);
-      const uniqueKeys = new Set(fingerKeys);
-      expect(uniqueKeys.size).toBe(fingerKeys.length);
+      const uniqueFingers = new Set(playableAtZero.map(e => `${e.assignedHand}-${e.finger}`));
+      expect(uniqueFingers.size).toBe(playableAtZero.length);
     });
 
     it('should reset used fingers for notes at different times', () => {
