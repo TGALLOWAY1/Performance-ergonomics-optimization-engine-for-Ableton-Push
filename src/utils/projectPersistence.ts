@@ -3,9 +3,144 @@
  */
 import { ProjectState, DEFAULT_ENGINE_CONFIGURATION, HAND_SIZE_PRESETS, HandSizePreset } from '../types/projectState';
 
+/** Structured result for strict project file validation. Invalid core shape fails fast. */
+export type ValidationResult =
+  | { ok: true; state: ProjectState }
+  | { ok: false; error: { code: string; message: string; path?: string } };
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+function isValidManualAssignmentsShape(val: unknown): boolean {
+  if (val == null || typeof val !== 'object') return false;
+  for (const v of Object.values(val)) {
+    if (v == null || typeof v !== 'object') return false;
+    for (const entry of Object.values(v)) {
+      if (!entry || typeof entry !== 'object') return false;
+      const e = entry as { hand?: string; finger?: string };
+      if (e.hand !== 'left' && e.hand !== 'right') return false;
+      if (typeof e.finger !== 'string') return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Strict validation for project file load. Rejects malformed core shape; applies defaults only for non-critical fields.
+ */
+export function validateProjectStrict(parsed: unknown): ValidationResult {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, error: { code: 'INVALID_ROOT', message: 'Invalid project file: root must be an object.', path: undefined } };
+  }
+  const p = parsed as Record<string, unknown>;
+
+  if (p.instrumentConfig == null || typeof p.instrumentConfig !== 'object') {
+    return {
+      ok: false,
+      error: {
+        code: 'MISSING_INSTRUMENT_CONFIG',
+        message: 'Project file is missing or has invalid instrumentConfig. Re-export from the app or use a compatible file.',
+        path: 'instrumentConfig',
+      },
+    };
+  }
+
+  if (!Array.isArray(p.layouts)) {
+    return { ok: false, error: { code: 'INVALID_LAYOUTS', message: 'Project file must have a valid layouts array.', path: 'layouts' } };
+  }
+  for (let i = 0; i < p.layouts.length; i++) {
+    const layout = p.layouts[i];
+    if (!layout || typeof layout !== 'object' || !isNonEmptyString((layout as { id?: unknown }).id)) {
+      return { ok: false, error: { code: 'INVALID_LAYOUT_ITEM', message: `Layout at index ${i} must have a non-empty id.`, path: `layouts[${i}]` } };
+    }
+  }
+
+  if (!Array.isArray(p.mappings)) {
+    return { ok: false, error: { code: 'INVALID_MAPPINGS', message: 'Project file must have a valid mappings array.', path: 'mappings' } };
+  }
+  for (let i = 0; i < p.mappings.length; i++) {
+    const mapping = p.mappings[i];
+    if (!mapping || typeof mapping !== 'object' || !isNonEmptyString((mapping as { id?: unknown }).id)) {
+      return { ok: false, error: { code: 'INVALID_MAPPING_ITEM', message: `Mapping at index ${i} must have a non-empty id.`, path: `mappings[${i}]` } };
+    }
+  }
+
+  if (p.manualAssignments !== undefined && !isValidManualAssignmentsShape(p.manualAssignments)) {
+    return { ok: false, error: { code: 'INVALID_MANUAL_ASSIGNMENTS', message: 'manualAssignments must be a nested map of layoutId -> eventKey -> { hand, finger }.', path: 'manualAssignments' } };
+  }
+
+  // Apply defaults/migrations for non-critical fields
+  let engineConfig = (p.engineConfiguration && typeof p.engineConfiguration === 'object')
+    ? p.engineConfiguration as Record<string, unknown>
+    : DEFAULT_ENGINE_CONFIGURATION as unknown as Record<string, unknown>;
+  if (typeof engineConfig.restingPose === 'string') {
+    const preset = HAND_SIZE_PRESETS[engineConfig.restingPose as HandSizePreset] || HAND_SIZE_PRESETS.standard;
+    engineConfig = { ...engineConfig, restingPose: preset };
+  }
+
+  const state: ProjectState = {
+    layouts: Array.isArray(p.layouts) ? p.layouts as ProjectState['layouts'] : [],
+    sectionMaps: Array.isArray(p.sectionMaps) ? p.sectionMaps : [],
+    activeLayoutId: (p.activeLayoutId != null && isNonEmptyString(p.activeLayoutId)) ? p.activeLayoutId : null,
+    activeMappingId: (p.activeMappingId != null && isNonEmptyString(p.activeMappingId)) ? p.activeMappingId : null,
+    projectTempo: typeof p.projectTempo === 'number' && p.projectTempo > 0 ? p.projectTempo : 120,
+    parkedSounds: Array.isArray(p.parkedSounds) ? p.parkedSounds as ProjectState['parkedSounds'] : [],
+    mappings: Array.isArray(p.mappings) ? p.mappings as ProjectState['mappings'] : [],
+    instrumentConfigs: Array.isArray(p.instrumentConfigs) ? p.instrumentConfigs as ProjectState['instrumentConfigs'] : [],
+    instrumentConfig: p.instrumentConfig as ProjectState['instrumentConfig'],
+    ignoredNoteNumbers: Array.isArray(p.ignoredNoteNumbers) ? p.ignoredNoteNumbers : [],
+    manualAssignments: (p.manualAssignments && typeof p.manualAssignments === 'object') ? p.manualAssignments as ProjectState['manualAssignments'] : {},
+    engineConfiguration: engineConfig as ProjectState['engineConfiguration'],
+    solverResults: (p.solverResults && typeof p.solverResults === 'object') ? p.solverResults : {},
+    activeSolverId: p.activeSolverId !== undefined ? (p.activeSolverId as string) : undefined,
+  };
+  return { ok: true, state };
+}
+
+/**
+ * Validates and sanitizes a parsed JSON object into a safe ProjectState.
+ * Used for localStorage / in-memory load. For file load use validateProjectStrict + loadProject.
+ */
+export function validateProjectState(parsed: unknown): ProjectState {
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid project state data structure.');
+  }
+  const p = parsed as Record<string, unknown>;
+
+  let engineConfig = (p.engineConfiguration && typeof p.engineConfiguration === 'object')
+    ? p.engineConfiguration as Record<string, unknown>
+    : DEFAULT_ENGINE_CONFIGURATION as unknown as Record<string, unknown>;
+  if (typeof engineConfig.restingPose === 'string') {
+    const preset = HAND_SIZE_PRESETS[engineConfig.restingPose as HandSizePreset] || HAND_SIZE_PRESETS.standard;
+    engineConfig = { ...engineConfig, restingPose: preset };
+  }
+
+  const instrumentConfig = p.instrumentConfig != null && typeof p.instrumentConfig === 'object'
+    ? p.instrumentConfig
+    : (Array.isArray(p.instrumentConfigs) && p.instrumentConfigs[0] != null) ? p.instrumentConfigs[0] : null;
+
+  return {
+    layouts: Array.isArray(p.layouts) ? p.layouts as ProjectState['layouts'] : [],
+    sectionMaps: Array.isArray(p.sectionMaps) ? p.sectionMaps : [],
+    activeLayoutId: p.activeLayoutId != null ? p.activeLayoutId : null,
+    activeMappingId: p.activeMappingId != null ? p.activeMappingId : null,
+    projectTempo: typeof p.projectTempo === 'number' ? p.projectTempo : 120,
+    parkedSounds: Array.isArray(p.parkedSounds) ? p.parkedSounds as ProjectState['parkedSounds'] : [],
+    mappings: Array.isArray(p.mappings) ? p.mappings as ProjectState['mappings'] : [],
+    instrumentConfigs: Array.isArray(p.instrumentConfigs) ? p.instrumentConfigs as ProjectState['instrumentConfigs'] : [],
+    instrumentConfig: instrumentConfig as ProjectState['instrumentConfig'],
+    ignoredNoteNumbers: Array.isArray(p.ignoredNoteNumbers) ? p.ignoredNoteNumbers : [],
+    manualAssignments: (p.manualAssignments && typeof p.manualAssignments === 'object') ? p.manualAssignments as ProjectState['manualAssignments'] : {},
+    engineConfiguration: engineConfig as ProjectState['engineConfiguration'],
+    solverResults: (p.solverResults && typeof p.solverResults === 'object') ? p.solverResults : {},
+    activeSolverId: p.activeSolverId !== undefined ? p.activeSolverId : undefined,
+  };
+}
+
 /**
  * Saves the full project state to a JSON file.
- * 
+ *
  * @param state - The complete ProjectState to save
  */
 export function saveProject(state: ProjectState): void {
@@ -22,51 +157,22 @@ export function saveProject(state: ProjectState): void {
 }
 
 /**
- * Validates and sanitizes a parsed JSON object into a safe ProjectState.
- * Prevents undefined-reference crashes by supplying robust fallback values.
- */
-export function validateProjectState(parsed: any): ProjectState {
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Invalid project state data structure.');
-  }
-
-  let engineConfig = parsed.engineConfiguration || DEFAULT_ENGINE_CONFIGURATION;
-
-  // Migrate legacy string-based restingPose
-  if (typeof engineConfig.restingPose === 'string') {
-    const presetKey = engineConfig.restingPose as HandSizePreset;
-    const preset = HAND_SIZE_PRESETS[presetKey] || HAND_SIZE_PRESETS.standard;
-    engineConfig = { ...engineConfig, restingPose: preset };
-  }
-
-  return {
-    layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
-    sectionMaps: Array.isArray(parsed.sectionMaps) ? parsed.sectionMaps : [],
-    activeLayoutId: parsed.activeLayoutId || null,
-    activeMappingId: parsed.activeMappingId || null,
-    projectTempo: parsed.projectTempo || 120,
-    parkedSounds: Array.isArray(parsed.parkedSounds) ? parsed.parkedSounds : [],
-    mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
-    instrumentConfigs: Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs : [],
-    instrumentConfig: parsed.instrumentConfig || (Array.isArray(parsed.instrumentConfigs) ? parsed.instrumentConfigs[0] : null) || null,
-    ignoredNoteNumbers: Array.isArray(parsed.ignoredNoteNumbers) ? parsed.ignoredNoteNumbers : [],
-    manualAssignments: parsed.manualAssignments || {},
-    engineConfiguration: engineConfig,
-    solverResults: parsed.solverResults || {},
-    activeSolverId: parsed.activeSolverId || undefined,
-  };
-}
-
-/**
- * Loads a project state from a JSON file.
- * 
+ * Loads a project state from a JSON file with strict validation.
+ * Rejects invalid core shape; returns structured error for UI (no alert).
+ *
  * @param file - The JSON file to load
- * @returns Promise that resolves to the loaded ProjectState
+ * @returns Promise resolving to ValidationResult (ok + state, or ok: false + error)
  */
-export async function loadProject(file: File): Promise<ProjectState> {
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-  return validateProjectState(parsed);
+export async function loadProject(file: File): Promise<ValidationResult> {
+  let parsed: unknown;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Invalid JSON';
+    return { ok: false, error: { code: 'PARSE_ERROR', message: `Project file could not be parsed: ${message}. Use a valid JSON file or re-export from the app.` } };
+  }
+  return validateProjectStrict(parsed);
 }
 
 /**
