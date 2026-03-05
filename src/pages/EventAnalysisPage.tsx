@@ -1,16 +1,17 @@
 /**
  * Event Analysis Page
- * 
+ *
  * Dedicated full-screen page for detailed event-by-event analysis with
  * timeline, onion skin visualization, and transition metrics.
+ * Uses shared useSongStateHydration for single-path hydration (no page-specific load).
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { EventAnalysisPanel } from '../workbench/EventAnalysisPanel';
 import { getActivePerformance } from '../utils/performanceSelectors';
-import { songService } from '../services/SongService';
+import { useSongStateHydration } from '../hooks/useSongStateHydration';
 import { FingerType } from '../engine/models';
 
 export const EventAnalysisPage: React.FC = () => {
@@ -22,57 +23,15 @@ export const EventAnalysisPage: React.FC = () => {
 
   const [searchParams] = useSearchParams();
   const songId = searchParams.get('songId');
-  // @ts-ignore
-  const [songName, setSongName] = useState<string | null>(null);
 
-  // Get active layout and performance
-  // @ts-ignore
+  const { hasLoadedSong } = useSongStateHydration(songId);
+
   const activeLayout = useMemo(() =>
     projectState.layouts.find(l => l.id === projectState.activeLayoutId) || null,
     [projectState.layouts, projectState.activeLayoutId]
   );
 
   const performance = useMemo(() => getActivePerformance(projectState), [projectState]);
-
-
-
-  // Load song state when navigating with songId (same logic as Workbench/Timeline)
-  useEffect(() => {
-    if (!songId) {
-      return;
-    }
-
-    // Get song metadata for display
-    const song = songService.getSong(songId);
-    if (song) {
-      setSongName(song.metadata.title);
-    }
-
-    // Check if the current projectState has MEANINGFUL data (not just the default initial state)
-    const hasVoices = projectState.parkedSounds.length > 0;
-    const hasMappingCells = projectState.mappings.some(m => Object.keys(m.cells).length > 0);
-    const hasRealData = hasVoices || hasMappingCells;
-
-    // Load from storage if no real data (page refresh scenario)
-    if (!hasRealData) {
-      console.log('[EventAnalysisPage] No data in context, loading from storage for song:', songId);
-
-      const savedState = songService.loadSongState(songId);
-      if (savedState) {
-        console.log('[EventAnalysisPage] Loaded saved project state:', {
-          layoutsCount: savedState.layouts.length,
-          parkedSoundsCount: savedState.parkedSounds.length,
-          mappingsCount: savedState.mappings.length,
-          voiceNames: savedState.parkedSounds.map(v => v.name),
-        });
-        setProjectState(savedState, true); // Skip history on load
-      } else {
-        console.log('[EventAnalysisPage] No saved state found for song:', songId);
-      }
-    } else {
-      console.log('[EventAnalysisPage] Using existing data in context');
-    }
-  }, [songId, setProjectState]);
 
 
 
@@ -119,7 +78,17 @@ export const EventAnalysisPage: React.FC = () => {
     };
   }, [engineResult]);
 
-  // Empty state: no data available
+  // Loading: wait for shared hydration when songId is in URL
+  if (songId && !hasLoadedSong) {
+    return (
+      <div className="h-screen w-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mb-4" />
+        <p className="text-[var(--text-secondary)]">Loading song data...</p>
+      </div>
+    );
+  }
+
+  // Empty state: no data available (after hydration)
   if (!engineResult || !performance || performance.events.length === 0) {
     return (
       <div className="h-screen w-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] items-center justify-center">
