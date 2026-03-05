@@ -32,10 +32,9 @@ export interface ProjectState {
   /** Voice Manager: Array of note numbers (Cells) that should be ignored/hidden in analysis and grid view. Defaults to empty array. */
   ignoredNoteNumbers?: number[];
 
-  /** 
-   * Manual finger assignment overrides.
-   * Key 1: layoutId
-   * Key 2: eventIndex (stringified number)
+  /**
+   * Manual finger assignment overrides. Key by eventKey for stable identity (never by index).
+   * Key 1: layoutId. Key 2: eventKey (or fallback index string when eventKey absent).
    * Value: { hand: 'left' | 'right', finger: FingerType }
    */
   manualAssignments?: Record<string, Record<string, { hand: 'left' | 'right', finger: FingerType }>>;

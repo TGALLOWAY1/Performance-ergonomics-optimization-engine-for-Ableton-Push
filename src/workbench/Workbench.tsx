@@ -39,6 +39,7 @@ export const Workbench: React.FC = () => {
   const [searchParams] = useSearchParams();
   const songId = searchParams.get('songId');
   const [currentSongId, setCurrentSongId] = useState<string | null>(songId);
+  const [loadError, setLoadError] = useState<{ code: string; message: string } | null>(null);
 
   useEffect(() => {
     setCurrentSongId(songId);
@@ -434,21 +435,19 @@ export const Workbench: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    try {
-      const loadedState = await loadProject(file);
+    setLoadError(null);
+    const result = await loadProject(file);
 
-      // Initialize activeMappingId if mappings exist
+    if (result.ok) {
+      const loadedState = result.state;
       if (loadedState.mappings.length > 0 && !loadedState.activeMappingId) {
         loadedState.activeMappingId = loadedState.mappings[0].id;
       }
-
-      setProjectState(loadedState, true); // Skip history on load
-    } catch (err) {
-      console.error(err);
-      alert("Failed to parse project file");
+      setProjectState(loadedState, true);
+    } else {
+      setLoadError({ code: result.error.code, message: result.error.message });
     }
 
-    // Reset input value so same file can be loaded again if needed
     event.target.value = '';
   };
 
@@ -521,7 +520,7 @@ export const Workbench: React.FC = () => {
     });
   };
 
-  const handleAssignmentChange = (index: number, hand: 'left' | 'right', finger: FingerType) => {
+  const handleAssignmentChange = (eventKey: string, hand: 'left' | 'right', finger: FingerType) => {
     if (!projectState.activeLayoutId) return;
 
     setProjectState(prevState => {
@@ -534,7 +533,7 @@ export const Workbench: React.FC = () => {
           ...prevState.manualAssignments,
           [layoutId]: {
             ...currentLayoutAssignments,
-            [index]: { hand, finger }
+            [eventKey]: { hand, finger }
           }
         }
       };
@@ -922,6 +921,22 @@ export const Workbench: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] overflow-hidden font-[family-name:var(--font-ui)] selection:bg-blue-500/30">
+      {/* Project load error banner (non-disruptive; no alert) */}
+      {loadError && (
+        <div className="flex-none px-6 py-3 bg-red-950/80 border-b border-red-700/50 flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-red-200">{loadError.message}</p>
+            <p className="text-xs text-red-300/80 mt-0.5">Use a valid project file exported from this app, or re-export and try again.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLoadError(null)}
+            className="flex-none px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/50 rounded border border-red-700/50 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Header (Top) - Premium Glassmorphism Look */}
       <div className="flex-none h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] backdrop-blur-md flex items-center justify-between px-6 z-50 relative shadow-sm">
         {/* Left: App Title & Branding */}
@@ -1053,12 +1068,6 @@ export const Workbench: React.FC = () => {
                     className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-input)] disabled:text-[var(--text-secondary)] disabled:cursor-not-allowed transition-colors"
                   >
                     Organize by 4x4 Banks
-                  </button>
-                  <button
-                    disabled
-                    className="w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] cursor-not-allowed"
-                  >
-                    Suggest Ergonomic Layout (Soon)
                   </button>
                   <div className="border-t border-[var(--border-subtle)] my-1" />
                   <button
