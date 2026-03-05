@@ -143,12 +143,7 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {/* Footer Actions */}
-            <div className="flex-none h-16 border-t border-slate-800/50 bg-slate-900/50 backdrop-blur-md flex items-center justify-end px-8 z-10">
-                <div className="text-xs text-slate-500 flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                    Last Sync: 2 minutes ago
-                </div>
-            </div>
+            <div className="flex-none h-16 border-t border-slate-800/50 bg-slate-900/50 backdrop-blur-md flex items-center justify-end px-8 z-10" />
 
             {/* DEBUG: Global file input diagnostics */}
 
