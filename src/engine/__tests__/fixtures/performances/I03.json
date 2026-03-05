@@ -1,0 +1,146 @@
+{
+  "name": "I03",
+  "tempo": 100,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "0:0.0000:36:1"
+    },
+    {
+      "noteNumber": 44,
+      "startTime": 0.3,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "1:0.3000:44:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.6,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "2:0.6000:37:1"
+    },
+    {
+      "noteNumber": 45,
+      "startTime": 0.8999999999999999,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "3:0.9000:45:1"
+    },
+    {
+      "noteNumber": 38,
+      "startTime": 1.2,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "4:1.2000:38:1"
+    },
+    {
+      "noteNumber": 46,
+      "startTime": 1.5,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "5:1.5000:46:1"
+    },
+    {
+      "noteNumber": 39,
+      "startTime": 1.7999999999999998,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "6:1.8000:39:1"
+    },
+    {
+      "noteNumber": 47,
+      "startTime": 2.1,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "7:2.1000:47:1"
+    },
+    {
+      "noteNumber": 40,
+      "startTime": 2.4,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "8:2.4000:40:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 2.6999999999999997,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "9:2.7000:48:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 3,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "10:3.0000:36:1"
+    },
+    {
+      "noteNumber": 44,
+      "startTime": 3.3,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "11:3.3000:44:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 3.5999999999999996,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "12:3.6000:37:1"
+    },
+    {
+      "noteNumber": 45,
+      "startTime": 3.9,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "13:3.9000:45:1"
+    },
+    {
+      "noteNumber": 38,
+      "startTime": 4.2,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "14:4.2000:38:1"
+    },
+    {
+      "noteNumber": 46,
+      "startTime": 4.5,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "15:4.5000:46:1"
+    },
+    {
+      "noteNumber": 39,
+      "startTime": 4.8,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "16:4.8000:39:1"
+    },
+    {
+      "noteNumber": 47,
+      "startTime": 5.1,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "17:5.1000:47:1"
+    },
+    {
+      "noteNumber": 40,
+      "startTime": 5.3999999999999995,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "18:5.4000:40:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 5.7,
+      "duration": 0.24,
+      "velocity": 100,
+      "eventKey": "19:5.7000:48:1"
+    }
+  ]
+}

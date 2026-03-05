@@ -1,0 +1,41 @@
+{
+  "name": "F11",
+  "tempo": 120,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0.001,
+      "duration": 0.1,
+      "velocity": 100,
+      "eventKey": "0:0.0010:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.502,
+      "duration": 0.1,
+      "velocity": 100,
+      "eventKey": "1:0.5020:37:1"
+    },
+    {
+      "noteNumber": 38,
+      "startTime": 1.003,
+      "duration": 0.1,
+      "velocity": 100,
+      "eventKey": "2:1.0030:38:1"
+    },
+    {
+      "noteNumber": 39,
+      "startTime": 1.504,
+      "duration": 0.1,
+      "velocity": 100,
+      "eventKey": "3:1.5040:39:1"
+    },
+    {
+      "noteNumber": 40,
+      "startTime": 2.005,
+      "duration": 0.1,
+      "velocity": 100,
+      "eventKey": "4:2.0050:40:1"
+    }
+  ]
+}

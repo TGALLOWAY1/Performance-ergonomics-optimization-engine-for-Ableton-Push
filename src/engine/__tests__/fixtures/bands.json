@@ -1,0 +1,142 @@
+{
+  "_comment": "Threshold bands for solver fixture tests. Update via scripts/rebaseline_bands.ts",
+  "_version": "1.0.0",
+  "F01": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.38,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F02": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.29,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F03": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.67,
+    "movementCostMax": 3,
+    "scoreMin": 90
+  },
+  "F04": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.37,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F05_fast": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.31,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F05_slow": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.36,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F06": {
+    "feasible": false,
+    "unplayableCount": 8
+  },
+  "F07": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.4,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F08": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.26,
+    "movementCostMax": 2,
+    "scoreMin": 90
+  },
+  "F09": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.15,
+    "movementCostMax": 1,
+    "scoreMin": 90
+  },
+  "F10": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 10.71,
+    "movementCostMax": 43,
+    "scoreMin": 90
+  },
+  "F11": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.59,
+    "movementCostMax": 3,
+    "scoreMin": 90
+  },
+  "F12": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 48.37,
+    "movementCostMax": 194,
+    "scoreMin": 90
+  },
+  "I01": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 112.55,
+    "movementCostMax": 451,
+    "scoreMin": 90
+  },
+  "I02": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 0.22,
+    "movementCostMax": 1,
+    "scoreMin": 90
+  },
+  "I03": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 6.59,
+    "movementCostMax": 27,
+    "scoreMin": 90
+  },
+  "I04": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "hardCountMax": 6,
+    "crossoverRateMax": 15.97,
+    "movementCostMax": 64,
+    "scoreMin": 67
+  },
+  "I05": {
+    "feasible": true,
+    "unplayableCount": 0,
+    "crossoverRateMax": 5.92,
+    "movementCostMax": 24,
+    "scoreMin": 90,
+    "metricProfile": {
+      "movementShareMin": 19,
+      "movementShareMax": 60,
+      "fatigueShareMin": 4,
+      "fatigueShareMax": 15,
+      "crossoverShareMin": 4,
+      "crossoverShareMax": 15,
+      "stretchShareMin": 9,
+      "stretchShareMax": 30,
+      "bounceShareMin": 0,
+      "bounceShareMax": 0,
+      "driftShareMin": 9,
+      "driftShareMax": 30
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "name": "F05_slow",
+  "tempo": 80,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "0:0.0000:36:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 0.75,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "1:0.7500:48:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 1.5,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "2:1.5000:36:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 2.25,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "3:2.2500:48:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 3,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "4:3.0000:36:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 3.75,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "5:3.7500:48:1"
+    },
+    {
+      "noteNumber": 36,
+      "startTime": 4.5,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "6:4.5000:36:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 5.25,
+      "duration": 0.6000000000000001,
+      "velocity": 100,
+      "eventKey": "7:5.2500:48:1"
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+{
+  "name": "F10",
+  "tempo": 100,
+  "events": [
+    {
+      "noteNumber": 36,
+      "startTime": 0,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "0:0.0000:36:1"
+    },
+    {
+      "noteNumber": 37,
+      "startTime": 0.15,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "1:0.1500:37:1"
+    },
+    {
+      "noteNumber": 38,
+      "startTime": 0.3,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "2:0.3000:38:1"
+    },
+    {
+      "noteNumber": 39,
+      "startTime": 0.44999999999999996,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "3:0.4500:39:1"
+    },
+    {
+      "noteNumber": 40,
+      "startTime": 0.6,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "4:0.6000:40:1"
+    },
+    {
+      "noteNumber": 41,
+      "startTime": 0.75,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "5:0.7500:41:1"
+    },
+    {
+      "noteNumber": 42,
+      "startTime": 0.8999999999999999,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "6:0.9000:42:1"
+    },
+    {
+      "noteNumber": 43,
+      "startTime": 1.05,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "7:1.0500:43:1"
+    },
+    {
+      "noteNumber": 44,
+      "startTime": 1.2,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "8:1.2000:44:1"
+    },
+    {
+      "noteNumber": 45,
+      "startTime": 1.3499999999999999,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "9:1.3500:45:1"
+    },
+    {
+      "noteNumber": 46,
+      "startTime": 1.5,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "10:1.5000:46:1"
+    },
+    {
+      "noteNumber": 47,
+      "startTime": 1.65,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "11:1.6500:47:1"
+    },
+    {
+      "noteNumber": 48,
+      "startTime": 1.7999999999999998,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "12:1.8000:48:1"
+    },
+    {
+      "noteNumber": 49,
+      "startTime": 1.95,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "13:1.9500:49:1"
+    },
+    {
+      "noteNumber": 50,
+      "startTime": 2.1,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "14:2.1000:50:1"
+    },
+    {
+      "noteNumber": 51,
+      "startTime": 2.25,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "15:2.2500:51:1"
+    },
+    {
+      "noteNumber": 52,
+      "startTime": 2.4,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "16:2.4000:52:1"
+    },
+    {
+      "noteNumber": 53,
+      "startTime": 2.55,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "17:2.5500:53:1"
+    },
+    {
+      "noteNumber": 54,
+      "startTime": 2.6999999999999997,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "18:2.7000:54:1"
+    },
+    {
+      "noteNumber": 55,
+      "startTime": 2.85,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "19:2.8500:55:1"
+    },
+    {
+      "noteNumber": 56,
+      "startTime": 3,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "20:3.0000:56:1"
+    },
+    {
+      "noteNumber": 57,
+      "startTime": 3.15,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "21:3.1500:57:1"
+    },
+    {
+      "noteNumber": 58,
+      "startTime": 3.3,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "22:3.3000:58:1"
+    },
+    {
+      "noteNumber": 59,
+      "startTime": 3.4499999999999997,
+      "duration": 0.12,
+      "velocity": 100,
+      "eventKey": "23:3.4500:59:1"
+    }
+  ]
+}
