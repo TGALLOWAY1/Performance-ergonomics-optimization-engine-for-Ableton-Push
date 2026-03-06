@@ -8,8 +8,8 @@
 
 import { Performance, NoteEvent, HandPose, EngineConfiguration } from '../../types/performance';
 import { InstrumentConfig } from '../../types/performance';
-import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
+import { buildNoteToPadIndex, resolveNoteToPad, hashGridMapping } from '../mappingResolver';
 import { GridMapping, cellKey } from '../../types/layout';
 import { generateValidGripsWithTier, Pad } from '../feasibility';
 import {
@@ -172,38 +172,13 @@ export class BeamSolver implements SolverStrategy {
   private instrumentConfig: InstrumentConfig;
   private gridMapping: GridMapping | null;
   private neutralPadPositionsOverride: NeutralPadPositions | null;
+  private mappingResolverMode: 'strict' | 'allow-fallback';
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.gridMapping = config.gridMapping ?? null;
     this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
-  }
-
-  /**
-   * Gets the grid position for a MIDI note.
-   * Prioritizes the custom GridMapping if available.
-   */
-  private getNotePosition(noteNumber: number): GridPosition | null {
-    // 1. Try custom mapping first
-    if (this.gridMapping) {
-      for (const [key, voice] of Object.entries(this.gridMapping.cells)) {
-        if (voice.originalMidiNote === noteNumber) {
-          const [rowStr, colStr] = key.split(',');
-          return {
-            row: parseInt(rowStr, 10),
-            col: parseInt(colStr, 10)
-          };
-        }
-      }
-    }
-
-    // 2. Fallback to algorithmic mapping
-    const tuple = GridMapService.noteToGrid(noteNumber, this.instrumentConfig);
-    if (tuple) {
-      return { row: tuple[0], col: tuple[1] };
-    }
-
-    return null;
+    this.mappingResolverMode = config.mappingResolverMode ?? 'strict';
   }
 
   /**
@@ -518,7 +493,9 @@ export class BeamSolver implements SolverStrategy {
     assignments: NoteAssignment[],
     totalEvents: number,
     unmappedIndices: Set<number>,
-    config: EngineConfiguration
+    config: EngineConfiguration,
+    sortedEvents: Array<{ event: NoteEvent; originalIndex: number }>,
+    coverage: { totalNotes: number; unmappedNotesCount: number; fallbackNotesCount: number }
   ): EngineResult {
     const debugEvents: EngineDebugEvent[] = [];
     const fingerUsageStats: FingerUsageStats = {};
@@ -551,10 +528,11 @@ export class BeamSolver implements SolverStrategy {
       const assignment = assignmentMap.get(i);
 
       if (unmappedIndices.has(i)) {
-        // Unmapped note
+        // Unmapped note - use actual event data
+        const ev = sortedEvents[i]?.event;
         debugEvents.push({
-          noteNumber: 0, // Unknown
-          startTime: 0,
+          noteNumber: ev?.noteNumber ?? 0,
+          startTime: ev?.startTime ?? 0,
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
@@ -569,7 +547,7 @@ export class BeamSolver implements SolverStrategy {
           },
           difficulty: 'Unplayable',
           eventIndex: i,
-          // padId undefined for unmapped notes
+          eventKey: ev?.eventKey,
         });
         continue;
       }
@@ -693,6 +671,14 @@ export class BeamSolver implements SolverStrategy {
       fatigueMap,
       averageDrift: driftCount > 0 ? totalDrift / driftCount : 0,
       averageMetrics,
+      metadata: {
+        mappingIdUsed: this.gridMapping?.id,
+        mappingHashUsed: this.gridMapping ? hashGridMapping(this.gridMapping) : undefined,
+        mappingCoverage: coverage,
+        strictMode: this.mappingResolverMode === 'strict',
+        beamWidthUsed: config.beamWidth,
+        objectiveTotal: averageMetrics.total,
+      },
     };
   }
 
@@ -765,22 +751,49 @@ export class BeamSolver implements SolverStrategy {
       stiffness: effectiveStiffness,
     };
 
-    // Sort events by time
+    // Sort events by time (stable tie-break: startTime, channel, noteNumber, eventKey)
     const sortedEvents = [...performance.events]
       .map((event, originalIndex) => ({ event, originalIndex }))
-      .sort((a, b) => a.event.startTime - b.event.startTime);
+      .sort((a, b) => {
+        const dt = a.event.startTime - b.event.startTime;
+        if (dt !== 0) return dt;
+        const ch = (a.event.channel ?? 0) - (b.event.channel ?? 0);
+        if (ch !== 0) return ch;
+        const nn = a.event.noteNumber - b.event.noteNumber;
+        if (nn !== 0) return nn;
+        return (a.event.eventKey ?? '').localeCompare(b.event.eventKey ?? '');
+      });
 
-    // Map events to grid positions
-    const eventsWithPositions = sortedEvents.map(({ event, originalIndex }) => ({
-      event,
-      index: originalIndex,
-      position: this.getNotePosition(event.noteNumber),
-    }));
+    // Build note-to-pad index once (O(cells)), then resolve each event O(1)
+    // When mapping is null, use allow-fallback (L01 chromatic); when mapping exists, use configured mode
+    const noteToPadIndex = buildNoteToPadIndex(this.gridMapping?.cells ?? {});
+    const effectiveMode =
+      this.gridMapping === null ? 'allow-fallback' : this.mappingResolverMode;
+    const eventsWithPositions = sortedEvents.map(({ event, originalIndex }) => {
+      const res = resolveNoteToPad(
+        event.noteNumber,
+        noteToPadIndex,
+        this.instrumentConfig,
+        effectiveMode
+      );
+      const position: GridPosition | null =
+        res.source === 'mapping' || res.source === 'fallback'
+          ? { row: res.pad.row, col: res.pad.col }
+          : null;
+      return {
+        event,
+        index: originalIndex,
+        position,
+        resolutionSource: res.source,
+      };
+    });
 
-    // Track unmapped notes
+    // Track unmapped notes and fallback count
     const unmappedIndices = new Set<number>();
-    eventsWithPositions.forEach(({ index, position }) => {
+    let fallbackCount = 0;
+    eventsWithPositions.forEach(({ index, position, resolutionSource }) => {
       if (!position) unmappedIndices.add(index);
+      else if (resolutionSource === 'fallback') fallbackCount++;
     });
 
     // Group events by timestamp (handles chords correctly)
@@ -969,8 +982,25 @@ export class BeamSolver implements SolverStrategy {
     }
 
     // Find best node (lowest total cost)
+    const requiredNotes = new Set(performance.events.map((e) => e.noteNumber));
+    const unmappedNoteNumbers = new Set(
+      eventsWithPositions.filter((e) => !e.position).map((e) => e.event.noteNumber)
+    );
+    const coverage = {
+      totalNotes: requiredNotes.size,
+      unmappedNotesCount: unmappedNoteNumbers.size,
+      fallbackNotesCount: fallbackCount,
+    };
+
     if (beam.length === 0) {
-      return this.buildResult([], performance.events.length, unmappedIndices, effectiveConfig);
+      return this.buildResult(
+        [],
+        performance.events.length,
+        unmappedIndices,
+        effectiveConfig,
+        sortedEvents,
+        coverage
+      );
     }
 
     const bestNode = beam.reduce((best, node) =>
@@ -980,7 +1010,14 @@ export class BeamSolver implements SolverStrategy {
     // Backtrack to build optimal assignment path
     const assignments = this.backtrack(bestNode);
 
-    return this.buildResult(assignments, performance.events.length, unmappedIndices, effectiveConfig);
+    return this.buildResult(
+      assignments,
+      performance.events.length,
+      unmappedIndices,
+      effectiveConfig,
+      sortedEvents,
+      coverage
+    );
   }
 }
 

@@ -175,6 +175,19 @@ export interface EngineResult {
    * Only populated by AnnealingSolver; undefined for other solvers.
    */
   annealingTrace?: AnnealingIterationSnapshot[];
+  /**
+   * Run metadata for forensic/debug. Includes mapping identity, coverage, and objective.
+   */
+  metadata?: {
+    mappingIdUsed?: string;
+    mappingHashUsed?: string;
+    mappingCoverage?: { totalNotes: number; unmappedNotesCount: number; fallbackNotesCount: number };
+    seed?: number;
+    strictMode?: boolean;
+    beamWidthUsed?: number;
+    objectiveTotal?: number;
+    objectiveComponentsSummary?: Record<string, number>;
+  };
 }
 
 // ============================================================================
@@ -255,6 +268,12 @@ export interface SolverConfig {
    * Solver derives neutral hand centers from these positions via computeNeutralHandCenters.
    */
   neutralPadPositionsOverride?: NeutralPadPositions | null;
+  /**
+   * Mapping resolution mode. 'strict' = no fallback (unmapped stays unmapped).
+   * 'allow-fallback' = use noteToGrid when note not in mapping.
+   * Default 'strict' for optimization; use 'allow-fallback' only for non-optimization previews.
+   */
+  mappingResolverMode?: 'strict' | 'allow-fallback';
 }
 
 /**
