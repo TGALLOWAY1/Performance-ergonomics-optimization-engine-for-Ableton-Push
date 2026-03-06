@@ -1017,6 +1017,24 @@ export const Workbench: React.FC = () => {
       return;
     }
 
+    // Ensure Pose0 exists (use default if missing)
+    if (!projectState.naturalHandPoses?.length) {
+      setProjectState(prev => ({
+        ...prev,
+        naturalHandPoses: [createDefaultPose0()],
+      }));
+    }
+
+    // Enforce full coverage: block if any sounds are unmapped
+    const { computeMappingCoverage } = await import('@/engine/mappingCoverage');
+    const coverage = computeMappingCoverage(performance, activeMapping);
+    if (coverage.unmappedNotes.length > 0) {
+      alert(
+        `Mapping must cover all sounds for optimization. ${coverage.unmappedNotes.length} note(s) are unmapped (e.g. MIDI ${coverage.unmappedNotes.slice(0, 5).join(', ')}${coverage.unmappedNotes.length > 5 ? '...' : ''}). Use "Seed from Pose0" or assign manually.`
+      );
+      return;
+    }
+
     console.log('[Workbench] Starting layout optimization with Simulated Annealing...');
     setIsOptimizingLayout(true);
 
@@ -1034,7 +1052,7 @@ export const Workbench: React.FC = () => {
     } finally {
       setIsOptimizingLayout(false);
     }
-  }, [activeMapping, projectState, optimizeLayout]);
+  }, [activeMapping, projectState, optimizeLayout, setProjectState]);
 
 
 
