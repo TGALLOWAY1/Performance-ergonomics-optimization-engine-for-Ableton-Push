@@ -131,6 +131,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     /**
      * Runs a solver and stores the result in the solverResults map.
+     * Mapping is resolved via activeMappingId only (no first-mapping fallback).
      */
     const runSolver = async (solverType: SolverType, activeMapping?: GridMapping | null): Promise<void> => {
         // Get filtered performance
@@ -140,9 +141,15 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             return;
         }
 
-        // Get active mapping (use provided or find first)
-        const mapping = activeMapping ??
-            (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
+        // Resolve mapping via activeMappingId (caller may pass activeMapping for consistency)
+        const mapping = activeMapping ?? (projectState.activeMappingId
+            ? projectState.mappings.find(m => m.id === projectState.activeMappingId) ?? null
+            : null);
+
+        // When mappings exist but none selected, require activeMappingId
+        if (!mapping && projectState.mappings.length > 0) {
+            throw new Error('No active mapping selected. Please select a mapping from the layout dropdown.');
+        }
 
         // Get manual assignments for current layout (keyed by eventKey for stable identity)
         const currentLayoutId = projectState.activeLayoutId;
@@ -237,6 +244,7 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     /**
      * Optimizes the layout using Simulated Annealing.
+     * Mapping is resolved via activeMappingId only (no first-mapping fallback).
      */
     const optimizeLayout = async (activeMapping?: GridMapping | null): Promise<void> => {
         // Get filtered performance
@@ -246,12 +254,13 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
             throw new Error('No performance data available. Please load a MIDI file first.');
         }
 
-        // Get active mapping (use provided or find first)
-        const mapping = activeMapping ??
-            (projectState.mappings.length > 0 ? projectState.mappings[0] : null);
+        // Resolve mapping via activeMappingId (caller may pass activeMapping for consistency)
+        const mapping = activeMapping ?? (projectState.activeMappingId
+            ? projectState.mappings.find(m => m.id === projectState.activeMappingId) ?? null
+            : null);
 
         if (!mapping) {
-            throw new Error('No mapping to optimize. Please assign some sounds to the grid first.');
+            throw new Error('No mapping to optimize. Please select a mapping and assign all sounds to the grid first.');
         }
 
         if (Object.keys(mapping.cells).length === 0) {
