@@ -44,13 +44,12 @@ const ITERATIONS = 1000;
 
 /**
  * Beam width for fast cost evaluation during annealing.
- * Lower values = faster but less accurate cost estimates.
+ * Bumped from 2 to 5 to reduce alias-y evaluations (plan: de-aliasing).
  */
-const FAST_BEAM_WIDTH = 2;
+const FAST_BEAM_WIDTH = 5;
 
 /**
  * Beam width for final high-quality evaluation.
- * Higher values = more accurate final result.
  */
 const FINAL_BEAM_WIDTH = 50;
 
@@ -420,8 +419,13 @@ export class AnnealingSolver implements SolverStrategy {
     return {
       ...finalResult,
       evolutionLog,
-      optimizationLog: telemetry, // Store full telemetry with step, temp, cost, accepted (backward compatibility)
-      annealingTrace: annealingTrace, // Store detailed trace with cost breakdown and acceptance details
+      optimizationLog: telemetry,
+      annealingTrace,
+      metadata: {
+        ...finalResult.metadata,
+        objectiveTotal: finalResult.averageMetrics.total,
+        objectiveComponentsSummary: finalResult.metadata?.objectiveComponentsSummary,
+      },
     };
   }
 }

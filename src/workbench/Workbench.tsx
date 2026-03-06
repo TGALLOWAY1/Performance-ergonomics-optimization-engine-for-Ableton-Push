@@ -18,6 +18,7 @@ import {
   poseHasAssignments,
   createDefaultPose0,
 } from '../types/naturalHandPose';
+import { seedMappingFromPose0 } from '../engine/seedMappingFromPose0';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
@@ -833,6 +834,50 @@ export const Workbench: React.FC = () => {
   };
 
   // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Seed from Pose0 (Full Coverage)
+  // ============================================================================
+  const handleSeedFromPose0 = useCallback(() => {
+    const performance = getActivePerformance(projectState);
+    if (!performance || performance.events.length === 0) {
+      alert('No performance data. Load a MIDI file first.');
+      return;
+    }
+    const pose0 = projectState.naturalHandPoses?.[0] ?? createDefaultPose0();
+    if (!poseHasAssignments(pose0)) {
+      alert('Configure Natural Hand Pose in the Pose tab first.');
+      return;
+    }
+    const voiceMap = new Map<number, Voice>();
+    for (const v of projectState.parkedSounds) {
+      if (v.originalMidiNote != null) voiceMap.set(v.originalMidiNote, v);
+    }
+    for (const v of Object.values(activeMapping?.cells ?? {})) {
+      if (v.originalMidiNote != null) voiceMap.set(v.originalMidiNote, v);
+    }
+    const seeded = seedMappingFromPose0(
+      performance,
+      pose0,
+      projectState.instrumentConfig,
+      0,
+      voiceMap
+    );
+    if (!activeMapping) {
+      setProjectState(prev => ({
+        ...prev,
+        mappings: [...prev.mappings, seeded],
+        activeMappingId: seeded.id,
+      }));
+    } else {
+      setProjectState(prev => ({
+        ...prev,
+        mappings: prev.mappings.map(m =>
+          m.id === activeMapping.id ? { ...seeded, id: m.id, name: m.name } : m
+        ),
+      }));
+    }
+  }, [projectState, activeMapping, setProjectState]);
+
+  // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Assign Using Natural Pose (Deterministic)
   // ============================================================================
   // Maps unassigned Voices to Pads using Pose 0 anchor pads as priority,
@@ -1332,8 +1377,23 @@ export const Workbench: React.FC = () => {
 
               <div className="h-6 w-px bg-slate-700/50" />
 
-              {/* Primary layout: Natural (assign to pose pads) then Auto-Arrange (optimize). Random is secondary. */}
+              {/* Primary layout: Seed (fill from Pose0), Natural (assign unassigned), Auto-Arrange (optimize). */}
               <div className="flex items-center gap-1.5">
+                {/* Seed: fill mapping from Pose0 for full coverage (when grid empty or incomplete) */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSeedFromPose0}
+                  disabled={!filteredPerformance || filteredPerformance.events.length === 0 || !hasNaturalPose}
+                  title="Fill grid from Natural Hand Pose (deterministic). Use when grid is empty or has unmapped sounds."
+                  leftIcon={(
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                  )}
+                >
+                  Seed
+                </Button>
                 {/* Natural: assign sounds to Natural Hand Pose pads first (primary when pose is set) */}
                 <Button
                   variant={hasNaturalPose ? "primary" : "secondary"}
