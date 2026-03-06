@@ -42,6 +42,79 @@ const MIN_TIME_DELTA = 0.001;
  */
 export const FALLBACK_GRIP_PENALTY = 1000;
 
+// ============================================================================
+// Alternation & Hand Balance (Phase 3)
+// ============================================================================
+
+/** Time threshold (seconds) below which same-finger repetition is penalized. */
+export const ALTERNATION_DT_THRESHOLD = 0.25;
+
+/** Base penalty for same-finger repetition on short dt. */
+export const ALTERNATION_PENALTY = 1.5;
+
+/** Target left-hand share for right-handed bias (0.45 = 55% right). */
+export const HAND_BALANCE_TARGET_LEFT = 0.45;
+
+/** Weight for quadratic hand-balance penalty. */
+export const HAND_BALANCE_WEIGHT = 2.0;
+
+/** Minimum total notes before applying hand balance penalty. */
+export const HAND_BALANCE_MIN_NOTES = 2;
+
+/**
+ * Alternation penalty: penalizes same-finger repetition on short dt.
+ * Encourages alternating fingers for rapid sequences.
+ *
+ * @param prevAssignments - Previous group's (hand, finger) pairs
+ * @param currentAssignments - Current group's (hand, finger) pairs
+ * @param dt - Time delta from previous group (seconds)
+ * @returns Alternation cost (0 if no repetition or dt above threshold)
+ */
+export function calculateAlternationCost(
+  prevAssignments: Array<{ hand: 'left' | 'right'; finger: FingerType }>,
+  currentAssignments: Array<{ hand: 'left' | 'right'; finger: FingerType }>,
+  dt: number
+): number {
+  if (prevAssignments.length === 0 || dt >= ALTERNATION_DT_THRESHOLD) {
+    return 0;
+  }
+
+  const prevSet = new Set(prevAssignments.map((a) => `${a.hand}:${a.finger}`));
+  let penalty = 0;
+
+  for (const curr of currentAssignments) {
+    if (prevSet.has(`${curr.hand}:${curr.finger}`)) {
+      // Same finger used again quickly - monotony penalty
+      const recencyFactor = 1 - dt / ALTERNATION_DT_THRESHOLD;
+      penalty += ALTERNATION_PENALTY * recencyFactor;
+    }
+  }
+
+  return penalty;
+}
+
+/**
+ * Hand balance penalty: quadratic penalty when leftShare deviates from target.
+ * Slight right-hand bias (target 0.45) for typical right-handed players.
+ *
+ * @param leftCount - Number of notes assigned to left hand so far
+ * @param rightCount - Number of notes assigned to right hand so far
+ * @returns Hand balance cost (0 if below min notes)
+ */
+export function calculateHandBalanceCost(
+  leftCount: number,
+  rightCount: number
+): number {
+  const total = leftCount + rightCount;
+  if (total < HAND_BALANCE_MIN_NOTES) {
+    return 0;
+  }
+
+  const leftShare = leftCount / total;
+  const deviation = leftShare - HAND_BALANCE_TARGET_LEFT;
+  return HAND_BALANCE_WEIGHT * deviation * deviation;
+}
+
 /**
  * Calculates the Euclidean distance between two grid positions.
  * Uses GridPosition (object-based) for consistency.

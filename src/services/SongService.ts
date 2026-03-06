@@ -8,7 +8,7 @@ import { saveProjectStateToStorage, loadProjectStateFromStorage, deleteProjectSt
 import { ProjectState } from '../types/projectState';
 import { createDefaultPose0 } from '../types/naturalHandPose';
 import { generateId } from '../utils/performanceUtils';
-import { DEFAULT_TEST_MIDI_URL, DEFAULT_TEST_SONG_ID } from '../data/testData';
+import { DEFAULT_TEST_SONG_ID, EMBEDDED_TEST_MIDI_BASE64 } from '../data/testData';
 
 class SongService {
     private getSongsMap(): Record<string, Song> {
@@ -321,19 +321,17 @@ class SongService {
     }
 
     /**
-     * Seeds the default test song (TEST MIDI 1) if it doesn't exist.
-     * The MIDI is bundled in public/default-test.mid - no import needed.
+     * Seeds the default test song from embedded MIDI data.
+     * The MIDI is bundled in the app—no fetch or import needed. Always available from start.
      */
     async seedDefaultTestSong(): Promise<void> {
         const existing = this.getSong(DEFAULT_TEST_SONG_ID);
         if (existing?.midiData) {
-            return; // Already seeded
+            return; // Already seeded with MIDI data
         }
 
         try {
-            const res = await fetch(DEFAULT_TEST_MIDI_URL);
-            if (!res.ok) throw new Error(`Failed to fetch default test MIDI: ${res.status}`);
-            const arrayBuffer = await res.arrayBuffer();
+            const arrayBuffer = this.base64ToArrayBuffer(EMBEDDED_TEST_MIDI_BASE64);
 
             const projectData = await parseMidiFileToProject(
                 new File([arrayBuffer], 'default-test.mid', { type: 'audio/midi' })
@@ -347,18 +345,14 @@ class SongService {
             const lastEvent = performance.events[performance.events.length - 1];
             const duration = lastEvent ? Math.ceil(lastEvent.startTime + (lastEvent.duration || 0)) : 0;
 
-            const projectStateId = uuidv4();
+            const projectStateId = existing?.projectStateId ?? uuidv4();
             const initialState = this.createProjectStateFromMidi(projectData);
             saveProjectStateToStorage(projectStateId, initialState);
-
-            const base64 = btoa(
-                String.fromCharCode(...new Uint8Array(arrayBuffer))
-            );
 
             const newSong: Song = {
                 metadata: {
                     id: DEFAULT_TEST_SONG_ID,
-                    title: 'Default Test (Scenario 1)',
+                    title: 'Default Test',
                     artist: 'Built-in',
                     bpm: performance.tempo || 120,
                     key: inferredKey,
@@ -372,8 +366,8 @@ class SongService {
                 },
                 sections: [],
                 projectStateId,
-                midiData: base64,
-                midiFileName: 'TEST MIDI 1.mid',
+                midiData: EMBEDDED_TEST_MIDI_BASE64,
+                midiFileName: 'default-test.mid',
             };
 
             const songs = this.getSongsMap();

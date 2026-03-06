@@ -13,12 +13,15 @@ interface AnalysisPanelProps {
     activeMapping: GridMapping | null;
     performance: Performance | null;
     onAssignmentChange: (eventKey: string, hand: 'left' | 'right', finger: FingerType) => void;
+    /** When false, hide Beam/Genetic comparison tab. */
+    showAdvanced?: boolean;
 }
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     engineResult,
     activeMapping,
     performance,
+    showAdvanced = false,
     // onAssignmentChange,
 }) => {
     const { getSolverResult } = useProject();
@@ -120,15 +123,17 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                         >
                             Performance Summary
                         </button>
-                        <button
-                            onClick={() => setActiveTab('comparison')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'comparison'
-                                ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
-                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                                }`}
-                        >
-                            Model Comparison
-                        </button>
+                        {showAdvanced && (
+                            <button
+                                onClick={() => setActiveTab('comparison')}
+                                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'comparison'
+                                    ? 'bg-[var(--bg-input)] text-[var(--text-primary)]'
+                                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                    }`}
+                            >
+                                Model Comparison
+                            </button>
+                        )}
                         <button
                             onClick={() => setActiveTab('optimization')}
                             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${activeTab === 'optimization'
@@ -143,7 +148,7 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6 flex flex-col">
-                {activeTab === 'summary' ? (
+                {(activeTab === 'summary' || (activeTab === 'comparison' && !showAdvanced)) ? (
                     <>
                         {/* Performance Summary Card */}
                         <div className="bg-[var(--bg-card)] p-4 rounded-[var(--radius-lg)] space-y-4 flex-none border border-[var(--border-subtle)] shadow-sm">

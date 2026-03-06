@@ -12,6 +12,8 @@ import { FingerType } from '../models';
 import { createBeamSolver } from './BeamSolver';
 import { applyRandomMutation } from './mutationService';
 import { NeutralPadPositions } from '../handPose';
+import { computeMappingCoverage } from '../mappingCoverage';
+import { createSeededRng } from '../seededRng';
 import {
   SolverStrategy,
   SolverType,
@@ -43,13 +45,12 @@ const ITERATIONS = 1000;
 
 /**
  * Beam width for fast cost evaluation during annealing.
- * Lower values = faster but less accurate cost estimates.
+ * Bumped from 2 to 5 to reduce alias-y evaluations (plan: de-aliasing).
  */
-const FAST_BEAM_WIDTH = 2;
+const FAST_BEAM_WIDTH = 5;
 
 /**
  * Beam width for final high-quality evaluation.
- * Higher values = more accurate final result.
  */
 const FINAL_BEAM_WIDTH = 50;
 
@@ -87,11 +88,13 @@ export class AnnealingSolver implements SolverStrategy {
   private initialGridMapping: GridMapping | null;
   private neutralPadPositionsOverride: NeutralPadPositions | null = null;
   private bestMapping: GridMapping | null = null;
+  private seed: number;
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.initialGridMapping = config.gridMapping ?? null;
     this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
+    this.seed = config.seed ?? Math.floor(Math.random() * 0x7fffffff);
   }
 
   /**
@@ -104,7 +107,8 @@ export class AnnealingSolver implements SolverStrategy {
 
   /**
    * Evaluates the cost of a GridMapping by running Beam Search.
-   * 
+   * Invalid candidates (unmapped notes) return Infinity and are always rejected.
+   *
    * @param mapping - The GridMapping to evaluate
    * @param performance - The performance data to analyze
    * @param config - Engine configuration (beam width, stiffness, resting pose)
@@ -116,12 +120,49 @@ export class AnnealingSolver implements SolverStrategy {
     performance: Performance,
     config: EngineConfiguration,
     beamWidth: number
-  ): Promise<{ result: EngineResult; cost: number }> {
-    // Create a BeamSolver with the candidate mapping (include Pose 0 override when present)
+  ): Promise<{ result: EngineResult; cost: number; invalidReason?: string }> {
+    // Enforce full coverage: unmapped candidates are invalid (return Infinity)
+    const coverage = computeMappingCoverage(performance, mapping);
+    if (coverage.unmappedNotes.length > 0) {
+      const sentinelResult: EngineResult = {
+        score: 0,
+        unplayableCount: performance.events.length,
+        hardCount: 0,
+        debugEvents: [],
+        fingerUsageStats: {},
+        fatigueMap: {},
+        averageDrift: 0,
+        averageMetrics: {
+          movement: 0,
+          stretch: 0,
+          drift: 0,
+          bounce: 0,
+          fatigue: 0,
+          crossover: 0,
+          total: Number.POSITIVE_INFINITY,
+        },
+        metadata: {
+          mappingCoverage: {
+            totalNotes: coverage.totalNotes,
+            unmappedNotesCount: coverage.unmappedNotes.length,
+            fallbackNotesCount: 0,
+          },
+          invalidReason: 'invalid_unmapped_notes',
+        },
+      };
+      return {
+        result: sentinelResult,
+        cost: Number.POSITIVE_INFINITY,
+        invalidReason: 'invalid_unmapped_notes',
+      };
+    }
+
+    // Create a BeamSolver with strict mode (no fallback during optimization)
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: mapping,
       neutralPadPositionsOverride: this.neutralPadPositionsOverride,
+      mappingResolverMode: 'strict',
     };
 
     const beamSolver = createBeamSolver(solverConfig);
@@ -136,7 +177,6 @@ export class AnnealingSolver implements SolverStrategy {
     const result = await beamSolver.solve(performance, evaluationConfig);
 
     // Return both the full result (for cost breakdown) and the cost value
-    // The cost is the average total cost per event (normalized metric for comparison)
     return {
       result,
       cost: result.averageMetrics.total,
@@ -185,6 +225,17 @@ export class AnnealingSolver implements SolverStrategy {
     );
     let currentCost = initialEvaluation.cost;
 
+    // Fail early if initial mapping is invalid (unmapped notes)
+    if (
+      !Number.isFinite(currentCost) ||
+      currentCost === Number.POSITIVE_INFINITY ||
+      initialEvaluation.invalidReason
+    ) {
+      throw new Error(
+        'Initial mapping does not cover all sounds. Seed the mapping from Pose0 or assign all required notes before optimizing.'
+      );
+    }
+
     // Track the best mapping found so far (deep copy)
     let bestMapping: GridMapping = {
       ...currentMapping,
@@ -192,6 +243,9 @@ export class AnnealingSolver implements SolverStrategy {
       fingerConstraints: { ...currentMapping.fingerConstraints },
     };
     let bestCost = currentCost;
+
+    // Seeded RNG for deterministic mutations and acceptance
+    const rng = createSeededRng(this.seed);
 
     // Initialize temperature
     let currentTemp = INITIAL_TEMP;
@@ -208,8 +262,7 @@ export class AnnealingSolver implements SolverStrategy {
 
     // The Annealing Loop
     for (let step = 0; step < ITERATIONS; step++) {
-      // Mutate: Get a candidate mapping
-      const candidateMapping = applyRandomMutation(currentMapping);
+      const candidateMapping = applyRandomMutation(currentMapping, rng);
 
       // Evaluate: Calculate cost of candidate using fast Beam Search
       const candidateEvaluation = await this.evaluateMappingCost(
@@ -220,21 +273,25 @@ export class AnnealingSolver implements SolverStrategy {
       );
       const candidateCost = candidateEvaluation.cost;
 
-      // Acceptance Probability (Metropolis criterion)
-      const delta = candidateCost - currentCost;
+      // Invalid candidates (Infinity) are always rejected; avoid NaN from exp(-Infinity/T)
+      const candidateInvalid =
+        !Number.isFinite(candidateCost) || candidateCost === Number.POSITIVE_INFINITY;
+
       let accepted = false;
       let acceptanceProbability: number | undefined = undefined;
 
-      if (delta < 0) {
-        // Better solution: accept immediately
-        accepted = true;
-      } else if (delta > 0) {
-        // Worse solution: accept probabilistically
-        acceptanceProbability = Math.exp(-delta / currentTemp);
-        accepted = Math.random() < acceptanceProbability;
+      if (candidateInvalid) {
+        accepted = false;
       } else {
-        // Same cost: accept (neutral move)
-        accepted = true;
+        const delta = candidateCost - currentCost;
+        if (delta < 0) {
+          accepted = true;
+        } else if (delta > 0 && Number.isFinite(currentCost) && currentCost > 0) {
+          acceptanceProbability = Math.exp(-delta / currentTemp);
+          accepted = rng() < acceptanceProbability;
+        } else {
+          accepted = true; // Same cost or current was invalid
+        }
       }
 
       // Update: If accepted, update current state
@@ -263,6 +320,8 @@ export class AnnealingSolver implements SolverStrategy {
 
       // Detailed trace: Log snapshot (with optional downsampling)
       if (step % LOG_EVERY_N === 0) {
+        const deltaCost = candidateInvalid ? 0 : candidateCost - currentCost;
+
         // Compute per-metric sums from debugEvents
         // Sum up all cost breakdowns across all events
         const playableEvents = candidateEvaluation.result.debugEvents.filter(
@@ -297,7 +356,7 @@ export class AnnealingSolver implements SolverStrategy {
           currentCost: currentCost,
           bestCost: bestCost,
           accepted: accepted,
-          deltaCost: delta,
+          deltaCost: deltaCost,
           acceptanceProbability: acceptanceProbability,
           movementSum,
           stretchSum,
@@ -367,8 +426,14 @@ export class AnnealingSolver implements SolverStrategy {
     return {
       ...finalResult,
       evolutionLog,
-      optimizationLog: telemetry, // Store full telemetry with step, temp, cost, accepted (backward compatibility)
-      annealingTrace: annealingTrace, // Store detailed trace with cost breakdown and acceptance details
+      optimizationLog: telemetry,
+      annealingTrace,
+      metadata: {
+        ...finalResult.metadata,
+        seed: this.seed,
+        objectiveTotal: finalResult.averageMetrics.total,
+        objectiveComponentsSummary: finalResult.metadata?.objectiveComponentsSummary,
+      },
     };
   }
 }

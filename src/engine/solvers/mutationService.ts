@@ -60,42 +60,35 @@ function getOccupiedPads(mapping: GridMapping): PadCoord[] {
   return occupiedPads;
 }
 
+export type Rng = () => number;
+
 /**
  * Applies a random mutation to a GridMapping by either swapping two Voices
  * or moving a Voice to an empty pad.
- * 
- * Mutation operations (50/50 chance):
- * - Swap: Pick two occupied pads at random and swap their assigned Voices
- * - Move: Pick one occupied pad and one empty pad, move the Voice to the empty slot
- * 
+ *
  * @param mapping - The GridMapping to mutate
- * @returns A new GridMapping with the mutation applied (immutable)
+ * @param rng - Optional RNG (default Math.random). Use seeded RNG for determinism.
  */
-export function applyRandomMutation(mapping: GridMapping): GridMapping {
+export function applyRandomMutation(mapping: GridMapping, rng: Rng = Math.random): GridMapping {
   const occupiedPads = getOccupiedPads(mapping);
   const emptyPads = getEmptyPads(mapping);
 
-  // Need at least one occupied pad to perform any mutation
   if (occupiedPads.length === 0) {
-    return mapping; // No mutations possible, return original
+    return mapping;
   }
 
-  // Randomly choose between swap and move operations
-  const useSwap = Math.random() < 0.5;
+  const useSwap = rng() < 0.5;
 
   if (useSwap && occupiedPads.length >= 2) {
-    // Swap Operation: Pick two occupied pads and swap their Voices
-    const [pad1, pad2] = getRandomPair(occupiedPads);
+    const [pad1, pad2] = getRandomPair(occupiedPads, rng);
     return applySwapMutation(mapping, pad1, pad2);
   } else if (emptyPads.length > 0) {
-    // Move Operation: Pick one occupied pad and one empty pad, move the Voice
-    const sourcePad = getRandomElement(occupiedPads);
-    const targetPad = getRandomElement(emptyPads);
+    const sourcePad = getRandomElement(occupiedPads, rng);
+    const targetPad = getRandomElement(emptyPads, rng);
     return applyMoveMutation(mapping, sourcePad, targetPad);
   } else {
-    // No empty pads available, fall back to swap if possible
     if (occupiedPads.length >= 2) {
-      const [pad1, pad2] = getRandomPair(occupiedPads);
+      const [pad1, pad2] = getRandomPair(occupiedPads, rng);
       return applySwapMutation(mapping, pad1, pad2);
     }
     // No mutations possible, return original
@@ -211,29 +204,19 @@ function applyMoveMutation(
   };
 }
 
-/**
- * Helper function to get a random element from an array.
- */
-function getRandomElement<T>(array: T[]): T {
-  return array[Math.floor(Math.random() * array.length)];
+function getRandomElement<T>(array: T[], rng: Rng = Math.random): T {
+  return array[Math.floor(rng() * array.length)];
 }
 
-/**
- * Helper function to get two distinct random elements from an array.
- */
-function getRandomPair<T>(array: T[]): [T, T] {
+function getRandomPair<T>(array: T[], rng: Rng = Math.random): [T, T] {
   if (array.length < 2) {
     throw new Error('Array must have at least 2 elements to get a pair');
   }
-
-  const index1 = Math.floor(Math.random() * array.length);
-  let index2 = Math.floor(Math.random() * array.length);
-
-  // Ensure indices are different
+  const index1 = Math.floor(rng() * array.length);
+  let index2 = Math.floor(rng() * array.length);
   while (index2 === index1) {
-    index2 = Math.floor(Math.random() * array.length);
+    index2 = Math.floor(rng() * array.length);
   }
-
   return [array[index1], array[index2]];
 }
 

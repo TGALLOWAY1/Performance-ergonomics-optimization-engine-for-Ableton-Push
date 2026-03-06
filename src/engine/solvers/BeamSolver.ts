@@ -8,8 +8,8 @@
 
 import { Performance, NoteEvent, HandPose, EngineConfiguration } from '../../types/performance';
 import { InstrumentConfig } from '../../types/performance';
-import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
+import { buildNoteToPadIndex, resolveNoteToPad, hashGridMapping } from '../mappingResolver';
 import { GridMapping, cellKey } from '../../types/layout';
 import { generateValidGripsWithTier, Pad } from '../feasibility';
 import {
@@ -17,8 +17,15 @@ import {
   calculateTransitionCost,
   calculateGripStretchCost,
   calculatePerFingerHomeCost,
+  calculateAlternationCost,
+  calculateHandBalanceCost,
   FALLBACK_GRIP_PENALTY,
 } from '../costFunction';
+import {
+  type ObjectiveComponents,
+  combineComponents,
+  objectiveToCostBreakdown,
+} from '../objective';
 import { GridPosition } from '../gridMath';
 import { getNeutralHandCenters, computeNeutralHandCenters, restingPoseFromNeutralPadPositions, NeutralHandCenters, NeutralPadPositions } from '../handPose';
 import {
@@ -38,6 +45,7 @@ import {
 
 /**
  * Assignment record for a single note event.
+ * costComponents: real objective breakdown (when present, cost === combineComponents(costComponents)).
  */
 interface NoteAssignment {
   eventIndex: number;
@@ -50,6 +58,8 @@ interface NoteAssignment {
   cost: number;
   row: number;
   col: number;
+  /** Real objective components; used for accurate CostBreakdown in result */
+  costComponents?: ObjectiveComponents;
 }
 
 /**
@@ -69,6 +79,10 @@ interface BeamNode {
   assignments: NoteAssignment[];
   /** Depth in the search tree (group index) */
   depth: number;
+  /** Cumulative left-hand note count (for hand balance) */
+  leftCount: number;
+  /** Cumulative right-hand note count (for hand balance) */
+  rightCount: number;
 }
 
 /**
@@ -172,38 +186,13 @@ export class BeamSolver implements SolverStrategy {
   private instrumentConfig: InstrumentConfig;
   private gridMapping: GridMapping | null;
   private neutralPadPositionsOverride: NeutralPadPositions | null;
+  private mappingResolverMode: 'strict' | 'allow-fallback';
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.gridMapping = config.gridMapping ?? null;
     this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
-  }
-
-  /**
-   * Gets the grid position for a MIDI note.
-   * Prioritizes the custom GridMapping if available.
-   */
-  private getNotePosition(noteNumber: number): GridPosition | null {
-    // 1. Try custom mapping first
-    if (this.gridMapping) {
-      for (const [key, voice] of Object.entries(this.gridMapping.cells)) {
-        if (voice.originalMidiNote === noteNumber) {
-          const [rowStr, colStr] = key.split(',');
-          return {
-            row: parseInt(rowStr, 10),
-            col: parseInt(colStr, 10)
-          };
-        }
-      }
-    }
-
-    // 2. Fallback to algorithmic mapping
-    const tuple = GridMapService.noteToGrid(noteNumber, this.instrumentConfig);
-    if (tuple) {
-      return { row: tuple[0], col: tuple[1] };
-    }
-
-    return null;
+    this.mappingResolverMode = config.mappingResolverMode ?? 'strict';
   }
 
   /**
@@ -219,6 +208,8 @@ export class BeamSolver implements SolverStrategy {
       parent: null,
       assignments: [], // Empty for initial node
       depth: 0,
+      leftCount: 0,
+      rightCount: 0,
     };
 
     return [initialNode];
@@ -281,10 +272,30 @@ export class BeamSolver implements SolverStrategy {
           ? calculatePerFingerHomeCost(grip, hand, neutralHandCenters, 0.8)
           : 0;
 
-        // Apply fallback penalty if this is a fallback grip
+        // Apply fallback penalty if this is a fallback grip (constraint cost)
         const fallbackPenalty = isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
-        const stepCost = effectiveTransitionCost + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
+        // Alternation: penalize same-finger repetition on short dt
+        const prevAssignments = node.assignments.map((a) => ({ hand: a.hand, finger: a.finger }));
+        const gripFingersForCost = Object.keys(grip.fingers) as FingerType[];
+        const currentAssignments = gripFingersForCost.slice(0, group.notes.length).map((finger) => ({ hand, finger }));
+        const alternationCost = calculateAlternationCost(prevAssignments, currentAssignments, rawTimeDelta);
+
+        // Hand balance: penalize deviation from target left share
+        const newLeftCount = node.leftCount + (hand === 'left' ? group.notes.length : 0);
+        const newRightCount = node.rightCount + (hand === 'right' ? group.notes.length : 0);
+        const handBalanceCost = calculateHandBalanceCost(newLeftCount, newRightCount);
+
+        const stepComponents: ObjectiveComponents = {
+          transition: effectiveTransitionCost,
+          stretch: staticCost,
+          poseAttractor: attractorCost,
+          perFingerHome: perFingerHomeCost,
+          alternation: alternationCost,
+          handBalance: handBalanceCost,
+          constraints: fallbackPenalty,
+        };
+        const stepCost = combineComponents(stepComponents);
         const newTotalCost = node.totalCost + stepCost;
 
         // Get fingers from grip for assignment
@@ -297,9 +308,19 @@ export class BeamSolver implements SolverStrategy {
         // Create assignments for ALL notes in the group (handles chords correctly)
         // Each note gets a distinct finger (1:1 mapping; no finger reused within the chord).
         const assignments: NoteAssignment[] = [];
-        const costPerNote = stepCost / group.notes.length; // Distribute cost across notes
+        const n = group.notes.length;
+        const costPerNote = stepCost / n;
+        const componentsPerNote: ObjectiveComponents = {
+          transition: stepComponents.transition / n,
+          stretch: stepComponents.stretch / n,
+          poseAttractor: stepComponents.poseAttractor / n,
+          perFingerHome: stepComponents.perFingerHome / n,
+          alternation: stepComponents.alternation / n,
+          handBalance: stepComponents.handBalance / n,
+          constraints: stepComponents.constraints / n,
+        };
 
-        for (let i = 0; i < group.notes.length; i++) {
+        for (let i = 0; i < n; i++) {
           const event = group.notes[i];
           const position = group.positions[i];
           const eventIndex = group.eventIndices[i];
@@ -318,6 +339,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
 
@@ -328,6 +350,8 @@ export class BeamSolver implements SolverStrategy {
           parent: node,
           assignments, // Now stores ALL assignments for the chord
           depth: node.depth + 1,
+          leftCount: newLeftCount,
+          rightCount: newRightCount,
         };
 
         children.push(childNode);
@@ -418,15 +442,45 @@ export class BeamSolver implements SolverStrategy {
         const leftFallbackPenalty = leftResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
         const rightFallbackPenalty = rightResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
-        const stepCost = effectiveLeftTransition + effectiveRightTransition +
-          leftAttractor + rightAttractor +
-          leftStatic + rightStatic +
-          leftHome + rightHome +
-          leftFallbackPenalty + rightFallbackPenalty;
+        // Alternation: penalize same-finger repetition on short dt
+        const prevAssignments = node.assignments.map((a) => ({ hand: a.hand, finger: a.finger }));
+        const leftFingersForCost = Object.keys(leftResult.pose.fingers) as FingerType[];
+        const rightFingersForCost = Object.keys(rightResult.pose.fingers) as FingerType[];
+        const currentAssignments: Array<{ hand: 'left' | 'right'; finger: FingerType }> = [
+          ...leftNoteIndices.map((_, j) => ({ hand: 'left' as const, finger: leftFingersForCost[j] })),
+          ...rightNoteIndices.map((_, j) => ({ hand: 'right' as const, finger: rightFingersForCost[j] })),
+        ];
+        const alternationCost = calculateAlternationCost(prevAssignments, currentAssignments, rawTimeDelta);
+
+        // Hand balance: penalize deviation from target left share
+        const newLeftCount = node.leftCount + leftNoteIndices.length;
+        const newRightCount = node.rightCount + rightNoteIndices.length;
+        const handBalanceCost = calculateHandBalanceCost(newLeftCount, newRightCount);
+
+        const stepComponents: ObjectiveComponents = {
+          transition: effectiveLeftTransition + effectiveRightTransition,
+          stretch: leftStatic + rightStatic,
+          poseAttractor: leftAttractor + rightAttractor,
+          perFingerHome: leftHome + rightHome,
+          alternation: alternationCost,
+          handBalance: handBalanceCost,
+          constraints: leftFallbackPenalty + rightFallbackPenalty,
+        };
+        const stepCost = combineComponents(stepComponents);
 
         // Create assignments for ALL notes in the split chord (1:1 finger per note per hand)
         const assignments: NoteAssignment[] = [];
-        const costPerNote = stepCost / group.notes.length;
+        const n = group.notes.length;
+        const costPerNote = stepCost / n;
+        const componentsPerNote: ObjectiveComponents = {
+          transition: stepComponents.transition / n,
+          stretch: stepComponents.stretch / n,
+          poseAttractor: stepComponents.poseAttractor / n,
+          perFingerHome: stepComponents.perFingerHome / n,
+          alternation: stepComponents.alternation / n,
+          handBalance: stepComponents.handBalance / n,
+          constraints: stepComponents.constraints / n,
+        };
 
         for (let j = 0; j < leftNoteIndices.length; j++) {
           const i = leftNoteIndices[j];
@@ -445,6 +499,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
         for (let j = 0; j < rightNoteIndices.length; j++) {
@@ -464,6 +519,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
 
@@ -474,6 +530,8 @@ export class BeamSolver implements SolverStrategy {
           parent: node,
           assignments, // All assignments for the split chord
           depth: node.depth + 1,
+          leftCount: newLeftCount,
+          rightCount: newRightCount,
         });
       }
     }
@@ -518,7 +576,9 @@ export class BeamSolver implements SolverStrategy {
     assignments: NoteAssignment[],
     totalEvents: number,
     unmappedIndices: Set<number>,
-    config: EngineConfiguration
+    config: EngineConfiguration,
+    sortedEvents: Array<{ event: NoteEvent; originalIndex: number }>,
+    coverage: { totalNotes: number; unmappedNotesCount: number; fallbackNotesCount: number }
   ): EngineResult {
     const debugEvents: EngineDebugEvent[] = [];
     const fingerUsageStats: FingerUsageStats = {};
@@ -551,10 +611,11 @@ export class BeamSolver implements SolverStrategy {
       const assignment = assignmentMap.get(i);
 
       if (unmappedIndices.has(i)) {
-        // Unmapped note
+        // Unmapped note - use actual event data
+        const ev = sortedEvents[i]?.event;
         debugEvents.push({
-          noteNumber: 0, // Unknown
-          startTime: 0,
+          noteNumber: ev?.noteNumber ?? 0,
+          startTime: ev?.startTime ?? 0,
           assignedHand: 'Unplayable',
           finger: null,
           cost: Infinity,
@@ -569,7 +630,7 @@ export class BeamSolver implements SolverStrategy {
           },
           difficulty: 'Unplayable',
           eventIndex: i,
-          // padId undefined for unmapped notes
+          eventKey: ev?.eventKey,
         });
         continue;
       }
@@ -619,17 +680,18 @@ export class BeamSolver implements SolverStrategy {
       totalDrift += drift;
       driftCount++;
 
-      // Cost breakdown (approximated for beam search - actual component costs
-      // are not tracked during beam search, so we use percentage estimates)
-      const costBreakdown: CostBreakdown = {
-        movement: assignment.cost * 0.4, // Approximate: movement typically 40% of total
-        stretch: assignment.cost * 0.2,  // Approximate: stretch typically 20% of total
-        drift: assignment.cost * 0.2,     // Approximate: drift typically 20% of total
-        bounce: 0,                         // Not tracked in beam search
-        fatigue: assignment.cost * 0.1,   // Approximate: fatigue typically 10% of total
-        crossover: assignment.cost * 0.1, // Approximate: crossover typically 10% of total
-        total: assignment.cost,
-      };
+      // Cost breakdown from real objective components (no fake percentages)
+      const costBreakdown: CostBreakdown = assignment.costComponents
+        ? objectiveToCostBreakdown(assignment.costComponents)
+        : {
+            movement: assignment.cost * 0.4,
+            stretch: assignment.cost * 0.2,
+            drift: assignment.cost * 0.2,
+            bounce: 0,
+            fatigue: assignment.cost * 0.1,
+            crossover: assignment.cost * 0.1,
+            total: assignment.cost,
+          };
 
       totalMetrics.movement += costBreakdown.movement;
       totalMetrics.stretch += costBreakdown.stretch;
@@ -693,6 +755,23 @@ export class BeamSolver implements SolverStrategy {
       fatigueMap,
       averageDrift: driftCount > 0 ? totalDrift / driftCount : 0,
       averageMetrics,
+      metadata: {
+        mappingIdUsed: this.gridMapping?.id,
+        mappingHashUsed: this.gridMapping ? hashGridMapping(this.gridMapping) : undefined,
+        mappingCoverage: coverage,
+        strictMode: this.mappingResolverMode === 'strict',
+        beamWidthUsed: config.beamWidth,
+        objectiveTotal: averageMetrics.total,
+        objectiveComponentsSummary: {
+          transition: totalMetrics.movement,
+          stretch: totalMetrics.stretch,
+          poseAttractor: totalMetrics.drift,
+          perFingerHome: totalMetrics.fatigue,
+          alternation: totalMetrics.bounce,
+          handBalance: 0,
+          constraints: totalMetrics.crossover,
+        },
+      },
     };
   }
 
@@ -765,22 +844,49 @@ export class BeamSolver implements SolverStrategy {
       stiffness: effectiveStiffness,
     };
 
-    // Sort events by time
+    // Sort events by time (stable tie-break: startTime, channel, noteNumber, eventKey)
     const sortedEvents = [...performance.events]
       .map((event, originalIndex) => ({ event, originalIndex }))
-      .sort((a, b) => a.event.startTime - b.event.startTime);
+      .sort((a, b) => {
+        const dt = a.event.startTime - b.event.startTime;
+        if (dt !== 0) return dt;
+        const ch = (a.event.channel ?? 0) - (b.event.channel ?? 0);
+        if (ch !== 0) return ch;
+        const nn = a.event.noteNumber - b.event.noteNumber;
+        if (nn !== 0) return nn;
+        return (a.event.eventKey ?? '').localeCompare(b.event.eventKey ?? '');
+      });
 
-    // Map events to grid positions
-    const eventsWithPositions = sortedEvents.map(({ event, originalIndex }) => ({
-      event,
-      index: originalIndex,
-      position: this.getNotePosition(event.noteNumber),
-    }));
+    // Build note-to-pad index once (O(cells)), then resolve each event O(1)
+    // When mapping is null, use allow-fallback (L01 chromatic); when mapping exists, use configured mode
+    const noteToPadIndex = buildNoteToPadIndex(this.gridMapping?.cells ?? {});
+    const effectiveMode =
+      this.gridMapping === null ? 'allow-fallback' : this.mappingResolverMode;
+    const eventsWithPositions = sortedEvents.map(({ event, originalIndex }) => {
+      const res = resolveNoteToPad(
+        event.noteNumber,
+        noteToPadIndex,
+        this.instrumentConfig,
+        effectiveMode
+      );
+      const position: GridPosition | null =
+        res.source === 'mapping' || res.source === 'fallback'
+          ? { row: res.pad.row, col: res.pad.col }
+          : null;
+      return {
+        event,
+        index: originalIndex,
+        position,
+        resolutionSource: res.source,
+      };
+    });
 
-    // Track unmapped notes
+    // Track unmapped notes and fallback count
     const unmappedIndices = new Set<number>();
-    eventsWithPositions.forEach(({ index, position }) => {
+    let fallbackCount = 0;
+    eventsWithPositions.forEach(({ index, position, resolutionSource }) => {
       if (!position) unmappedIndices.add(index);
+      else if (resolutionSource === 'fallback') fallbackCount++;
     });
 
     // Group events by timestamp (handles chords correctly)
@@ -837,14 +943,33 @@ export class BeamSolver implements SolverStrategy {
                 : 0;
               const fallbackPenalty = matchingResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
               const effectiveTransition = transitionCost === Infinity ? 100 : transitionCost;
-              const stepCost = effectiveTransition + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
+              const stepComponents: ObjectiveComponents = {
+                transition: effectiveTransition,
+                stretch: staticCost,
+                poseAttractor: attractorCost,
+                perFingerHome: perFingerHomeCost,
+                alternation: 0,
+                handBalance: 0,
+                constraints: fallbackPenalty,
+              };
+              const stepCost = combineComponents(stepComponents);
 
               // Create assignments for ALL notes in the group (handles chords)
               const assignments: NoteAssignment[] = [];
-              const costPerNote = stepCost / group.notes.length;
+              const n = group.notes.length;
+              const costPerNote = stepCost / n;
+              const componentsPerNote: ObjectiveComponents = {
+                transition: stepComponents.transition / n,
+                stretch: stepComponents.stretch / n,
+                poseAttractor: stepComponents.poseAttractor / n,
+                perFingerHome: stepComponents.perFingerHome / n,
+                alternation: 0,
+                handBalance: 0,
+                constraints: stepComponents.constraints / n,
+              };
               const gripFingers = Object.keys(matchingResult.pose.fingers) as FingerType[];
 
-              for (let i = 0; i < group.notes.length; i++) {
+              for (let i = 0; i < n; i++) {
                 assignments.push({
                   eventIndex: group.eventIndices[i],
                   eventKey: group.eventKeys[i],
@@ -856,8 +981,12 @@ export class BeamSolver implements SolverStrategy {
                   cost: costPerNote,
                   row: group.positions[i].row,
                   col: group.positions[i].col,
+                  costComponents: componentsPerNote,
                 });
               }
+
+              const newLeftCount = node.leftCount + (override.hand === 'left' ? n : 0);
+              const newRightCount = node.rightCount + (override.hand === 'right' ? n : 0);
 
               newBeam.push({
                 leftPose: override.hand === 'left' ? matchingResult.pose : node.leftPose,
@@ -866,6 +995,8 @@ export class BeamSolver implements SolverStrategy {
                 parent: node,
                 assignments,
                 depth: node.depth + 1,
+                leftCount: newLeftCount,
+                rightCount: newRightCount,
               });
             }
             continue;
@@ -888,6 +1019,16 @@ export class BeamSolver implements SolverStrategy {
         console.warn(`No valid expansions for group at t=${group.timestamp}. Using emergency fallback.`);
 
         const fallbackFingers: FingerType[] = ['index', 'middle', 'ring', 'thumb', 'pinky'];
+
+        const emergencyComponentsPerNote: ObjectiveComponents = {
+          transition: 0,
+          stretch: 0,
+          poseAttractor: 0,
+          perFingerHome: 0,
+          alternation: 0,
+          handBalance: 0,
+          constraints: FALLBACK_GRIP_PENALTY / group.notes.length,
+        };
 
         for (const node of beam) {
           const assignments: NoteAssignment[] = [];
@@ -920,6 +1061,7 @@ export class BeamSolver implements SolverStrategy {
               cost: costPerNote,
               row: group.positions[i].row,
               col: group.positions[i].col,
+              costComponents: emergencyComponentsPerNote,
             });
           }
           for (let j = 0; j < Math.min(rightIndices.length, fallbackFingers.length); j++) {
@@ -940,6 +1082,7 @@ export class BeamSolver implements SolverStrategy {
               cost: costPerNote,
               row: group.positions[i].row,
               col: group.positions[i].col,
+              costComponents: emergencyComponentsPerNote,
             });
           }
 
@@ -952,6 +1095,9 @@ export class BeamSolver implements SolverStrategy {
           const rightDist = Math.abs(group.positions[0].col - 5);
           const primaryHand = leftDist <= rightDist ? 'left' : 'right';
 
+          const newLeftCount = node.leftCount + leftIndices.length;
+          const newRightCount = node.rightCount + rightIndices.length;
+
           newBeam.push({
             leftPose: primaryHand === 'left' ? firstFallbackGrip : node.leftPose,
             rightPose: primaryHand === 'right' ? firstFallbackGrip : node.rightPose,
@@ -959,6 +1105,8 @@ export class BeamSolver implements SolverStrategy {
             parent: node,
             assignments,
             depth: node.depth + 1,
+            leftCount: newLeftCount,
+            rightCount: newRightCount,
           });
         }
       }
@@ -969,8 +1117,25 @@ export class BeamSolver implements SolverStrategy {
     }
 
     // Find best node (lowest total cost)
+    const requiredNotes = new Set(performance.events.map((e) => e.noteNumber));
+    const unmappedNoteNumbers = new Set(
+      eventsWithPositions.filter((e) => !e.position).map((e) => e.event.noteNumber)
+    );
+    const coverage = {
+      totalNotes: requiredNotes.size,
+      unmappedNotesCount: unmappedNoteNumbers.size,
+      fallbackNotesCount: fallbackCount,
+    };
+
     if (beam.length === 0) {
-      return this.buildResult([], performance.events.length, unmappedIndices, effectiveConfig);
+      return this.buildResult(
+        [],
+        performance.events.length,
+        unmappedIndices,
+        effectiveConfig,
+        sortedEvents,
+        coverage
+      );
     }
 
     const bestNode = beam.reduce((best, node) =>
@@ -980,7 +1145,14 @@ export class BeamSolver implements SolverStrategy {
     // Backtrack to build optimal assignment path
     const assignments = this.backtrack(bestNode);
 
-    return this.buildResult(assignments, performance.events.length, unmappedIndices, effectiveConfig);
+    return this.buildResult(
+      assignments,
+      performance.events.length,
+      unmappedIndices,
+      effectiveConfig,
+      sortedEvents,
+      coverage
+    );
   }
 }
 

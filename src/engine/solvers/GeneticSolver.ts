@@ -8,8 +8,8 @@
 
 import { Performance, NoteEvent, HandPose, EngineConfiguration } from '../../types/performance';
 import { InstrumentConfig } from '../../types/performance';
-import { GridMapService } from '../gridMapService';
 import { FingerType } from '../models';
+import { buildNoteToPadIndex, resolveNoteToPad } from '../mappingResolver';
 import { GridMapping, cellKey } from '../../types/layout';
 import { generateValidGripsWithTier, Pad } from '../feasibility';
 import {
@@ -128,36 +128,13 @@ export class GeneticSolver implements SolverStrategy {
   private gridMapping: GridMapping | null;
   private geneticConfig: GeneticConfig;
 
+  private mappingResolverMode: 'strict' | 'allow-fallback';
+
   constructor(config: SolverConfig, geneticConfig: GeneticConfig = DEFAULT_GENETIC_CONFIG) {
     this.instrumentConfig = config.instrumentConfig;
     this.gridMapping = config.gridMapping ?? null;
     this.geneticConfig = geneticConfig;
-  }
-
-  /**
-   * Gets the grid position for a MIDI note.
-   */
-  private getNotePosition(noteNumber: number): GridPosition | null {
-    // 1. Try custom mapping first
-    if (this.gridMapping) {
-      for (const [key, voice] of Object.entries(this.gridMapping.cells)) {
-        if (voice.originalMidiNote === noteNumber) {
-          const [rowStr, colStr] = key.split(',');
-          return {
-            row: parseInt(rowStr, 10),
-            col: parseInt(colStr, 10)
-          };
-        }
-      }
-    }
-
-    // 2. Fallback to algorithmic mapping
-    const tuple = GridMapService.noteToGrid(noteNumber, this.instrumentConfig);
-    if (tuple) {
-      return { row: tuple[0], col: tuple[1] };
-    }
-
-    return null;
+    this.mappingResolverMode = config.mappingResolverMode ?? 'strict';
   }
 
   /**
@@ -668,22 +645,39 @@ export class GeneticSolver implements SolverStrategy {
       return seed / 0x7fffffff;
     };
 
-    // Sort events by time
+    // Sort events by time (stable tie-break)
     const sortedEvents = [...performance.events]
       .map((event, originalIndex) => ({ event, originalIndex }))
-      .sort((a, b) => a.event.startTime - b.event.startTime);
+      .sort((a, b) => {
+        const dt = a.event.startTime - b.event.startTime;
+        if (dt !== 0) return dt;
+        const ch = (a.event.channel ?? 0) - (b.event.channel ?? 0);
+        if (ch !== 0) return ch;
+        const nn = a.event.noteNumber - b.event.noteNumber;
+        if (nn !== 0) return nn;
+        return (a.event.eventKey ?? '').localeCompare(b.event.eventKey ?? '');
+      });
 
-    // Map events to grid positions and filter unmapped
+    // Build note-to-pad index once, resolve each event
+    // When mapping is null, use allow-fallback (L01 chromatic)
+    const effectiveMode =
+      this.gridMapping === null ? 'allow-fallback' : this.mappingResolverMode;
+    const noteToPadIndex = buildNoteToPadIndex(this.gridMapping?.cells ?? {});
     const unmappedIndices = new Set<number>();
     const eventContexts: EventContext[] = [];
 
     for (const { event, originalIndex } of sortedEvents) {
-      const position = this.getNotePosition(event.noteNumber);
-      if (!position) {
+      const res = resolveNoteToPad(
+        event.noteNumber,
+        noteToPadIndex,
+        this.instrumentConfig,
+        effectiveMode
+      );
+      if (res.source === 'unmapped') {
         unmappedIndices.add(originalIndex);
         continue;
       }
-
+      const position: GridPosition = { row: res.pad.row, col: res.pad.col };
       eventContexts.push({
         event,
         originalIndex,

@@ -18,6 +18,7 @@ import {
   poseHasAssignments,
   createDefaultPose0,
 } from '../types/naturalHandPose';
+import { seedMappingFromPose0 } from '../engine/seedMappingFromPose0';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
@@ -204,6 +205,8 @@ export const Workbench: React.FC = () => {
   const [selectedSolver, setSelectedSolver] = useState<SolverType>('beam');
   const [isRunningSolver, setIsRunningSolver] = useState(false);
   const [solverProgress, setSolverProgress] = useState(0);
+  /** When false, hide Beam/Genetic comparison; always use Beam. */
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Layout optimization state
   const [isOptimizingLayout, setIsOptimizingLayout] = useState(false);
@@ -228,8 +231,9 @@ export const Workbench: React.FC = () => {
     setSolverProgress(0);
 
     try {
+      const solverToRun = showAdvanced ? selectedSolver : 'beam';
       // For genetic solver, simulate progress updates
-      if (selectedSolver === 'genetic') {
+      if (solverToRun === 'genetic') {
         // Create a progress interval (genetic solver runs async)
         const progressInterval = setInterval(() => {
           setSolverProgress(prev => {
@@ -241,17 +245,17 @@ export const Workbench: React.FC = () => {
           });
         }, 500);
 
-        await runSolver(selectedSolver, activeMapping);
+        await runSolver(solverToRun, activeMapping);
 
         clearInterval(progressInterval);
         setSolverProgress(100);
 
         // Set as active solver
-        setActiveSolverId(selectedSolver);
+        setActiveSolverId(solverToRun);
       } else {
         // Beam solver is fast, no progress needed
-        await runSolver(selectedSolver, activeMapping);
-        setActiveSolverId(selectedSolver);
+        await runSolver(solverToRun, activeMapping);
+        setActiveSolverId(solverToRun);
         setSolverProgress(100);
       }
     } catch (error) {
@@ -261,7 +265,7 @@ export const Workbench: React.FC = () => {
       setIsRunningSolver(false);
       setTimeout(() => setSolverProgress(0), 1000); // Reset progress after 1s
     }
-  }, [selectedSolver, filteredPerformance, activeMapping, runSolver, setActiveSolverId]);
+  }, [selectedSolver, showAdvanced, filteredPerformance, activeMapping, runSolver, setActiveSolverId]);
 
 
   /**
@@ -833,6 +837,50 @@ export const Workbench: React.FC = () => {
   };
 
   // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Seed from Pose0 (Full Coverage)
+  // ============================================================================
+  const handleSeedFromPose0 = useCallback(() => {
+    const performance = getActivePerformance(projectState);
+    if (!performance || performance.events.length === 0) {
+      alert('No performance data. Load a MIDI file first.');
+      return;
+    }
+    const pose0 = projectState.naturalHandPoses?.[0] ?? createDefaultPose0();
+    if (!poseHasAssignments(pose0)) {
+      alert('Configure Natural Hand Pose in the Pose tab first.');
+      return;
+    }
+    const voiceMap = new Map<number, Voice>();
+    for (const v of projectState.parkedSounds) {
+      if (v.originalMidiNote != null) voiceMap.set(v.originalMidiNote, v);
+    }
+    for (const v of Object.values(activeMapping?.cells ?? {})) {
+      if (v.originalMidiNote != null) voiceMap.set(v.originalMidiNote, v);
+    }
+    const seeded = seedMappingFromPose0(
+      performance,
+      pose0,
+      projectState.instrumentConfig,
+      0,
+      voiceMap
+    );
+    if (!activeMapping) {
+      setProjectState(prev => ({
+        ...prev,
+        mappings: [...prev.mappings, seeded],
+        activeMappingId: seeded.id,
+      }));
+    } else {
+      setProjectState(prev => ({
+        ...prev,
+        mappings: prev.mappings.map(m =>
+          m.id === activeMapping.id ? { ...seeded, id: m.id, name: m.name } : m
+        ),
+      }));
+    }
+  }, [projectState, activeMapping, setProjectState]);
+
+  // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Assign Using Natural Pose (Deterministic)
   // ============================================================================
   // Maps unassigned Voices to Pads using Pose 0 anchor pads as priority,
@@ -1017,6 +1065,24 @@ export const Workbench: React.FC = () => {
       return;
     }
 
+    // Ensure Pose0 exists (use default if missing)
+    if (!projectState.naturalHandPoses?.length) {
+      setProjectState(prev => ({
+        ...prev,
+        naturalHandPoses: [createDefaultPose0()],
+      }));
+    }
+
+    // Enforce full coverage: block if any sounds are unmapped
+    const { computeMappingCoverage } = await import('@/engine/mappingCoverage');
+    const coverage = computeMappingCoverage(performance, activeMapping);
+    if (coverage.unmappedNotes.length > 0) {
+      alert(
+        `Mapping must cover all sounds for optimization. ${coverage.unmappedNotes.length} note(s) are unmapped (e.g. MIDI ${coverage.unmappedNotes.slice(0, 5).join(', ')}${coverage.unmappedNotes.length > 5 ? '...' : ''}). Use "Seed from Pose0" or assign manually.`
+      );
+      return;
+    }
+
     console.log('[Workbench] Starting layout optimization with Simulated Annealing...');
     setIsOptimizingLayout(true);
 
@@ -1034,7 +1100,7 @@ export const Workbench: React.FC = () => {
     } finally {
       setIsOptimizingLayout(false);
     }
-  }, [activeMapping, projectState, optimizeLayout]);
+  }, [activeMapping, projectState, optimizeLayout, setProjectState]);
 
 
 
@@ -1314,8 +1380,23 @@ export const Workbench: React.FC = () => {
 
               <div className="h-6 w-px bg-slate-700/50" />
 
-              {/* Primary layout: Natural (assign to pose pads) then Auto-Arrange (optimize). Random is secondary. */}
+              {/* Primary layout: Seed (fill from Pose0), Natural (assign unassigned), Auto-Arrange (optimize). */}
               <div className="flex items-center gap-1.5">
+                {/* Seed: fill mapping from Pose0 for full coverage (when grid empty or incomplete) */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSeedFromPose0}
+                  disabled={!filteredPerformance || filteredPerformance.events.length === 0 || !hasNaturalPose}
+                  title="Fill grid from Natural Hand Pose (deterministic). Use when grid is empty or has unmapped sounds."
+                  leftIcon={(
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                  )}
+                >
+                  Seed
+                </Button>
                 {/* Natural: assign sounds to Natural Hand Pose pads first (primary when pose is set) */}
                 <Button
                   variant={hasNaturalPose ? "primary" : "secondary"}
@@ -1369,17 +1450,19 @@ export const Workbench: React.FC = () => {
 
               <div className="h-6 w-px bg-slate-700/50" />
 
-              <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
-                <select
-                  value={selectedSolver}
-                  onChange={(e) => setSelectedSolver(e.target.value as SolverType)}
-                  disabled={isRunningSolver}
-                  className="bg-transparent border-none text-xs text-slate-200 focus:outline-none disabled:opacity-50 cursor-pointer"
-                >
-                  <option value="beam">Beam Analysis</option>
-                  <option value="genetic">Genetic Analysis</option>
-                </select>
-              </div>
+              {showAdvanced && (
+                <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50">
+                  <select
+                    value={selectedSolver}
+                    onChange={(e) => setSelectedSolver(e.target.value as SolverType)}
+                    disabled={isRunningSolver}
+                    className="bg-transparent border-none text-xs text-slate-200 focus:outline-none disabled:opacity-50 cursor-pointer"
+                  >
+                    <option value="beam">Beam Analysis</option>
+                    <option value="genetic">Genetic Analysis</option>
+                  </select>
+                </div>
+              )}
 
               <Button
                 variant="primary"
@@ -1407,8 +1490,8 @@ export const Workbench: React.FC = () => {
                 </div>
               )}
 
-              {/* Solver result selector */}
-              {projectState.solverResults && Object.keys(projectState.solverResults).length > 0 && (
+              {/* Solver result selector (Advanced only) */}
+              {showAdvanced && projectState.solverResults && Object.keys(projectState.solverResults).length > 0 && (
                 <>
                   <div className="h-6 w-px bg-slate-700/50" />
                   <div className="flex items-center gap-2">
@@ -1430,6 +1513,20 @@ export const Workbench: React.FC = () => {
                   </div>
                 </>
               )}
+
+              {/* Advanced toggle: Beam/Genetic comparison */}
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-colors ${showAdvanced ? 'text-slate-200 bg-slate-800/50' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+                title={showAdvanced ? 'Hide Beam/Genetic comparison' : 'Show Beam/Genetic comparison'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Advanced
+              </button>
             </div>
 
           </div>
@@ -1535,6 +1632,7 @@ export const Workbench: React.FC = () => {
             activeMapping={activeMapping}
             performance={filteredPerformance}
             onAssignmentChange={handleAssignmentChange}
+            showAdvanced={showAdvanced}
           />
         </div>
       </div>

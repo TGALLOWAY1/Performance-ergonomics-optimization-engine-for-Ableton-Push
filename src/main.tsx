@@ -8,27 +8,38 @@ import { EventAnalysisPage } from './pages/EventAnalysisPage'
 import { CostDebugPage } from './pages/CostDebugPage'
 import { ProjectProvider } from './context/ProjectContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { songService } from './services/SongService'
 import './index.css'
 
 // Dev-only flag: conditionally register Cost Debug route
 // The page itself also checks this flag and shows a disabled message if accessed in production
 const SHOW_COST_DEBUG = import.meta.env.MODE === 'development';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <ProjectProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/workbench" element={<Workbench />} />
-            <Route path="/timeline" element={<TimelinePage />} />
-            <Route path="/event-analysis" element={<EventAnalysisPage />} />
-            {SHOW_COST_DEBUG && <Route path="/cost-debug" element={<CostDebugPage />} />}
-          </Routes>
-        </BrowserRouter>
-      </ProjectProvider>
-    </ThemeProvider>
-  </React.StrictMode>,
-)
+async function bootstrap() {
+  await songService.seedDefaultTestSong();
+}
+
+function App() {
+  return (
+    <React.StrictMode>
+      <ThemeProvider>
+        <ProjectProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/workbench" element={<Workbench />} />
+              <Route path="/timeline" element={<TimelinePage />} />
+              <Route path="/event-analysis" element={<EventAnalysisPage />} />
+              {SHOW_COST_DEBUG && <Route path="/cost-debug" element={<CostDebugPage />} />}
+            </Routes>
+          </BrowserRouter>
+        </ProjectProvider>
+      </ThemeProvider>
+    </React.StrictMode>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+root.render(<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading…</div>);
+bootstrap().then(() => root.render(<App />));
 
