@@ -182,6 +182,7 @@ export interface EngineResult {
     mappingIdUsed?: string;
     mappingHashUsed?: string;
     mappingCoverage?: { totalNotes: number; unmappedNotesCount: number; fallbackNotesCount: number };
+    invalidReason?: string;
     seed?: number;
     strictMode?: boolean;
     beamWidthUsed?: number;

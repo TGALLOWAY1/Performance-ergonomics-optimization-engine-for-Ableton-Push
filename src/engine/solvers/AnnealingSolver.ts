@@ -12,6 +12,7 @@ import { FingerType } from '../models';
 import { createBeamSolver } from './BeamSolver';
 import { applyRandomMutation } from './mutationService';
 import { NeutralPadPositions } from '../handPose';
+import { computeMappingCoverage } from '../mappingCoverage';
 import {
   SolverStrategy,
   SolverType,
@@ -104,7 +105,8 @@ export class AnnealingSolver implements SolverStrategy {
 
   /**
    * Evaluates the cost of a GridMapping by running Beam Search.
-   * 
+   * Invalid candidates (unmapped notes) return Infinity and are always rejected.
+   *
    * @param mapping - The GridMapping to evaluate
    * @param performance - The performance data to analyze
    * @param config - Engine configuration (beam width, stiffness, resting pose)
@@ -116,12 +118,49 @@ export class AnnealingSolver implements SolverStrategy {
     performance: Performance,
     config: EngineConfiguration,
     beamWidth: number
-  ): Promise<{ result: EngineResult; cost: number }> {
-    // Create a BeamSolver with the candidate mapping (include Pose 0 override when present)
+  ): Promise<{ result: EngineResult; cost: number; invalidReason?: string }> {
+    // Enforce full coverage: unmapped candidates are invalid (return Infinity)
+    const coverage = computeMappingCoverage(performance, mapping);
+    if (coverage.unmappedNotes.length > 0) {
+      const sentinelResult: EngineResult = {
+        score: 0,
+        unplayableCount: performance.events.length,
+        hardCount: 0,
+        debugEvents: [],
+        fingerUsageStats: {},
+        fatigueMap: {},
+        averageDrift: 0,
+        averageMetrics: {
+          movement: 0,
+          stretch: 0,
+          drift: 0,
+          bounce: 0,
+          fatigue: 0,
+          crossover: 0,
+          total: Number.POSITIVE_INFINITY,
+        },
+        metadata: {
+          mappingCoverage: {
+            totalNotes: coverage.totalNotes,
+            unmappedNotesCount: coverage.unmappedNotes.length,
+            fallbackNotesCount: 0,
+          },
+          invalidReason: 'invalid_unmapped_notes',
+        },
+      };
+      return {
+        result: sentinelResult,
+        cost: Number.POSITIVE_INFINITY,
+        invalidReason: 'invalid_unmapped_notes',
+      };
+    }
+
+    // Create a BeamSolver with strict mode (no fallback during optimization)
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: mapping,
       neutralPadPositionsOverride: this.neutralPadPositionsOverride,
+      mappingResolverMode: 'strict',
     };
 
     const beamSolver = createBeamSolver(solverConfig);
@@ -136,7 +175,6 @@ export class AnnealingSolver implements SolverStrategy {
     const result = await beamSolver.solve(performance, evaluationConfig);
 
     // Return both the full result (for cost breakdown) and the cost value
-    // The cost is the average total cost per event (normalized metric for comparison)
     return {
       result,
       cost: result.averageMetrics.total,
@@ -185,6 +223,17 @@ export class AnnealingSolver implements SolverStrategy {
     );
     let currentCost = initialEvaluation.cost;
 
+    // Fail early if initial mapping is invalid (unmapped notes)
+    if (
+      !Number.isFinite(currentCost) ||
+      currentCost === Number.POSITIVE_INFINITY ||
+      initialEvaluation.invalidReason
+    ) {
+      throw new Error(
+        'Initial mapping does not cover all sounds. Seed the mapping from Pose0 or assign all required notes before optimizing.'
+      );
+    }
+
     // Track the best mapping found so far (deep copy)
     let bestMapping: GridMapping = {
       ...currentMapping,
@@ -220,21 +269,25 @@ export class AnnealingSolver implements SolverStrategy {
       );
       const candidateCost = candidateEvaluation.cost;
 
-      // Acceptance Probability (Metropolis criterion)
-      const delta = candidateCost - currentCost;
+      // Invalid candidates (Infinity) are always rejected; avoid NaN from exp(-Infinity/T)
+      const candidateInvalid =
+        !Number.isFinite(candidateCost) || candidateCost === Number.POSITIVE_INFINITY;
+
       let accepted = false;
       let acceptanceProbability: number | undefined = undefined;
 
-      if (delta < 0) {
-        // Better solution: accept immediately
-        accepted = true;
-      } else if (delta > 0) {
-        // Worse solution: accept probabilistically
-        acceptanceProbability = Math.exp(-delta / currentTemp);
-        accepted = Math.random() < acceptanceProbability;
+      if (candidateInvalid) {
+        accepted = false;
       } else {
-        // Same cost: accept (neutral move)
-        accepted = true;
+        const delta = candidateCost - currentCost;
+        if (delta < 0) {
+          accepted = true;
+        } else if (delta > 0 && Number.isFinite(currentCost) && currentCost > 0) {
+          acceptanceProbability = Math.exp(-delta / currentTemp);
+          accepted = Math.random() < acceptanceProbability;
+        } else {
+          accepted = true; // Same cost or current was invalid
+        }
       }
 
       // Update: If accepted, update current state
