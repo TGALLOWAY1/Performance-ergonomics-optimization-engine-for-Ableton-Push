@@ -320,6 +320,8 @@ export class AnnealingSolver implements SolverStrategy {
 
       // Detailed trace: Log snapshot (with optional downsampling)
       if (step % LOG_EVERY_N === 0) {
+        const deltaCost = candidateInvalid ? 0 : candidateCost - currentCost;
+
         // Compute per-metric sums from debugEvents
         // Sum up all cost breakdowns across all events
         const playableEvents = candidateEvaluation.result.debugEvents.filter(
@@ -354,7 +356,7 @@ export class AnnealingSolver implements SolverStrategy {
           currentCost: currentCost,
           bestCost: bestCost,
           accepted: accepted,
-          deltaCost: delta,
+          deltaCost: deltaCost,
           acceptanceProbability: acceptanceProbability,
           movementSum,
           stretchSum,

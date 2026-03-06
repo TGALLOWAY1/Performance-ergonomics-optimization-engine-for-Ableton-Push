@@ -17,6 +17,8 @@ import {
   calculateTransitionCost,
   calculateGripStretchCost,
   calculatePerFingerHomeCost,
+  calculateAlternationCost,
+  calculateHandBalanceCost,
   FALLBACK_GRIP_PENALTY,
 } from '../costFunction';
 import {
@@ -77,6 +79,10 @@ interface BeamNode {
   assignments: NoteAssignment[];
   /** Depth in the search tree (group index) */
   depth: number;
+  /** Cumulative left-hand note count (for hand balance) */
+  leftCount: number;
+  /** Cumulative right-hand note count (for hand balance) */
+  rightCount: number;
 }
 
 /**
@@ -202,6 +208,8 @@ export class BeamSolver implements SolverStrategy {
       parent: null,
       assignments: [], // Empty for initial node
       depth: 0,
+      leftCount: 0,
+      rightCount: 0,
     };
 
     return [initialNode];
@@ -267,13 +275,24 @@ export class BeamSolver implements SolverStrategy {
         // Apply fallback penalty if this is a fallback grip (constraint cost)
         const fallbackPenalty = isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
+        // Alternation: penalize same-finger repetition on short dt
+        const prevAssignments = node.assignments.map((a) => ({ hand: a.hand, finger: a.finger }));
+        const gripFingersForCost = Object.keys(grip.fingers) as FingerType[];
+        const currentAssignments = gripFingersForCost.slice(0, group.notes.length).map((finger) => ({ hand, finger }));
+        const alternationCost = calculateAlternationCost(prevAssignments, currentAssignments, rawTimeDelta);
+
+        // Hand balance: penalize deviation from target left share
+        const newLeftCount = node.leftCount + (hand === 'left' ? group.notes.length : 0);
+        const newRightCount = node.rightCount + (hand === 'right' ? group.notes.length : 0);
+        const handBalanceCost = calculateHandBalanceCost(newLeftCount, newRightCount);
+
         const stepComponents: ObjectiveComponents = {
           transition: effectiveTransitionCost,
           stretch: staticCost,
           poseAttractor: attractorCost,
           perFingerHome: perFingerHomeCost,
-          alternation: 0,
-          handBalance: 0,
+          alternation: alternationCost,
+          handBalance: handBalanceCost,
           constraints: fallbackPenalty,
         };
         const stepCost = combineComponents(stepComponents);
@@ -296,8 +315,8 @@ export class BeamSolver implements SolverStrategy {
           stretch: stepComponents.stretch / n,
           poseAttractor: stepComponents.poseAttractor / n,
           perFingerHome: stepComponents.perFingerHome / n,
-          alternation: 0,
-          handBalance: 0,
+          alternation: stepComponents.alternation / n,
+          handBalance: stepComponents.handBalance / n,
           constraints: stepComponents.constraints / n,
         };
 
@@ -331,6 +350,8 @@ export class BeamSolver implements SolverStrategy {
           parent: node,
           assignments, // Now stores ALL assignments for the chord
           depth: node.depth + 1,
+          leftCount: newLeftCount,
+          rightCount: newRightCount,
         };
 
         children.push(childNode);
@@ -421,13 +442,28 @@ export class BeamSolver implements SolverStrategy {
         const leftFallbackPenalty = leftResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
         const rightFallbackPenalty = rightResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
+        // Alternation: penalize same-finger repetition on short dt
+        const prevAssignments = node.assignments.map((a) => ({ hand: a.hand, finger: a.finger }));
+        const leftFingersForCost = Object.keys(leftResult.pose.fingers) as FingerType[];
+        const rightFingersForCost = Object.keys(rightResult.pose.fingers) as FingerType[];
+        const currentAssignments: Array<{ hand: 'left' | 'right'; finger: FingerType }> = [
+          ...leftNoteIndices.map((_, j) => ({ hand: 'left' as const, finger: leftFingersForCost[j] })),
+          ...rightNoteIndices.map((_, j) => ({ hand: 'right' as const, finger: rightFingersForCost[j] })),
+        ];
+        const alternationCost = calculateAlternationCost(prevAssignments, currentAssignments, rawTimeDelta);
+
+        // Hand balance: penalize deviation from target left share
+        const newLeftCount = node.leftCount + leftNoteIndices.length;
+        const newRightCount = node.rightCount + rightNoteIndices.length;
+        const handBalanceCost = calculateHandBalanceCost(newLeftCount, newRightCount);
+
         const stepComponents: ObjectiveComponents = {
           transition: effectiveLeftTransition + effectiveRightTransition,
           stretch: leftStatic + rightStatic,
           poseAttractor: leftAttractor + rightAttractor,
           perFingerHome: leftHome + rightHome,
-          alternation: 0,
-          handBalance: 0,
+          alternation: alternationCost,
+          handBalance: handBalanceCost,
           constraints: leftFallbackPenalty + rightFallbackPenalty,
         };
         const stepCost = combineComponents(stepComponents);
@@ -441,8 +477,8 @@ export class BeamSolver implements SolverStrategy {
           stretch: stepComponents.stretch / n,
           poseAttractor: stepComponents.poseAttractor / n,
           perFingerHome: stepComponents.perFingerHome / n,
-          alternation: 0,
-          handBalance: 0,
+          alternation: stepComponents.alternation / n,
+          handBalance: stepComponents.handBalance / n,
           constraints: stepComponents.constraints / n,
         };
 
@@ -494,6 +530,8 @@ export class BeamSolver implements SolverStrategy {
           parent: node,
           assignments, // All assignments for the split chord
           depth: node.depth + 1,
+          leftCount: newLeftCount,
+          rightCount: newRightCount,
         });
       }
     }
@@ -947,6 +985,9 @@ export class BeamSolver implements SolverStrategy {
                 });
               }
 
+              const newLeftCount = node.leftCount + (override.hand === 'left' ? n : 0);
+              const newRightCount = node.rightCount + (override.hand === 'right' ? n : 0);
+
               newBeam.push({
                 leftPose: override.hand === 'left' ? matchingResult.pose : node.leftPose,
                 rightPose: override.hand === 'right' ? matchingResult.pose : node.rightPose,
@@ -954,6 +995,8 @@ export class BeamSolver implements SolverStrategy {
                 parent: node,
                 assignments,
                 depth: node.depth + 1,
+                leftCount: newLeftCount,
+                rightCount: newRightCount,
               });
             }
             continue;
@@ -1052,6 +1095,9 @@ export class BeamSolver implements SolverStrategy {
           const rightDist = Math.abs(group.positions[0].col - 5);
           const primaryHand = leftDist <= rightDist ? 'left' : 'right';
 
+          const newLeftCount = node.leftCount + leftIndices.length;
+          const newRightCount = node.rightCount + rightIndices.length;
+
           newBeam.push({
             leftPose: primaryHand === 'left' ? firstFallbackGrip : node.leftPose,
             rightPose: primaryHand === 'right' ? firstFallbackGrip : node.rightPose,
@@ -1059,6 +1105,8 @@ export class BeamSolver implements SolverStrategy {
             parent: node,
             assignments,
             depth: node.depth + 1,
+            leftCount: newLeftCount,
+            rightCount: newRightCount,
           });
         }
       }
