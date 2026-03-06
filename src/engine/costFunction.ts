@@ -585,6 +585,43 @@ export function calculateAttractorCost(
 }
 
 /**
+ * Per-finger home cost: penalizes each finger's distance from its neutral pad.
+ * Used when Natural Hand Pose 0 override is present to strongly favor pose positions.
+ * Finger at neutral pad = 0 cost; cost increases with distance.
+ *
+ * @param pose - Current hand pose (finger positions)
+ * @param handSide - Which hand
+ * @param neutralHandCenters - Neutral pad positions (from Pose 0)
+ * @param weight - Cost weight per unit distance (default 0.8)
+ */
+export function calculatePerFingerHomeCost(
+  pose: HandPose,
+  handSide: 'left' | 'right',
+  neutralHandCenters: NeutralHandCenters,
+  weight: number = 0.8
+): number {
+  let total = 0;
+  const prefix = handSide === 'left' ? 'L' : 'R';
+  const fingerNums: Record<FingerType, number> = {
+    thumb: 1,
+    index: 2,
+    middle: 3,
+    ring: 4,
+    pinky: 5,
+  };
+
+  for (const [finger, coord] of Object.entries(pose.fingers) as [FingerType, FingerCoordinate][]) {
+    const key = `${prefix}${fingerNums[finger]}`;
+    const neutral = neutralHandCenters.neutralPads[key];
+    if (!neutral) continue;
+    const dist = fingerCoordinateDistance(coord, { x: neutral.col, y: neutral.row });
+    total += dist * weight;
+  }
+
+  return total;
+}
+
+/**
  * Calculates the transition cost for moving from one hand pose to another.
  * 
  * Implements Fitts's Law principles:

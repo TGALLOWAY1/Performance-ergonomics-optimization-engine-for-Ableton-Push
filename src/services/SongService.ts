@@ -6,7 +6,9 @@ const STORAGE_KEY = 'push_perf_songs';
 import { parseMidiFileToProject, MidiProjectData } from '../utils/midiImport';
 import { saveProjectStateToStorage, loadProjectStateFromStorage, deleteProjectStateFromStorage } from '../utils/projectPersistence';
 import { ProjectState } from '../types/projectState';
+import { createDefaultPose0 } from '../types/naturalHandPose';
 import { generateId } from '../utils/performanceUtils';
+import { DEFAULT_TEST_MIDI_URL, DEFAULT_TEST_SONG_ID } from '../data/testData';
 
 class SongService {
     private getSongsMap(): Record<string, Song> {
@@ -118,6 +120,7 @@ class SongService {
             mappings: [gridMappingWithMode], // Empty grid with layoutMode: 'none'
             ignoredNoteNumbers: [],
             manualAssignments: {},
+            naturalHandPoses: [createDefaultPose0()],
         };
 
         return state;
@@ -315,6 +318,70 @@ class SongService {
     seedMockData(): void {
         // Mock data removed to ensure only valid MIDI data is used.
         // User must import Songs from MIDI files.
+    }
+
+    /**
+     * Seeds the default test song (TEST MIDI 1) if it doesn't exist.
+     * The MIDI is bundled in public/default-test.mid - no import needed.
+     */
+    async seedDefaultTestSong(): Promise<void> {
+        const existing = this.getSong(DEFAULT_TEST_SONG_ID);
+        if (existing?.midiData) {
+            return; // Already seeded
+        }
+
+        try {
+            const res = await fetch(DEFAULT_TEST_MIDI_URL);
+            if (!res.ok) throw new Error(`Failed to fetch default test MIDI: ${res.status}`);
+            const arrayBuffer = await res.arrayBuffer();
+
+            const projectData = await parseMidiFileToProject(
+                new File([arrayBuffer], 'default-test.mid', { type: 'audio/midi' })
+            );
+            const { performance, minNoteNumber } = projectData;
+
+            const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const rootNote = minNoteNumber != null ? noteNames[minNoteNumber % 12] : 'C';
+            const inferredKey = `${rootNote} Major`;
+
+            const lastEvent = performance.events[performance.events.length - 1];
+            const duration = lastEvent ? Math.ceil(lastEvent.startTime + (lastEvent.duration || 0)) : 0;
+
+            const projectStateId = uuidv4();
+            const initialState = this.createProjectStateFromMidi(projectData);
+            saveProjectStateToStorage(projectStateId, initialState);
+
+            const base64 = btoa(
+                String.fromCharCode(...new Uint8Array(arrayBuffer))
+            );
+
+            const newSong: Song = {
+                metadata: {
+                    id: DEFAULT_TEST_SONG_ID,
+                    title: 'Default Test (Scenario 1)',
+                    artist: 'Built-in',
+                    bpm: performance.tempo || 120,
+                    key: inferredKey,
+                    duration,
+                    lastPracticed: Date.now(),
+                    totalPracticeTime: 0,
+                    performanceRating: 0,
+                    difficulty: 'Medium',
+                    isFavorite: false,
+                    tags: ['Default', 'Test'],
+                },
+                sections: [],
+                projectStateId,
+                midiData: base64,
+                midiFileName: 'TEST MIDI 1.mid',
+            };
+
+            const songs = this.getSongsMap();
+            songs[DEFAULT_TEST_SONG_ID] = newSong;
+            this.saveSongsMap(songs);
+        } catch (err) {
+            console.warn('[SongService] Could not seed default test song:', err);
+        }
     }
 }
 

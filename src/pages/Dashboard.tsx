@@ -24,13 +24,8 @@ export const Dashboard: React.FC = () => {
     };
 
     useEffect(() => {
-        // Seed mock data for MVP if empty
-        // Seed mock data removed for production readiness - starts empty
-        // songService.seedMockData();
-        // Load songs
-        refreshSongs();
-
-
+        // Seed default test MIDI clip if not already present (hardcoded, no import needed)
+        songService.seedDefaultTestSong().then(() => refreshSongs());
     }, []);
 
 

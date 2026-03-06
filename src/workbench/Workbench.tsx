@@ -11,6 +11,13 @@ import { mapToQuadrants } from '../utils/autoLayout';
 import { BiomechanicalSolver, SolverType } from '../engine/core';
 import { FingerType } from '../engine/models';
 import { getActivePerformance } from '../utils/performanceSelectors';
+import {
+  FINGER_PRIORITY_ORDER,
+  getPose0PadsWithOffset,
+  getMaxSafeOffset,
+  poseHasAssignments,
+  createDefaultPose0,
+} from '../types/naturalHandPose';
 import { AnalysisPanel } from './AnalysisPanel';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { songService } from '../services/SongService';
@@ -826,6 +833,140 @@ export const Workbench: React.FC = () => {
   };
 
   // ============================================================================
+  // EXPLICIT LAYOUT CONTROL: Assign Using Natural Pose (Deterministic)
+  // ============================================================================
+  // Maps unassigned Voices to Pads using Pose 0 anchor pads as priority,
+  // sorted by voice importance (note-on count). Deterministic, not random.
+  // ============================================================================
+  const handleAutoAssignNaturalPose = () => {
+    if (!activeMapping || !projectState.instrumentConfig) {
+      alert('No active mapping or instrument config available. Please create a mapping first.');
+      return;
+    }
+
+    // Get Pose 0
+    const pose0 = projectState.naturalHandPoses?.[0] ?? createDefaultPose0();
+    if (!poseHasAssignments(pose0)) {
+      alert('No Natural Hand Pose configured. Please configure Pose 0 first, or use Random assignment.');
+      return;
+    }
+
+    // Find all unassigned Voices (in staging, not yet assigned to a Pad)
+    const assignedIds = new Set(Object.values(activeMapping.cells).map(v => v.id));
+    const unassignedVoices = projectState.parkedSounds.filter(s => !assignedIds.has(s.id));
+
+    if (unassignedVoices.length === 0) {
+      alert('No unassigned Voices found. All Voices are already assigned to Pads.');
+      return;
+    }
+
+    // Sort voices by importance (note-on count, descending - most important first)
+    // Calculate importance from the active performance
+    const performance = getActivePerformance(projectState);
+    const voiceImportance = new Map<string, number>();
+    if (performance) {
+      for (const event of performance.events) {
+        const voice = unassignedVoices.find(v => v.originalMidiNote === event.noteNumber);
+        if (voice) {
+          voiceImportance.set(voice.id, (voiceImportance.get(voice.id) || 0) + 1);
+        }
+      }
+    }
+    
+    // Sort by importance (descending)
+    const sortedVoices = [...unassignedVoices].sort((a, b) => {
+      const importanceA = voiceImportance.get(a.id) || 0;
+      const importanceB = voiceImportance.get(b.id) || 0;
+      return importanceB - importanceA;
+    });
+
+    // Get Pose 0 anchor pads with max safe offset
+    const safeOffset = getMaxSafeOffset(pose0, true);
+    const anchorPads = getPose0PadsWithOffset(pose0, safeOffset, true);
+    
+    // Build ordered pad list: anchor pads first (in finger priority order), then other empty pads
+    const anchorPadKeys = new Set<string>();
+    const orderedPads: Array<{ row: number; col: number; key: string }> = [];
+    
+    // Add anchor pads in finger priority order
+    for (const fingerId of FINGER_PRIORITY_ORDER) {
+      const anchor = anchorPads.find(p => p.fingerId === fingerId);
+      if (anchor && anchor.row >= 0 && anchor.row <= 7) {
+        const key = cellKey(anchor.row, anchor.col);
+        // Only add if empty (not already assigned)
+        if (!activeMapping.cells[key] && !anchorPadKeys.has(key)) {
+          orderedPads.push({ row: anchor.row, col: anchor.col, key });
+          anchorPadKeys.add(key);
+        }
+      }
+    }
+    
+    // Add remaining empty pads (row-major order for determinism)
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const key = cellKey(row, col);
+        if (!activeMapping.cells[key] && !anchorPadKeys.has(key)) {
+          orderedPads.push({ row, col, key });
+        }
+      }
+    }
+
+    if (orderedPads.length === 0) {
+      alert('No empty Pads available. All 64 Pads are already assigned.');
+      return;
+    }
+
+    // Map sorted voices to ordered pads (deterministic)
+    const assignments: Record<string, Voice> = {};
+    const maxAssignments = Math.min(sortedVoices.length, orderedPads.length);
+
+    for (let i = 0; i < maxAssignments; i++) {
+      assignments[orderedPads[i].key] = sortedVoices[i];
+    }
+
+    // Batch assign all at once and update layoutMode
+    if (Object.keys(assignments).length > 0) {
+      if (!activeMapping) {
+        const newMapping: GridMapping = {
+          id: `mapping-${Date.now()}`,
+          name: 'New Mapping',
+          cells: assignments,
+          fingerConstraints: {},
+          scoreCache: null,
+          notes: '',
+          layoutMode: 'manual', // Natural Pose is a form of manual/deterministic layout
+        };
+        setProjectState({
+          ...projectState,
+          mappings: [...projectState.mappings, newMapping],
+          activeMappingId: newMapping.id,
+        });
+      } else {
+        setProjectState({
+          ...projectState,
+          mappings: projectState.mappings.map(m => {
+            if (m.id !== activeMapping.id) return m;
+            return {
+              ...m,
+              cells: {
+                ...m.cells,
+                ...assignments,
+              },
+              layoutMode: 'manual',
+            };
+          }),
+        });
+      }
+
+      console.log(`[Workbench] Assign Natural Pose: placed ${Object.keys(assignments).length} voices deterministically.`);
+    }
+  };
+
+  // Check if Natural Pose is available
+  const pose0 = projectState.naturalHandPoses?.[0];
+  const hasNaturalPose = pose0 && poseHasAssignments(pose0);
+
+  // ============================================================================
   // EXPLICIT LAYOUT CONTROL: Clear Grid
   // ============================================================================
   // Removes all pad assignments and moves sounds back to staging.
@@ -1173,40 +1314,58 @@ export const Workbench: React.FC = () => {
 
               <div className="h-6 w-px bg-slate-700/50" />
 
-              {/* Assign Randomly Button */}
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleAutoAssignRandom}
-                disabled={!activeMapping || projectState.parkedSounds.filter(s => !Object.values(activeMapping.cells).some(c => c.id === s.id)).length === 0}
-                title="Randomly assign unassigned sounds to empty pads"
-                leftIcon={(
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                )}
-              >
-                Randomize
-              </Button>
+              {/* Primary layout: Natural (assign to pose pads) then Auto-Arrange (optimize). Random is secondary. */}
+              <div className="flex items-center gap-1.5">
+                {/* Natural: assign sounds to Natural Hand Pose pads first (primary when pose is set) */}
+                <Button
+                  variant={hasNaturalPose ? "primary" : "secondary"}
+                  size="sm"
+                  onClick={handleAutoAssignNaturalPose}
+                  disabled={!activeMapping || !hasNaturalPose || projectState.parkedSounds.filter(s => !Object.values(activeMapping.cells).some(c => c.id === s.id)).length === 0}
+                  title={hasNaturalPose ? "Assign sounds to your Natural Hand Pose pads first (by importance). Use this to fill the grid from the library." : "Set your Natural Hand Pose in the Pose tab first, then use this to assign sounds to those pads."}
+                  leftIcon={(
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+                    </svg>
+                  )}
+                >
+                  Natural
+                </Button>
 
-              <div className="h-6 w-px bg-slate-700/50" />
+                {/* Auto-Arrange: optimize layout (respects Natural Hand Pose when set) */}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleOptimizeLayout}
+                  disabled={isOptimizingLayout || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
+                  isLoading={isOptimizingLayout}
+                  title={hasNaturalPose ? "Optimize pad layout; prefers your Natural Hand Pose positions" : "Optimize pad layout using Simulated Annealing"}
+                  leftIcon={!isOptimizingLayout && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                >
+                  {isOptimizingLayout ? 'Optimizing...' : 'Auto-Arrange'}
+                </Button>
 
-              {/* Auto-Arrange Grid Button (Simulated Annealing) */}
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleOptimizeLayout}
-                disabled={isOptimizingLayout || !activeMapping || !filteredPerformance || filteredPerformance.events.length === 0 || Object.keys(activeMapping?.cells || {}).length === 0}
-                isLoading={isOptimizingLayout}
-                title="Optimize pad layout using Simulated Annealing"
-                leftIcon={!isOptimizingLayout && (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                )}
-              >
-                {isOptimizingLayout ? 'Optimizing...' : 'Auto-Arrange'}
-              </Button>
+                {/* Random: secondary option */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleAutoAssignRandom}
+                  disabled={!activeMapping || projectState.parkedSounds.filter(s => !Object.values(activeMapping.cells).some(c => c.id === s.id)).length === 0}
+                  title="Randomly assign unassigned sounds to empty pads (secondary option)"
+                  className="text-slate-400 hover:text-slate-200"
+                  leftIcon={(
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                >
+                  Random
+                </Button>
+              </div>
 
               <div className="h-6 w-px bg-slate-700/50" />
 

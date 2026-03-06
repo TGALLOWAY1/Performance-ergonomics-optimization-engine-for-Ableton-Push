@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -41,7 +41,8 @@ import { ProjectState, LayoutSnapshot } from '../types/projectState';
 import { EngineResult } from '../engine/core';
 import { VoiceLibrary } from './VoiceLibrary';
 import { FingerLegend } from './FingerLegend';
-
+import { NaturalHandPosePanel, getPoseGhostMarkers, handlePoseEditPadClick } from './NaturalHandPosePanel';
+import { FingerId, NaturalHandPose, createDefaultPose0 } from '../types/naturalHandPose';
 
 import { getActivePerformance } from '../utils/performanceSelectors';
 
@@ -129,6 +130,10 @@ interface DroppableCellProps {
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  /** Ghost marker for Natural Hand Pose visualization */
+  poseGhostMarker?: { shortName: string; color: string; isOffGrid: boolean } | null;
+  /** Whether pose edit mode is active */
+  isPoseEditMode?: boolean;
 }
 
 const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: Partial<Voice>) => void }> = ({
@@ -151,6 +156,8 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
   onDoubleClick,
   onContextMenu,
   onUpdateSound,
+  poseGhostMarker,
+  isPoseEditMode = false,
 }) => {
   // Get Cell (MIDI note number) for label display on this Pad
   const noteNumber = assignedSound && assignedSound.originalMidiNote !== null
@@ -380,6 +387,23 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
               <span className="text-[8px]">🔒</span>
             </div>
           )}
+
+          {/* Pose Ghost Marker (Bottom Left) - Show when pose has this pad assigned */}
+          {poseGhostMarker && (
+            <div
+              className={`absolute -bottom-1.5 -left-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shadow-md z-10 border-2 border-white/30 ${
+                poseGhostMarker.isOffGrid ? 'opacity-40' : ''
+              }`}
+              style={{
+                backgroundColor: poseGhostMarker.color,
+                color: 'white',
+                textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+              }}
+              title={`Natural Pose: ${poseGhostMarker.shortName}${poseGhostMarker.isOffGrid ? ' (off-grid)' : ''}`}
+            >
+              {poseGhostMarker.shortName}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -418,6 +442,23 @@ const DroppableCell: React.FC<DroppableCellProps & { onUpdateSound?: (updates: P
                 <span className="text-[8px] text-[var(--text-secondary)] font-mono opacity-0 hover:opacity-100 transition-opacity">
                   {row},{col}
                 </span>
+              )}
+
+              {/* Pose Ghost Marker for empty cells */}
+              {poseGhostMarker && (
+                <div
+                  className={`absolute inset-2 rounded-lg flex items-center justify-center ${
+                    poseGhostMarker.isOffGrid ? 'opacity-40' : 'opacity-70'
+                  } ${isPoseEditMode ? 'ring-2 ring-dashed ring-white/50' : ''}`}
+                  style={{
+                    backgroundColor: poseGhostMarker.color,
+                  }}
+                  title={`Natural Pose: ${poseGhostMarker.shortName}${poseGhostMarker.isOffGrid ? ' (off-grid)' : ''}`}
+                >
+                  <span className="text-[11px] font-bold text-white drop-shadow-md">
+                    {poseGhostMarker.shortName}
+                  </span>
+                </div>
               )}
             </>
           )}
@@ -532,7 +573,40 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
     return map;
   }, [engineResult, projectState]);
-  // const [leftPanelTab, setLeftPanelTab] = useState<'library'>('library');
+
+  // Left Panel Tab State
+  const [leftPanelTab, setLeftPanelTab] = useState<'library' | 'pose'>('library');
+
+  // Pose Editor State
+  const [isPoseEditMode, setIsPoseEditMode] = useState(false);
+  const [activeFinger, setActiveFinger] = useState<FingerId | null>(null);
+  const [previewOffset, setPreviewOffset] = useState(0);
+
+  // Get Pose 0 from project state (or create default)
+  const pose0: NaturalHandPose = projectState.naturalHandPoses?.[0] ?? createDefaultPose0();
+
+  // Update Pose 0 in project state
+  const handleUpdatePose0 = useCallback((pose: NaturalHandPose) => {
+    const newPoses = [...(projectState.naturalHandPoses ?? [createDefaultPose0()])];
+    newPoses[0] = pose;
+    onUpdateProjectState({
+      ...projectState,
+      naturalHandPoses: newPoses,
+    });
+  }, [projectState, onUpdateProjectState]);
+
+  // Toggle pose edit mode
+  const handleTogglePoseEditMode = useCallback(() => {
+    setIsPoseEditMode(prev => !prev);
+    if (isPoseEditMode) {
+      setActiveFinger(null); // Clear active finger when exiting edit mode
+    }
+  }, [isPoseEditMode]);
+
+  // Get ghost markers for pose visualization
+  const poseGhostMarkers = useMemo(() => {
+    return getPoseGhostMarkers(pose0, previewOffset);
+  }, [pose0, previewOffset]);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -790,8 +864,18 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
 
 
-  // Handle cell click - selects the sound asset at that coordinate
+  // Handle cell click - selects the sound asset at that coordinate OR assigns finger in pose edit mode
   const handleCellClick = (row: number, col: number) => {
+    // Handle pose edit mode: assign active finger to this pad
+    if (isPoseEditMode && leftPanelTab === 'pose') {
+      const result = handlePoseEditPadClick(row, col, activeFinger, pose0, handleUpdatePose0);
+      if (!result.success && result.message) {
+        console.log('[LayoutDesigner] Pose edit:', result.message);
+      }
+      return; // Don't do normal cell selection in pose edit mode
+    }
+
+    // Normal cell click behavior
     const key = cellKey(row, col);
     const sound = getCellSound(row, col);
     if (sound) {
@@ -977,36 +1061,77 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
 
         {/* Main Content Area - Strict 3-Column Layout */}
         <div className="flex-1 flex flex-row overflow-hidden">
-          {/* Left Panel (w-80) - Tabbed: Library & Sections */}
+          {/* Left Panel (w-80) - Tabbed: Library | Pose */}
           <div className="w-80 flex-none border-r border-[var(--border-subtle)] bg-[var(--bg-app)] flex flex-col overflow-hidden">
-            {/* Layout Actions Removed - Moved to Icons */}
+            {/* Top-level Tabs: Library | Pose */}
+            <div className="flex-none border-b border-[var(--border-subtle)]">
+              <div className="flex">
+                <button
+                  onClick={() => {
+                    setLeftPanelTab('library');
+                    if (isPoseEditMode) {
+                      setIsPoseEditMode(false);
+                      setActiveFinger(null);
+                    }
+                  }}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                    leftPanelTab === 'library'
+                      ? 'text-[var(--text-primary)] border-b-2 border-blue-500 bg-[var(--bg-panel)]'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)]'
+                  }`}
+                >
+                  Library
+                </button>
+                <button
+                  onClick={() => setLeftPanelTab('pose')}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                    leftPanelTab === 'pose'
+                      ? 'text-[var(--text-primary)] border-b-2 border-blue-500 bg-[var(--bg-panel)]'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)]'
+                  }`}
+                >
+                  Pose
+                </button>
+              </div>
+            </div>
 
-            {/* Tabs (Removed - VoiceLibrary handles this) */}
-
-            {/* Voice Library Component */}
-            <VoiceLibrary
-              parkedSounds={stagingAssets}
-              activeMapping={activeMapping}
-              projectState={projectState}
-              selectedSoundId={selectedSoundId}
-              selectedCellKey={selectedCellKey}
-              ignoredNoteNumbers={ignoredNoteNumbers}
-              onSelectSound={(id) => {
-                setSelectedSoundId(id);
-                setSelectedCellKey(null);
-              }}
-              onSelectCell={(key) => {
-                setSelectedCellKey(key);
-                setSelectedSoundId(null);
-              }}
-              onAddSound={onAddSound}
-              onUpdateSound={onUpdateSound}
-              onUpdateMappingSound={onUpdateMappingSound}
-              onDeleteSound={(id) => onDeleteSound?.(id)}
-              onToggleVoiceVisibility={handleToggleVoiceVisibility}
-              handleDestructiveDelete={handleDestructiveDelete}
-              handleClearStaging={handleClearStaging}
-            />
+            {/* Tab Content */}
+            {leftPanelTab === 'library' ? (
+              <VoiceLibrary
+                parkedSounds={stagingAssets}
+                activeMapping={activeMapping}
+                projectState={projectState}
+                selectedSoundId={selectedSoundId}
+                selectedCellKey={selectedCellKey}
+                ignoredNoteNumbers={ignoredNoteNumbers}
+                onSelectSound={(id) => {
+                  setSelectedSoundId(id);
+                  setSelectedCellKey(null);
+                }}
+                onSelectCell={(key) => {
+                  setSelectedCellKey(key);
+                  setSelectedSoundId(null);
+                }}
+                onAddSound={onAddSound}
+                onUpdateSound={onUpdateSound}
+                onUpdateMappingSound={onUpdateMappingSound}
+                onDeleteSound={(id) => onDeleteSound?.(id)}
+                onToggleVoiceVisibility={handleToggleVoiceVisibility}
+                handleDestructiveDelete={handleDestructiveDelete}
+                handleClearStaging={handleClearStaging}
+              />
+            ) : (
+              <NaturalHandPosePanel
+                pose0={pose0}
+                onUpdatePose0={handleUpdatePose0}
+                activeFinger={activeFinger}
+                onSetActiveFinger={setActiveFinger}
+                previewOffset={previewOffset}
+                onSetPreviewOffset={setPreviewOffset}
+                isEditMode={isPoseEditMode}
+                onToggleEditMode={handleTogglePoseEditMode}
+              />
+            )}
           </div>
 
           {/* Center Panel (flex-1) - GridEditor (top) & Timeline (bottom) */}
@@ -1076,6 +1201,11 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                       // Get finger constraint for this cell
                       const fingerConstraint = activeMapping?.fingerConstraints[cellKeyStr] || null;
 
+                      // Pose ghost markers only visible during pose edit mode (backend data otherwise)
+                      const ghostMarker = (isPoseEditMode && leftPanelTab === 'pose')
+                        ? poseGhostMarkers.get(cellKeyStr)
+                        : undefined;
+
                       return (
                         <DroppableCell
                           key={key}
@@ -1098,6 +1228,8 @@ export const LayoutDesigner: React.FC<LayoutDesignerProps> = ({
                           onClick={() => handleCellClick(row, col)}
                           onDoubleClick={() => handleCellDoubleClick(row, col)}
                           onContextMenu={(e) => handleCellContextMenu(e, row, col)}
+                          poseGhostMarker={ghostMarker ?? null}
+                          isPoseEditMode={isPoseEditMode && leftPanelTab === 'pose'}
                         />
                       );
                     })}

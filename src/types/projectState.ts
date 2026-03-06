@@ -3,6 +3,7 @@ import { Voice, GridMapping } from './layout';
 import { InstrumentConfig } from '../types/performance';
 import { FingerType } from '../engine/models';
 import { EngineResult } from '../engine/core';
+import { NaturalHandPose, createDefaultPose0 } from './naturalHandPose';
 
 export interface LayoutSnapshot {
   id: string;
@@ -64,6 +65,13 @@ export interface ProjectState {
    * Centralizes this state so Workbench, Timeline, and EventAnalysis remain in sync.
    */
   activeMappingId: string | null;
+
+  /**
+   * Natural Hand Pose configurations.
+   * Index 0 is always the default "Pose 0" - the user's natural resting hand position.
+   * Used for deterministic voice-to-pad seeding and as solver neutral position override.
+   */
+  naturalHandPoses?: NaturalHandPose[];
 }
 
 // ============================================================================
@@ -209,4 +217,5 @@ export const createInitialProjectState = (): ProjectState => ({
   solverResults: {},
   activeSolverId: undefined,
   activeMappingId: null,
+  naturalHandPoses: [createDefaultPose0()],
 });

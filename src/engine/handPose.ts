@@ -10,8 +10,16 @@
  */
 
 import { GridMapping, cellKey } from '../types/layout';
-import { InstrumentConfig } from '../types/performance';
+import { InstrumentConfig, RestingPose, HandPose, FingerCoordinate } from '../types/performance';
 import { GridMapService } from './gridMapService';
+import { FingerType } from './models';
+import {
+  NaturalHandPose,
+  fingerIdToEngineKey,
+  getPose0PadsWithOffset,
+  getMaxSafeOffset,
+  poseHasAssignments,
+} from '../types/naturalHandPose';
 
 // ============================================================================
 // Core Types
@@ -212,6 +220,71 @@ export function resolveNeutralPadPositions(
   return result;
 }
 
+/**
+ * Converts a Natural Hand Pose (Pose 0) to NeutralPadPositions format.
+ * 
+ * This allows the solver to use user-defined finger positions instead of
+ * the default musical-note-based positions.
+ * 
+ * @param pose - The Natural Hand Pose configuration
+ * @param offsetRow - Vertical offset to apply (signed, [-4, +4]). If not provided, uses max safe offset.
+ * @param instrumentConfig - Instrument configuration for deriving note numbers
+ * @returns NeutralPadPositions or null if pose has no assignments
+ */
+export function getNeutralPadPositionsFromPose0(
+  pose: NaturalHandPose,
+  offsetRow?: number,
+  instrumentConfig?: InstrumentConfig
+): NeutralPadPositions | null {
+  if (!poseHasAssignments(pose)) {
+    return null;
+  }
+
+  // Use provided offset or calculate max safe offset
+  const effectiveOffset = offsetRow ?? getMaxSafeOffset(pose, true);
+  
+  // Get pads with offset applied (clamped to grid)
+  const padsWithOffset = getPose0PadsWithOffset(pose, effectiveOffset, true);
+  
+  const result: NeutralPadPositions = {};
+  
+  for (const { fingerId, row, col } of padsWithOffset) {
+    // Convert FingerId to engine key (e.g., "L_INDEX" -> "L2")
+    const engineKey = fingerIdToEngineKey(fingerId);
+    const padId = cellKey(row, col);
+    
+    // Calculate MIDI note number if instrument config is provided
+    let noteNumber = 0;
+    let noteName = '';
+    if (instrumentConfig) {
+      noteNumber = GridMapService.getNoteForPosition(row, col, instrumentConfig) ?? 0;
+      noteName = midiToNoteName(noteNumber);
+    }
+    
+    result[engineKey] = {
+      row,
+      col,
+      padId,
+      noteNumber,
+      noteName,
+    };
+  }
+  
+  return result;
+}
+
+/**
+ * Converts a MIDI note number to a note name string.
+ * @param midiNote - MIDI note number (0-127)
+ * @returns Note name in format "C0", "D#2", etc.
+ */
+function midiToNoteName(midiNote: number): string {
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const note = NOTE_NAMES[midiNote % 12];
+  const octave = Math.floor(midiNote / 12) - 2;
+  return `${note}${octave}`;
+}
+
 // ============================================================================
 // Neutral Hand Centers
 // ============================================================================
@@ -277,6 +350,61 @@ export function computeNeutralHandCenters(
     leftCenter,
     rightCenter,
     neutralPads,
+  };
+}
+
+/** Engine key (L1..R5) to FingerType for building HandPose.fingers */
+const ENGINE_KEY_TO_FINGER: Record<string, FingerType> = {
+  L1: 'thumb', L2: 'index', L3: 'middle', L4: 'ring', L5: 'pinky',
+  R1: 'thumb', R2: 'index', R3: 'middle', R4: 'ring', R5: 'pinky',
+};
+
+/**
+ * Builds a RestingPose from NeutralPadPositions (e.g. from Pose 0).
+ * Used so the attractor cost in the solver pulls toward the user's natural hand pose
+ * instead of the default claw.
+ *
+ * @param neutralPads - Per-finger pad positions (L1..R5)
+ * @returns RestingPose with left/right HandPose (centroid + fingers), or null if empty
+ */
+export function restingPoseFromNeutralPadPositions(
+  neutralPads: NeutralPadPositions
+): RestingPose | null {
+  const leftFingers: Partial<Record<FingerType, FingerCoordinate>> = {};
+  const rightFingers: Partial<Record<FingerType, FingerCoordinate>> = {};
+  let leftSumX = 0, leftSumY = 0, leftCount = 0;
+  let rightSumX = 0, rightSumY = 0, rightCount = 0;
+
+  for (const [key, pos] of Object.entries(neutralPads)) {
+    const finger = ENGINE_KEY_TO_FINGER[key];
+    if (!finger) continue;
+    const coord: FingerCoordinate = { x: pos.col, y: pos.row };
+    if (key.startsWith('L')) {
+      leftFingers[finger] = coord;
+      leftSumX += pos.col;
+      leftSumY += pos.row;
+      leftCount++;
+    } else {
+      rightFingers[finger] = coord;
+      rightSumX += pos.col;
+      rightSumY += pos.row;
+      rightCount++;
+    }
+  }
+
+  const leftCenter: FingerCoordinate = leftCount > 0
+    ? { x: leftSumX / leftCount, y: leftSumY / leftCount }
+    : { x: 2, y: 2 };
+  const rightCenter: FingerCoordinate = rightCount > 0
+    ? { x: rightSumX / rightCount, y: rightSumY / rightCount }
+    : { x: 5, y: 2 };
+
+  const leftPose: HandPose = { centroid: leftCenter, fingers: leftFingers };
+  const rightPose: HandPose = { centroid: rightCenter, fingers: rightFingers };
+
+  return {
+    left: leftPose,
+    right: rightPose,
   };
 }
 

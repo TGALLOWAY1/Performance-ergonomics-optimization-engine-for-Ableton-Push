@@ -16,10 +16,11 @@ import {
   calculateAttractorCost,
   calculateTransitionCost,
   calculateGripStretchCost,
+  calculatePerFingerHomeCost,
   FALLBACK_GRIP_PENALTY,
 } from '../costFunction';
 import { GridPosition } from '../gridMath';
-import { getNeutralHandCenters, NeutralHandCenters } from '../handPose';
+import { getNeutralHandCenters, computeNeutralHandCenters, restingPoseFromNeutralPadPositions, NeutralHandCenters, NeutralPadPositions } from '../handPose';
 import {
   SolverStrategy,
   SolverType,
@@ -170,10 +171,12 @@ export class BeamSolver implements SolverStrategy {
 
   private instrumentConfig: InstrumentConfig;
   private gridMapping: GridMapping | null;
+  private neutralPadPositionsOverride: NeutralPadPositions | null;
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.gridMapping = config.gridMapping ?? null;
+    this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
   }
 
   /**
@@ -274,11 +277,14 @@ export class BeamSolver implements SolverStrategy {
 
         const attractorCost = calculateAttractorCost(grip, restPose, stiffness);
         const staticCost = calculateGripStretchCost(grip, hand, undefined, undefined, neutralHandCenters);
+        const perFingerHomeCost = neutralHandCenters
+          ? calculatePerFingerHomeCost(grip, hand, neutralHandCenters, 0.8)
+          : 0;
 
         // Apply fallback penalty if this is a fallback grip
         const fallbackPenalty = isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
-        const stepCost = effectiveTransitionCost + attractorCost + staticCost + fallbackPenalty;
+        const stepCost = effectiveTransitionCost + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
         const newTotalCost = node.totalCost + stepCost;
 
         // Get fingers from grip for assignment
@@ -405,6 +411,8 @@ export class BeamSolver implements SolverStrategy {
         const rightAttractor = calculateAttractorCost(rightResult.pose, restingPose.right, stiffness);
         const leftStatic = calculateGripStretchCost(leftResult.pose, 'left', undefined, undefined, neutralHandCenters);
         const rightStatic = calculateGripStretchCost(rightResult.pose, 'right', undefined, undefined, neutralHandCenters);
+        const leftHome = neutralHandCenters ? calculatePerFingerHomeCost(leftResult.pose, 'left', neutralHandCenters, 0.8) : 0;
+        const rightHome = neutralHandCenters ? calculatePerFingerHomeCost(rightResult.pose, 'right', neutralHandCenters, 0.8) : 0;
 
         // Apply fallback penalties
         const leftFallbackPenalty = leftResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
@@ -413,6 +421,7 @@ export class BeamSolver implements SolverStrategy {
         const stepCost = effectiveLeftTransition + effectiveRightTransition +
           leftAttractor + rightAttractor +
           leftStatic + rightStatic +
+          leftHome + rightHome +
           leftFallbackPenalty + rightFallbackPenalty;
 
         // Create assignments for ALL notes in the split chord (1:1 finger per note per hand)
@@ -597,7 +606,7 @@ export class BeamSolver implements SolverStrategy {
       const fingerKey = `${assignment.hand === 'left' ? 'L' : 'R'}-${assignment.finger.charAt(0).toUpperCase() + assignment.finger.slice(1)}`;
       fingerUsageStats[fingerKey] = (fingerUsageStats[fingerKey] || 0) + 1;
 
-      // Calculate drift from home
+      // Calculate drift from home (config is effectiveConfig when Pose 0 override is present)
       const { restingPose } = config;
       const homeCentroid = assignment.hand === 'left'
         ? restingPose.left.centroid
@@ -721,16 +730,40 @@ export class BeamSolver implements SolverStrategy {
     config: EngineConfiguration,
     manualAssignments?: Record<string, { hand: 'left' | 'right', finger: FingerType }>
   ): EngineResult {
-    // Compute neutral hand centers from the current layout
+    // Compute neutral hand centers from Pose 0 override or the current layout
     let neutralHandCenters: NeutralHandCenters | null = null;
-    if (this.gridMapping) {
+    if (this.neutralPadPositionsOverride) {
+      // Use Natural Hand Pose 0 override - derive centers from per-finger positions
+      try {
+        neutralHandCenters = computeNeutralHandCenters(this.neutralPadPositionsOverride);
+      } catch (error) {
+        console.warn('[BeamSolver] Failed to compute neutral hand centers from Pose 0 override:', error);
+        // Fall back to layout-based centers
+      }
+    }
+    
+    // Fall back to layout-based neutral centers if override not available or failed
+    if (!neutralHandCenters && this.gridMapping) {
       try {
         neutralHandCenters = getNeutralHandCenters(this.gridMapping, this.instrumentConfig);
       } catch (error) {
-        console.warn('[BeamSolver] Failed to compute neutral hand centers:', error);
+        console.warn('[BeamSolver] Failed to compute neutral hand centers from layout:', error);
         // Continue without neutral centers (graceful degradation)
       }
     }
+
+    // When Pose 0 override is present, use it as the attractor resting pose and strengthen the attractor
+    const effectiveRestingPose = this.neutralPadPositionsOverride
+      ? (restingPoseFromNeutralPadPositions(this.neutralPadPositionsOverride) ?? config.restingPose)
+      : config.restingPose;
+    const effectiveStiffness = this.neutralPadPositionsOverride
+      ? Math.min(2.0, config.stiffness * 2.0)
+      : config.stiffness;
+    const effectiveConfig: EngineConfiguration = {
+      ...config,
+      restingPose: effectiveRestingPose,
+      stiffness: effectiveStiffness,
+    };
 
     // Sort events by time
     const sortedEvents = [...performance.events]
@@ -753,8 +786,8 @@ export class BeamSolver implements SolverStrategy {
     // Group events by timestamp (handles chords correctly)
     const groups = groupEventsByTimestamp(eventsWithPositions);
 
-    // Initialize beam with resting pose
-    let beam = this.createInitialBeam(config);
+    // Initialize beam with resting pose (uses Pose 0 when override present)
+    let beam = this.createInitialBeam(effectiveConfig);
     let prevTimestamp = 0;
 
     // Process each group (single notes and chords treated uniformly)
@@ -793,15 +826,18 @@ export class BeamSolver implements SolverStrategy {
               const timeDelta = group.timestamp - prevTimestamp;
               const prevPose = override.hand === 'left' ? node.leftPose : node.rightPose;
               const restPose = override.hand === 'left'
-                ? config.restingPose.left
-                : config.restingPose.right;
+                ? effectiveConfig.restingPose.left
+                : effectiveConfig.restingPose.right;
 
               const transitionCost = calculateTransitionCost(prevPose, matchingResult.pose, timeDelta);
-              const attractorCost = calculateAttractorCost(matchingResult.pose, restPose, config.stiffness);
+              const attractorCost = calculateAttractorCost(matchingResult.pose, restPose, effectiveConfig.stiffness);
               const staticCost = calculateGripStretchCost(matchingResult.pose, override.hand, undefined, undefined, neutralHandCenters);
+              const perFingerHomeCost = neutralHandCenters
+                ? calculatePerFingerHomeCost(matchingResult.pose, override.hand, neutralHandCenters, 0.8)
+                : 0;
               const fallbackPenalty = matchingResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
               const effectiveTransition = transitionCost === Infinity ? 100 : transitionCost;
-              const stepCost = effectiveTransition + attractorCost + staticCost + fallbackPenalty;
+              const stepCost = effectiveTransition + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
 
               // Create assignments for ALL notes in the group (handles chords)
               const assignments: NoteAssignment[] = [];
@@ -837,7 +873,7 @@ export class BeamSolver implements SolverStrategy {
         }
 
         // Standard expansion using group-based approach
-        const children = this.expandNodeForGroup(node, group, prevTimestamp, config, neutralHandCenters);
+        const children = this.expandNodeForGroup(node, group, prevTimestamp, effectiveConfig, neutralHandCenters);
         newBeam.push(...children);
 
         // For multi-note chords, also try split-hand approach
@@ -928,13 +964,13 @@ export class BeamSolver implements SolverStrategy {
       }
 
       // Prune beam to keep top K candidates
-      beam = this.pruneBeam(newBeam, config.beamWidth);
+      beam = this.pruneBeam(newBeam, effectiveConfig.beamWidth);
       prevTimestamp = group.timestamp;
     }
 
     // Find best node (lowest total cost)
     if (beam.length === 0) {
-      return this.buildResult([], performance.events.length, unmappedIndices, config);
+      return this.buildResult([], performance.events.length, unmappedIndices, effectiveConfig);
     }
 
     const bestNode = beam.reduce((best, node) =>
@@ -944,7 +980,7 @@ export class BeamSolver implements SolverStrategy {
     // Backtrack to build optimal assignment path
     const assignments = this.backtrack(bestNode);
 
-    return this.buildResult(assignments, performance.events.length, unmappedIndices, config);
+    return this.buildResult(assignments, performance.events.length, unmappedIndices, effectiveConfig);
   }
 }
 
