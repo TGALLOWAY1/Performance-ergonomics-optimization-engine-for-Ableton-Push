@@ -13,6 +13,7 @@ import { createBeamSolver } from './BeamSolver';
 import { applyRandomMutation } from './mutationService';
 import { NeutralPadPositions } from '../handPose';
 import { computeMappingCoverage } from '../mappingCoverage';
+import { createSeededRng } from '../seededRng';
 import {
   SolverStrategy,
   SolverType,
@@ -87,11 +88,13 @@ export class AnnealingSolver implements SolverStrategy {
   private initialGridMapping: GridMapping | null;
   private neutralPadPositionsOverride: NeutralPadPositions | null = null;
   private bestMapping: GridMapping | null = null;
+  private seed: number;
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.initialGridMapping = config.gridMapping ?? null;
     this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
+    this.seed = config.seed ?? Math.floor(Math.random() * 0x7fffffff);
   }
 
   /**
@@ -241,6 +244,9 @@ export class AnnealingSolver implements SolverStrategy {
     };
     let bestCost = currentCost;
 
+    // Seeded RNG for deterministic mutations and acceptance
+    const rng = createSeededRng(this.seed);
+
     // Initialize temperature
     let currentTemp = INITIAL_TEMP;
 
@@ -256,8 +262,7 @@ export class AnnealingSolver implements SolverStrategy {
 
     // The Annealing Loop
     for (let step = 0; step < ITERATIONS; step++) {
-      // Mutate: Get a candidate mapping
-      const candidateMapping = applyRandomMutation(currentMapping);
+      const candidateMapping = applyRandomMutation(currentMapping, rng);
 
       // Evaluate: Calculate cost of candidate using fast Beam Search
       const candidateEvaluation = await this.evaluateMappingCost(
@@ -283,7 +288,7 @@ export class AnnealingSolver implements SolverStrategy {
           accepted = true;
         } else if (delta > 0 && Number.isFinite(currentCost) && currentCost > 0) {
           acceptanceProbability = Math.exp(-delta / currentTemp);
-          accepted = Math.random() < acceptanceProbability;
+          accepted = rng() < acceptanceProbability;
         } else {
           accepted = true; // Same cost or current was invalid
         }
@@ -423,6 +428,7 @@ export class AnnealingSolver implements SolverStrategy {
       annealingTrace,
       metadata: {
         ...finalResult.metadata,
+        seed: this.seed,
         objectiveTotal: finalResult.averageMetrics.total,
         objectiveComponentsSummary: finalResult.metadata?.objectiveComponentsSummary,
       },

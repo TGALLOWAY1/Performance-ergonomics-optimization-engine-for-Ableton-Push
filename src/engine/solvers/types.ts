@@ -275,6 +275,8 @@ export interface SolverConfig {
    * Default 'strict' for optimization; use 'allow-fallback' only for non-optimization previews.
    */
   mappingResolverMode?: 'strict' | 'allow-fallback';
+  /** Optional seed for deterministic optimization (SA, mutation). */
+  seed?: number;
 }
 
 /**
