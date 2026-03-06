@@ -2,6 +2,11 @@
  * Project persistence utilities for saving and loading project state.
  */
 import { ProjectState, DEFAULT_ENGINE_CONFIGURATION, HAND_SIZE_PRESETS, HandSizePreset } from '../types/projectState';
+import {
+  NaturalHandPose,
+  createDefaultPose0,
+  validateNaturalHandPose,
+} from '../types/naturalHandPose';
 
 /** Structured result for strict project file validation. Invalid core shape fails fast. */
 export type ValidationResult =
@@ -70,6 +75,37 @@ export function validateProjectStrict(parsed: unknown): ValidationResult {
     return { ok: false, error: { code: 'INVALID_MANUAL_ASSIGNMENTS', message: 'manualAssignments must be a nested map of layoutId -> eventKey -> { hand, finger }.', path: 'manualAssignments' } };
   }
 
+  // Validate naturalHandPoses (strict: fail on malformed, default if missing)
+  let naturalHandPoses: NaturalHandPose[];
+  if (p.naturalHandPoses === undefined || p.naturalHandPoses === null) {
+    // Missing is OK for strict (additive field) - create default
+    naturalHandPoses = [createDefaultPose0()];
+  } else if (!Array.isArray(p.naturalHandPoses)) {
+    return { ok: false, error: { code: 'INVALID_NATURAL_HAND_POSES', message: 'naturalHandPoses must be an array.', path: 'naturalHandPoses' } };
+  } else {
+    // Validate each pose strictly
+    naturalHandPoses = [];
+    for (let i = 0; i < p.naturalHandPoses.length; i++) {
+      const pose = p.naturalHandPoses[i] as NaturalHandPose;
+      const validation = validateNaturalHandPose(pose);
+      if (!validation.valid) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_POSE',
+            message: `naturalHandPoses[${i}]: ${validation.error}`,
+            path: `naturalHandPoses[${i}]`,
+          },
+        };
+      }
+      naturalHandPoses.push(pose);
+    }
+    // Ensure Pose 0 exists
+    if (naturalHandPoses.length === 0) {
+      naturalHandPoses = [createDefaultPose0()];
+    }
+  }
+
   // Apply defaults/migrations for non-critical fields
   let engineConfig = (p.engineConfiguration && typeof p.engineConfiguration === 'object')
     ? p.engineConfiguration as Record<string, unknown>
@@ -94,6 +130,7 @@ export function validateProjectStrict(parsed: unknown): ValidationResult {
     engineConfiguration: engineConfig as ProjectState['engineConfiguration'],
     solverResults: (p.solverResults && typeof p.solverResults === 'object') ? p.solverResults : {},
     activeSolverId: p.activeSolverId !== undefined ? (p.activeSolverId as string) : undefined,
+    naturalHandPoses,
   };
   return { ok: true, state };
 }
@@ -120,6 +157,24 @@ export function validateProjectState(parsed: unknown): ProjectState {
     ? p.instrumentConfig
     : (Array.isArray(p.instrumentConfigs) && p.instrumentConfigs[0] != null) ? p.instrumentConfigs[0] : null;
 
+  // Lenient handling for naturalHandPoses: default if missing/invalid
+  let naturalHandPoses: NaturalHandPose[] = [createDefaultPose0()];
+  if (Array.isArray(p.naturalHandPoses) && p.naturalHandPoses.length > 0) {
+    // Try to use existing poses, filter out invalid ones
+    const validPoses: NaturalHandPose[] = [];
+    for (const pose of p.naturalHandPoses) {
+      if (pose && typeof pose === 'object') {
+        const validation = validateNaturalHandPose(pose as NaturalHandPose);
+        if (validation.valid) {
+          validPoses.push(pose as NaturalHandPose);
+        }
+      }
+    }
+    if (validPoses.length > 0) {
+      naturalHandPoses = validPoses;
+    }
+  }
+
   return {
     layouts: Array.isArray(p.layouts) ? p.layouts as ProjectState['layouts'] : [],
     sectionMaps: Array.isArray(p.sectionMaps) ? p.sectionMaps : [],
@@ -135,6 +190,7 @@ export function validateProjectState(parsed: unknown): ProjectState {
     engineConfiguration: engineConfig as ProjectState['engineConfiguration'],
     solverResults: (p.solverResults && typeof p.solverResults === 'object') ? p.solverResults : {},
     activeSolverId: p.activeSolverId !== undefined ? p.activeSolverId : undefined,
+    naturalHandPoses,
   };
 }
 

@@ -14,6 +14,7 @@ import { InstrumentConfig } from '../types/performance';
 import { GridMapping } from '../types/layout';
 import { FingerType, EngineConstants, DEFAULT_ENGINE_CONSTANTS } from './models';
 import { DEFAULT_ENGINE_CONFIGURATION } from '../types/projectState';
+import { NeutralPadPositions } from './handPose';
 
 // Re-export types from solvers for backwards compatibility
 export type {
@@ -91,6 +92,7 @@ export class BiomechanicalSolver {
   private gridMapping: GridMapping | null;
   private engineConfig: EngineConfiguration;
   private strategy: SolverStrategy;
+  private neutralPadPositionsOverride: NeutralPadPositions | null = null;
 
   constructor(
     instrumentConfig: InstrumentConfig,
@@ -136,6 +138,7 @@ export class BiomechanicalSolver {
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: this.gridMapping,
+      neutralPadPositionsOverride: this.neutralPadPositionsOverride,
     };
 
     this.strategy = resolveSolver(type, solverConfig);
@@ -152,9 +155,31 @@ export class BiomechanicalSolver {
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: this.gridMapping,
+      neutralPadPositionsOverride: this.neutralPadPositionsOverride,
     };
 
     // Recreate strategy with new config
+    this.strategy = resolveSolver(this.strategy.type, solverConfig);
+  }
+
+  /**
+   * Sets the neutral pad positions override from Natural Hand Pose 0.
+   * 
+   * When set, the solver uses these per-finger positions instead of
+   * the default musical-note-based positions for computing hand centers.
+   * 
+   * @param override - NeutralPadPositions from Pose 0, or null to clear
+   */
+  public setNeutralPadPositionsOverride(override: NeutralPadPositions | null): void {
+    this.neutralPadPositionsOverride = override;
+
+    // Recreate strategy with updated config
+    const solverConfig: SolverConfig = {
+      instrumentConfig: this.instrumentConfig,
+      gridMapping: this.gridMapping,
+      neutralPadPositionsOverride: this.neutralPadPositionsOverride,
+    };
+
     this.strategy = resolveSolver(this.strategy.type, solverConfig);
   }
 

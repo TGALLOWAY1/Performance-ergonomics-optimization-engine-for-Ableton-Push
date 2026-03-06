@@ -1,5 +1,6 @@
 import React, { createContext, useContext, ReactNode, useMemo } from 'react';
 import { ProjectState, DEFAULT_ENGINE_CONFIGURATION } from '../types/projectState';
+import { createDefaultPose0 } from '../types/naturalHandPose';
 import { InstrumentConfig } from '../types/performance';
 import { useProjectHistory } from '../hooks/useProjectHistory';
 import { EngineResult, BiomechanicalSolver, SolverType } from '../engine/core';
@@ -8,6 +9,8 @@ import { getActivePerformance } from '../utils/performanceSelectors';
 import { GridMapping, LayoutMode } from '../types/layout';
 import { createAnnealingSolver } from '../engine/solvers/AnnealingSolver';
 import { buildNeutralGreedyInitialAssignment } from '../engine/solvers/greedyInitialAssignment';
+import { getNeutralPadPositionsFromPose0 } from '../engine/handPose';
+import { poseHasAssignments } from '../types/naturalHandPose';
 
 // Initial Data
 const INITIAL_INSTRUMENT_CONFIG: InstrumentConfig = {
@@ -38,6 +41,7 @@ const INITIAL_PROJECT_STATE: ProjectState = {
     engineConfiguration: DEFAULT_ENGINE_CONFIGURATION,
     solverResults: {},
     activeSolverId: undefined,
+    naturalHandPoses: [createDefaultPose0()],
 };
 
 
@@ -157,6 +161,19 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
                 solverType
             );
 
+            // Apply Natural Hand Pose 0 override if available
+            const pose0 = projectState.naturalHandPoses?.[0];
+            if (pose0 && poseHasAssignments(pose0)) {
+                const neutralPadOverride = getNeutralPadPositionsFromPose0(
+                    pose0,
+                    undefined, // Auto-pick max safe offset
+                    projectState.instrumentConfig
+                );
+                if (neutralPadOverride) {
+                    solver.setNeutralPadPositionsOverride(neutralPadOverride);
+                }
+            }
+
             // Run solver (async for genetic, sync for beam). Pass string-keyed manualAssignments as-is.
             let result: EngineResult;
             if (solverType === 'genetic') {
@@ -249,10 +266,17 @@ export const ProjectProvider: React.FC<{ children: ReactNode }> = ({ children })
                 : undefined;
 
         try {
-            // Create AnnealingSolver
+            // Apply Natural Hand Pose 0 to Auto-Arrange so layouts are attracted to pose pads
+            const pose0 = projectState.naturalHandPoses?.[0];
+            const neutralPadOverride = (pose0 && poseHasAssignments(pose0))
+                ? getNeutralPadPositionsFromPose0(pose0, undefined, projectState.instrumentConfig)
+                : null;
+
+            // Create AnnealingSolver (with Pose 0 override when available)
             const solver = createAnnealingSolver({
                 instrumentConfig: projectState.instrumentConfig,
                 gridMapping: mapping,
+                neutralPadPositionsOverride: neutralPadOverride ?? undefined,
             });
 
             // Run the solver (pass string-keyed manualAssignments as-is)

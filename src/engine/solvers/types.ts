@@ -10,6 +10,7 @@ import { Performance, EngineConfiguration } from '../../types/performance';
 import { InstrumentConfig } from '../../types/performance';
 import { GridMapping } from '../../types/layout';
 import { FingerType, EngineConstants } from '../models';
+import { NeutralPadPositions } from '../handPose';
 
 // ============================================================================
 // Solver Result Types (shared across all solvers)
@@ -247,6 +248,13 @@ export interface SolverConfig {
   gridMapping?: GridMapping | null;
   /** Optional engine constants (deprecated, kept for compatibility) */
   engineConstants?: EngineConstants;
+  /**
+   * Optional override for neutral pad positions.
+   * When provided (e.g., from Natural Hand Pose 0), the solver uses these positions
+   * instead of the default musical-note-based positions.
+   * Solver derives neutral hand centers from these positions via computeNeutralHandCenters.
+   */
+  neutralPadPositionsOverride?: NeutralPadPositions | null;
 }
 
 /**

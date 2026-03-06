@@ -11,6 +11,7 @@ import { GridMapping } from '../../types/layout';
 import { FingerType } from '../models';
 import { createBeamSolver } from './BeamSolver';
 import { applyRandomMutation } from './mutationService';
+import { NeutralPadPositions } from '../handPose';
 import {
   SolverStrategy,
   SolverType,
@@ -84,11 +85,13 @@ export class AnnealingSolver implements SolverStrategy {
 
   private instrumentConfig: SolverConfig['instrumentConfig'];
   private initialGridMapping: GridMapping | null;
+  private neutralPadPositionsOverride: NeutralPadPositions | null = null;
   private bestMapping: GridMapping | null = null;
 
   constructor(config: SolverConfig) {
     this.instrumentConfig = config.instrumentConfig;
     this.initialGridMapping = config.gridMapping ?? null;
+    this.neutralPadPositionsOverride = config.neutralPadPositionsOverride ?? null;
   }
 
   /**
@@ -114,10 +117,11 @@ export class AnnealingSolver implements SolverStrategy {
     config: EngineConfiguration,
     beamWidth: number
   ): Promise<{ result: EngineResult; cost: number }> {
-    // Create a BeamSolver with the candidate mapping
+    // Create a BeamSolver with the candidate mapping (include Pose 0 override when present)
     const solverConfig: SolverConfig = {
       instrumentConfig: this.instrumentConfig,
       gridMapping: mapping,
+      neutralPadPositionsOverride: this.neutralPadPositionsOverride,
     };
 
     const beamSolver = createBeamSolver(solverConfig);

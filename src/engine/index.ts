@@ -43,7 +43,7 @@ export { DEFAULT_ENGINE_CONSTANTS } from './models';
 
 // Hand pose configuration
 export type { Hand, FingerId, NeutralFingerPose, NeutralHandPose, NeutralPadPosition, NeutralPadPositions, NeutralHandCenters } from './handPose';
-export { DEFAULT_HAND_POSE, resolveNeutralPadPositions, getNeutralHandCenters, computeNeutralHandCenters } from './handPose';
+export { DEFAULT_HAND_POSE, resolveNeutralPadPositions, getNeutralPadPositionsFromPose0, getNeutralHandCenters, computeNeutralHandCenters } from './handPose';
 
 // Feasibility checking
 export { 
