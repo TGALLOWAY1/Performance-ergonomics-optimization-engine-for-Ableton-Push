@@ -19,6 +19,11 @@ import {
   calculatePerFingerHomeCost,
   FALLBACK_GRIP_PENALTY,
 } from '../costFunction';
+import {
+  type ObjectiveComponents,
+  combineComponents,
+  objectiveToCostBreakdown,
+} from '../objective';
 import { GridPosition } from '../gridMath';
 import { getNeutralHandCenters, computeNeutralHandCenters, restingPoseFromNeutralPadPositions, NeutralHandCenters, NeutralPadPositions } from '../handPose';
 import {
@@ -38,6 +43,7 @@ import {
 
 /**
  * Assignment record for a single note event.
+ * costComponents: real objective breakdown (when present, cost === combineComponents(costComponents)).
  */
 interface NoteAssignment {
   eventIndex: number;
@@ -50,6 +56,8 @@ interface NoteAssignment {
   cost: number;
   row: number;
   col: number;
+  /** Real objective components; used for accurate CostBreakdown in result */
+  costComponents?: ObjectiveComponents;
 }
 
 /**
@@ -256,10 +264,19 @@ export class BeamSolver implements SolverStrategy {
           ? calculatePerFingerHomeCost(grip, hand, neutralHandCenters, 0.8)
           : 0;
 
-        // Apply fallback penalty if this is a fallback grip
+        // Apply fallback penalty if this is a fallback grip (constraint cost)
         const fallbackPenalty = isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
-        const stepCost = effectiveTransitionCost + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
+        const stepComponents: ObjectiveComponents = {
+          transition: effectiveTransitionCost,
+          stretch: staticCost,
+          poseAttractor: attractorCost,
+          perFingerHome: perFingerHomeCost,
+          alternation: 0,
+          handBalance: 0,
+          constraints: fallbackPenalty,
+        };
+        const stepCost = combineComponents(stepComponents);
         const newTotalCost = node.totalCost + stepCost;
 
         // Get fingers from grip for assignment
@@ -272,9 +289,19 @@ export class BeamSolver implements SolverStrategy {
         // Create assignments for ALL notes in the group (handles chords correctly)
         // Each note gets a distinct finger (1:1 mapping; no finger reused within the chord).
         const assignments: NoteAssignment[] = [];
-        const costPerNote = stepCost / group.notes.length; // Distribute cost across notes
+        const n = group.notes.length;
+        const costPerNote = stepCost / n;
+        const componentsPerNote: ObjectiveComponents = {
+          transition: stepComponents.transition / n,
+          stretch: stepComponents.stretch / n,
+          poseAttractor: stepComponents.poseAttractor / n,
+          perFingerHome: stepComponents.perFingerHome / n,
+          alternation: 0,
+          handBalance: 0,
+          constraints: stepComponents.constraints / n,
+        };
 
-        for (let i = 0; i < group.notes.length; i++) {
+        for (let i = 0; i < n; i++) {
           const event = group.notes[i];
           const position = group.positions[i];
           const eventIndex = group.eventIndices[i];
@@ -293,6 +320,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
 
@@ -393,15 +421,30 @@ export class BeamSolver implements SolverStrategy {
         const leftFallbackPenalty = leftResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
         const rightFallbackPenalty = rightResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
 
-        const stepCost = effectiveLeftTransition + effectiveRightTransition +
-          leftAttractor + rightAttractor +
-          leftStatic + rightStatic +
-          leftHome + rightHome +
-          leftFallbackPenalty + rightFallbackPenalty;
+        const stepComponents: ObjectiveComponents = {
+          transition: effectiveLeftTransition + effectiveRightTransition,
+          stretch: leftStatic + rightStatic,
+          poseAttractor: leftAttractor + rightAttractor,
+          perFingerHome: leftHome + rightHome,
+          alternation: 0,
+          handBalance: 0,
+          constraints: leftFallbackPenalty + rightFallbackPenalty,
+        };
+        const stepCost = combineComponents(stepComponents);
 
         // Create assignments for ALL notes in the split chord (1:1 finger per note per hand)
         const assignments: NoteAssignment[] = [];
-        const costPerNote = stepCost / group.notes.length;
+        const n = group.notes.length;
+        const costPerNote = stepCost / n;
+        const componentsPerNote: ObjectiveComponents = {
+          transition: stepComponents.transition / n,
+          stretch: stepComponents.stretch / n,
+          poseAttractor: stepComponents.poseAttractor / n,
+          perFingerHome: stepComponents.perFingerHome / n,
+          alternation: 0,
+          handBalance: 0,
+          constraints: stepComponents.constraints / n,
+        };
 
         for (let j = 0; j < leftNoteIndices.length; j++) {
           const i = leftNoteIndices[j];
@@ -420,6 +463,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
         for (let j = 0; j < rightNoteIndices.length; j++) {
@@ -439,6 +483,7 @@ export class BeamSolver implements SolverStrategy {
             cost: costPerNote,
             row: position.row,
             col: position.col,
+            costComponents: componentsPerNote,
           });
         }
 
@@ -597,17 +642,18 @@ export class BeamSolver implements SolverStrategy {
       totalDrift += drift;
       driftCount++;
 
-      // Cost breakdown (approximated for beam search - actual component costs
-      // are not tracked during beam search, so we use percentage estimates)
-      const costBreakdown: CostBreakdown = {
-        movement: assignment.cost * 0.4, // Approximate: movement typically 40% of total
-        stretch: assignment.cost * 0.2,  // Approximate: stretch typically 20% of total
-        drift: assignment.cost * 0.2,     // Approximate: drift typically 20% of total
-        bounce: 0,                         // Not tracked in beam search
-        fatigue: assignment.cost * 0.1,   // Approximate: fatigue typically 10% of total
-        crossover: assignment.cost * 0.1, // Approximate: crossover typically 10% of total
-        total: assignment.cost,
-      };
+      // Cost breakdown from real objective components (no fake percentages)
+      const costBreakdown: CostBreakdown = assignment.costComponents
+        ? objectiveToCostBreakdown(assignment.costComponents)
+        : {
+            movement: assignment.cost * 0.4,
+            stretch: assignment.cost * 0.2,
+            drift: assignment.cost * 0.2,
+            bounce: 0,
+            fatigue: assignment.cost * 0.1,
+            crossover: assignment.cost * 0.1,
+            total: assignment.cost,
+          };
 
       totalMetrics.movement += costBreakdown.movement;
       totalMetrics.stretch += costBreakdown.stretch;
@@ -678,6 +724,15 @@ export class BeamSolver implements SolverStrategy {
         strictMode: this.mappingResolverMode === 'strict',
         beamWidthUsed: config.beamWidth,
         objectiveTotal: averageMetrics.total,
+        objectiveComponentsSummary: {
+          transition: totalMetrics.movement,
+          stretch: totalMetrics.stretch,
+          poseAttractor: totalMetrics.drift,
+          perFingerHome: totalMetrics.fatigue,
+          alternation: totalMetrics.bounce,
+          handBalance: 0,
+          constraints: totalMetrics.crossover,
+        },
       },
     };
   }
@@ -850,14 +905,33 @@ export class BeamSolver implements SolverStrategy {
                 : 0;
               const fallbackPenalty = matchingResult.isFallback ? FALLBACK_GRIP_PENALTY : 0;
               const effectiveTransition = transitionCost === Infinity ? 100 : transitionCost;
-              const stepCost = effectiveTransition + attractorCost + staticCost + perFingerHomeCost + fallbackPenalty;
+              const stepComponents: ObjectiveComponents = {
+                transition: effectiveTransition,
+                stretch: staticCost,
+                poseAttractor: attractorCost,
+                perFingerHome: perFingerHomeCost,
+                alternation: 0,
+                handBalance: 0,
+                constraints: fallbackPenalty,
+              };
+              const stepCost = combineComponents(stepComponents);
 
               // Create assignments for ALL notes in the group (handles chords)
               const assignments: NoteAssignment[] = [];
-              const costPerNote = stepCost / group.notes.length;
+              const n = group.notes.length;
+              const costPerNote = stepCost / n;
+              const componentsPerNote: ObjectiveComponents = {
+                transition: stepComponents.transition / n,
+                stretch: stepComponents.stretch / n,
+                poseAttractor: stepComponents.poseAttractor / n,
+                perFingerHome: stepComponents.perFingerHome / n,
+                alternation: 0,
+                handBalance: 0,
+                constraints: stepComponents.constraints / n,
+              };
               const gripFingers = Object.keys(matchingResult.pose.fingers) as FingerType[];
 
-              for (let i = 0; i < group.notes.length; i++) {
+              for (let i = 0; i < n; i++) {
                 assignments.push({
                   eventIndex: group.eventIndices[i],
                   eventKey: group.eventKeys[i],
@@ -869,6 +943,7 @@ export class BeamSolver implements SolverStrategy {
                   cost: costPerNote,
                   row: group.positions[i].row,
                   col: group.positions[i].col,
+                  costComponents: componentsPerNote,
                 });
               }
 
@@ -902,6 +977,16 @@ export class BeamSolver implements SolverStrategy {
 
         const fallbackFingers: FingerType[] = ['index', 'middle', 'ring', 'thumb', 'pinky'];
 
+        const emergencyComponentsPerNote: ObjectiveComponents = {
+          transition: 0,
+          stretch: 0,
+          poseAttractor: 0,
+          perFingerHome: 0,
+          alternation: 0,
+          handBalance: 0,
+          constraints: FALLBACK_GRIP_PENALTY / group.notes.length,
+        };
+
         for (const node of beam) {
           const assignments: NoteAssignment[] = [];
           const costPerNote = FALLBACK_GRIP_PENALTY / group.notes.length;
@@ -933,6 +1018,7 @@ export class BeamSolver implements SolverStrategy {
               cost: costPerNote,
               row: group.positions[i].row,
               col: group.positions[i].col,
+              costComponents: emergencyComponentsPerNote,
             });
           }
           for (let j = 0; j < Math.min(rightIndices.length, fallbackFingers.length); j++) {
@@ -953,6 +1039,7 @@ export class BeamSolver implements SolverStrategy {
               cost: costPerNote,
               row: group.positions[i].row,
               col: group.positions[i].col,
+              costComponents: emergencyComponentsPerNote,
             });
           }
 
