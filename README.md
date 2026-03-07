@@ -35,3 +35,6 @@ System Outputs
 
 **Cost Metrics** 
 h<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/bead6244-0240-4b52-8057-79b3eb5951fd" />
+
+**Event Analysis** 
+<img width="2134" height="1290" alt="image" src="https://github.com/user-attachments/assets/b84b391d-be7d-484e-8fcf-edd2ee57d052" />
